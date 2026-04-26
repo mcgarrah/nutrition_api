@@ -17,13 +17,20 @@ from .gpc.routes import router as gpc_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Build GPC database from XML if it doesn't exist
+    # Build or update GPC database on startup
     from .database import DB_PATH
+    scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+    import subprocess, sys
     if not DB_PATH.exists():
-        import subprocess, sys
-        scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+        # No database — build from whatever is available
         subprocess.run(
             [sys.executable, str(scripts_dir / "import_gpc_xml.py")],
+            check=True,
+        )
+    else:
+        # Database exists — check if GS1 has a newer version
+        subprocess.run(
+            [sys.executable, str(scripts_dir / "import_gpc_xml.py"), "--auto-update"],
             check=True,
         )
     yield
@@ -55,7 +62,16 @@ async def health():
     try:
         db = await get_db()
         row = await db.execute_fetchall("SELECT COUNT(*) FROM segments")
-        return {"status": "ok", "gpc_segments": row[0][0]}
+        # Fetch GPC data freshness metadata
+        meta_rows = await db.execute_fetchall("SELECT key, value FROM gpc_metadata")
+        metadata = {r[0]: r[1] for r in meta_rows}
+        return {
+            "status": "ok",
+            "gpc_segments": row[0][0],
+            "gpc_version": metadata.get("gpc_version"),
+            "gpc_xml_date": metadata.get("xml_date"),
+            "gpc_import_timestamp": metadata.get("import_timestamp"),
+        }
     except Exception as e:
         return {"status": "degraded", "error": str(e)}
 

@@ -139,13 +139,71 @@ def resolve_xml_file(args) -> str:
     sys.exit(1)
 
 
+def extract_version_from_path(xml_path: str, xml_date: str = "unknown") -> str:
+    """Extract version string from XML filename or date attribute.
+
+    GPCDownloader names files like 'en-v20251127.xml' -> version '20251127'.
+    For other filenames, fall back to the XML dateUtc attribute (e.g., '2/12/2024' -> '20241202').
+    """
+    name = Path(xml_path).stem
+    if "-v" in name:
+        return name.split("-v", 1)[1]  # '20251127'
+    elif "-" in name:
+        parts = name.split("-", 1)[1]
+        if parts.isdigit():
+            return parts
+    # Fall back to XML dateUtc attribute: "2/12/2024" -> "20241202"
+    if xml_date and xml_date != "unknown":
+        try:
+            import datetime
+            # dateUtc format is "M/DD/YYYY" or "MM/DD/YYYY"
+            dt = datetime.datetime.strptime(xml_date.strip(), "%m/%d/%Y")
+            return dt.strftime("%Y%m%d")
+        except (ValueError, AttributeError):
+            pass
+    return "unknown"
+
+
+def get_stored_version(db_path: Path) -> str | None:
+    """Read the GPC version from an existing database, or None if no DB."""
+    if not db_path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT value FROM gpc_metadata WHERE key = 'gpc_version'"
+        ).fetchone()
+        conn.close()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def get_latest_remote_version() -> str | None:
+    """Query GS1 via gpcc for the latest publication version string."""
+    try:
+        import asyncio
+        from gpcc._crawlers import get_language, get_publications
+
+        async def _check():
+            lang = await get_language("en")
+            pubs = await get_publications(lang)
+            return pubs[0].version if pubs else None
+
+        return asyncio.run(_check())
+    except Exception as e:
+        logging.warning("Could not check remote GPC version: %s", e)
+        return None
+
+
 def import_food_gpc(xml_path: str, db_path: Path) -> dict:
     """Parse GPC XML, filter to food segments, insert with correct many-to-many schema."""
     tree = ET.parse(xml_path)
     root = tree.getroot()
 
-    # Extract version from XML root attributes
+    # Extract version from XML root attributes and filename
     xml_date = root.get("dateUtc", "unknown")
+    gpc_version = extract_version_from_path(xml_path, xml_date)
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
     if db_path.exists():
@@ -223,18 +281,18 @@ def import_food_gpc(xml_path: str, db_path: Path) -> dict:
                             counts["attribute_type_values"] += 1
 
     # Store metadata
-    conn.execute(
-        "INSERT OR REPLACE INTO gpc_metadata VALUES (?, ?)",
+    import datetime
+    for key, value in [
         ("xml_date", xml_date),
-    )
-    conn.execute(
-        "INSERT OR REPLACE INTO gpc_metadata VALUES (?, ?)",
         ("xml_source", xml_path),
-    )
-    conn.execute(
-        "INSERT OR REPLACE INTO gpc_metadata VALUES (?, ?)",
         ("food_segments", ",".join(sorted(FOOD_SEGMENTS))),
-    )
+        ("gpc_version", gpc_version),
+        ("import_timestamp", datetime.datetime.now(datetime.timezone.utc).isoformat()),
+    ]:
+        conn.execute(
+            "INSERT OR REPLACE INTO gpc_metadata VALUES (?, ?)",
+            (key, value),
+        )
 
     conn.commit()
     conn.close()
@@ -246,7 +304,34 @@ def main():
     parser.add_argument("--xml", type=Path, help="Path to GPC XML file (overrides download)")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB, help="Output SQLite path")
     parser.add_argument("--download", action="store_true", help="Download latest from GS1")
+    parser.add_argument(
+        "--auto-update", action="store_true",
+        help="Check GS1 for newer version; skip import if local is current",
+    )
     args = parser.parse_args()
+
+    # Auto-update mode: compare local version to remote, skip if current
+    if args.auto_update:
+        stored = get_stored_version(args.db)
+        if stored:
+            remote = get_latest_remote_version()
+            if remote and remote.lstrip("v") <= stored.lstrip("v"):
+                logging.info(
+                    "GPC data is current (local=%s, remote=%s). No update needed.",
+                    stored, remote,
+                )
+                return
+            if remote:
+                logging.info(
+                    "Newer GPC data available (local=%s, remote=%s). Updating...",
+                    stored, remote,
+                )
+                args.download = True  # force download of newer version
+            else:
+                logging.info("Could not check remote version. Using existing data.")
+                return
+        else:
+            logging.info("No existing GPC database. Building from available data.")
 
     xml_path = resolve_xml_file(args)
     logging.info("Importing %s -> %s (food segments only)", xml_path, args.db)
