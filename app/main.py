@@ -9,6 +9,7 @@ Licensed under MIT License
 Repository: https://github.com/mcgarrah/nutrition_api
 """
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
 from .database import close_db
 from .gpc.routes import router as gpc_router
@@ -16,6 +17,15 @@ from .gpc.routes import router as gpc_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Build GPC database from XML if it doesn't exist
+    from .database import DB_PATH
+    if not DB_PATH.exists():
+        import subprocess, sys
+        scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+        subprocess.run(
+            [sys.executable, str(scripts_dir / "import_gpc_xml.py")],
+            check=True,
+        )
     yield
     await close_db()
 
