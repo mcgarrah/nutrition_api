@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from .database import close_db
 from .gpc.routes import router as gpc_router
+from .core.usda_routes import router as usda_router
 
 
 @asynccontextmanager
@@ -70,26 +71,36 @@ app = FastAPI(
 )
 
 app.include_router(gpc_router)
+app.include_router(usda_router)
 
 
 @app.get("/api/v1/health", tags=["Operations"], summary="Health check")
 async def health():
     from .database import get_db
+    from .core import usda_fdc
+    result = {"status": "ok"}
     try:
         db = await get_db()
         row = await db.execute_fetchall("SELECT COUNT(*) FROM segments")
-        # Fetch GPC data freshness metadata
         meta_rows = await db.execute_fetchall("SELECT key, value FROM gpc_metadata")
         metadata = {r[0]: r[1] for r in meta_rows}
-        return {
+        result["gpc"] = {
             "status": "ok",
-            "gpc_segments": row[0][0],
-            "gpc_version": metadata.get("gpc_version"),
-            "gpc_xml_date": metadata.get("xml_date"),
-            "gpc_import_timestamp": metadata.get("import_timestamp"),
+            "segments": row[0][0],
+            "version": metadata.get("gpc_version"),
+            "xml_date": metadata.get("xml_date"),
+            "import_timestamp": metadata.get("import_timestamp"),
         }
     except Exception as e:
-        return {"status": "degraded", "error": str(e)}
+        result["gpc"] = {"status": "error", "detail": str(e)}
+        result["status"] = "degraded"
+
+    usda_status = await usda_fdc.check_connectivity()
+    result["usda_fdc"] = usda_status
+    if usda_status["status"] == "error":
+        result["status"] = "degraded"
+
+    return result
 
 
 @app.get("/api/v1/version", tags=["Operations"], summary="API version")
