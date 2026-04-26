@@ -15,6 +15,7 @@ from .database import close_db
 from .gpc.routes import router as gpc_router
 from .core.usda_routes import router as usda_router
 from .core.off_routes import router as off_router
+from .core.lookup_routes import router as lookup_router
 
 
 @asynccontextmanager
@@ -73,6 +74,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(lookup_router)
 app.include_router(gpc_router)
 app.include_router(usda_router)
 app.include_router(off_router)
