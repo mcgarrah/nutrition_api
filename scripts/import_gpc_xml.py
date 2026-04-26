@@ -179,18 +179,91 @@ def get_stored_version(db_path: Path) -> str | None:
         return None
 
 
+# How often to check GS1 for newer data (seconds). Default: 24 hours.
+VERSION_CHECK_INTERVAL_SECONDS = 24 * 60 * 60
+# Network timeout for GS1 API calls (seconds).
+GS1_CHECK_TIMEOUT_SECONDS = 15
+
+
+def get_last_version_check(db_path: Path) -> str | None:
+    """Read the timestamp of the last remote version check, or None."""
+    if not db_path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT value FROM gpc_metadata WHERE key = 'last_version_check'"
+        ).fetchone()
+        conn.close()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def set_last_version_check(db_path: Path) -> None:
+    """Record the current time as the last version check timestamp."""
+    import datetime
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT OR REPLACE INTO gpc_metadata VALUES (?, ?)",
+            ("last_version_check",
+             datetime.datetime.now(datetime.timezone.utc).isoformat()),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # non-critical — worst case we check again next boot
+
+
+def should_check_remote(db_path: Path) -> bool:
+    """Return True if enough time has passed since the last remote check."""
+    import datetime
+    last_check = get_last_version_check(db_path)
+    if not last_check:
+        return True
+    try:
+        last_dt = datetime.datetime.fromisoformat(last_check)
+        elapsed = (datetime.datetime.now(datetime.timezone.utc) - last_dt).total_seconds()
+        if elapsed < VERSION_CHECK_INTERVAL_SECONDS:
+            logging.info(
+                "Last GS1 version check was %.0f minutes ago (interval: %d hours). Skipping.",
+                elapsed / 60,
+                VERSION_CHECK_INTERVAL_SECONDS // 3600,
+            )
+            return False
+        return True
+    except (ValueError, TypeError):
+        return True
+
+
 def get_latest_remote_version() -> str | None:
-    """Query GS1 via gpcc for the latest publication version string."""
+    """Query GS1 via gpcc for the latest publication version string.
+
+    Uses a timeout to avoid blocking startup if GS1 is slow or unreachable.
+    """
     try:
         import asyncio
         from gpcc._crawlers import get_language, get_publications
 
         async def _check():
-            lang = await get_language("en")
-            pubs = await get_publications(lang)
+            lang = await asyncio.wait_for(
+                get_language("en"),
+                timeout=GS1_CHECK_TIMEOUT_SECONDS,
+            )
+            pubs = await asyncio.wait_for(
+                get_publications(lang),
+                timeout=GS1_CHECK_TIMEOUT_SECONDS,
+            )
             return pubs[0].version if pubs else None
 
         return asyncio.run(_check())
+    except asyncio.TimeoutError:
+        logging.warning(
+            "GS1 version check timed out after %d seconds.",
+            GS1_CHECK_TIMEOUT_SECONDS,
+        )
+        return None
     except Exception as e:
         logging.warning("Could not check remote GPC version: %s", e)
         return None
@@ -314,7 +387,14 @@ def main():
     if args.auto_update:
         stored = get_stored_version(args.db)
         if stored:
+            # Rate-limit: skip remote check if we checked recently
+            if not should_check_remote(args.db):
+                return
+
             remote = get_latest_remote_version()
+            # Record that we checked, regardless of outcome
+            set_last_version_check(args.db)
+
             if remote and remote.lstrip("v") <= stored.lstrip("v"):
                 logging.info(
                     "GPC data is current (local=%s, remote=%s). No update needed.",
@@ -328,7 +408,7 @@ def main():
                 )
                 args.download = True  # force download of newer version
             else:
-                logging.info("Could not check remote version. Using existing data.")
+                logging.info("Could not check remote version (timeout or error). Using existing data.")
                 return
         else:
             logging.info("No existing GPC database. Building from available data.")

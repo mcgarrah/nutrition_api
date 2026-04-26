@@ -21,18 +21,34 @@ async def lifespan(app: FastAPI):
     from .database import DB_PATH
     scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
     import subprocess, sys
+    import_script = str(scripts_dir / "import_gpc_xml.py")
+
     if not DB_PATH.exists():
-        # No database — build from whatever is available
+        # No database — must build from whatever is available
         subprocess.run(
-            [sys.executable, str(scripts_dir / "import_gpc_xml.py")],
+            [sys.executable, import_script],
             check=True,
         )
     else:
-        # Database exists — check if GS1 has a newer version
-        subprocess.run(
-            [sys.executable, str(scripts_dir / "import_gpc_xml.py"), "--auto-update"],
-            check=True,
-        )
+        # Database exists — check if GS1 has a newer version.
+        # Non-fatal: if the check fails, we continue with existing data.
+        try:
+            subprocess.run(
+                [sys.executable, import_script, "--auto-update"],
+                check=True,
+                timeout=120,  # hard cap: don't block startup > 2 minutes
+            )
+        except subprocess.TimeoutExpired:
+            import logging
+            logging.warning(
+                "GPC auto-update timed out after 120s. Continuing with existing data."
+            )
+        except subprocess.CalledProcessError as e:
+            import logging
+            logging.warning(
+                "GPC auto-update failed (exit code %d). Continuing with existing data.",
+                e.returncode,
+            )
     yield
     await close_db()
 
