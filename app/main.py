@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from .database import close_db
 from .gpc.routes import router as gpc_router
 from .core.usda_routes import router as usda_router
+from .core.off_routes import router as off_router
 
 
 @asynccontextmanager
@@ -61,6 +62,8 @@ app = FastAPI(
         "Open Food Facts, and GS1 Global Product Classification data.\n\n"
         "**GPC Browser**: Browse the full GS1 GPC taxonomy hierarchy — "
         "Segments, Families, Classes, Bricks, and Attributes.\n\n"
+        "**USDA FDC**: Search and retrieve lab-quality nutritional data.\n\n"
+        "**Open Food Facts**: Crowdsourced product data — images, ingredients, labels.\n\n"
         "Author: Michael McGarrah (mcgarrah@gmail.com)\n"
         "Website: https://mcgarrah.org"
     ),
@@ -72,12 +75,14 @@ app = FastAPI(
 
 app.include_router(gpc_router)
 app.include_router(usda_router)
+app.include_router(off_router)
 
 
 @app.get("/api/v1/health", tags=["Operations"], summary="Health check")
 async def health():
     from .database import get_db
     from .core import usda_fdc
+    from .core import open_food_facts as off
     result = {"status": "ok"}
     try:
         db = await get_db()
@@ -98,6 +103,11 @@ async def health():
     usda_status = await usda_fdc.check_connectivity()
     result["usda_fdc"] = usda_status
     if usda_status["status"] == "error":
+        result["status"] = "degraded"
+
+    off_status = await off.check_connectivity()
+    result["open_food_facts"] = off_status
+    if off_status["status"] == "error":
         result["status"] = "degraded"
 
     return result

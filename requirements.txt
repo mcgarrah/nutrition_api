@@ -5,3 +5,4 @@ aiosqlite>=0.20.0
 gs1-gpc>=1.0.0
 usda-fdc>=0.1.9
 python-dotenv>=1.0.0
+openfoodfacts>=5.0.0
