@@ -1,0 +1,25 @@
+# DigitalOcean App Platform spec for the Nutrition API.
+# Deploys the Dockerfile on push to main. Set FDC_API_KEY as an
+# encrypted secret in the App Platform console (never commit it).
+name: nutrition-api
+region: nyc
+
+services:
+  - name: api
+    dockerfile_path: Dockerfile
+    source_dir: /
+    github:
+      repo: mcgarrah/nutrition_api
+      branch: main
+      deploy_on_push: true
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    health_check:
+      http_path: /api/v1/health
+      initial_delay_seconds: 30
+      period_seconds: 60
+    envs:
+      - key: FDC_API_KEY
+        scope: RUN_TIME
+        type: SECRET

@@ -408,7 +408,10 @@ def main():
                 )
                 args.download = True  # force download of newer version
             else:
-                logging.info("Could not check remote version (timeout or error). Using existing data.")
+                logging.info(
+                    "Could not check remote version (timeout or error). "
+                    "Using existing data."
+                )
                 return
         else:
             logging.info("No existing GPC database. Building from available data.")

@@ -6,8 +6,12 @@ Provides endpoints for searching and retrieving USDA nutritional data.
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
+import logging
+
 from fastapi import APIRouter, HTTPException, Query
 from ..core import usda_fdc
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/usda", tags=["USDA FDC"])
 
@@ -18,18 +22,30 @@ async def usda_search(
     page_size: int = Query(25, ge=1, le=200, description="Results per page"),
 ):
     """Search the USDA FoodData Central database by keyword."""
-    result = await usda_fdc.search(q, page_size=page_size)
+    try:
+        result = await usda_fdc.search(q, page_size=page_size)
+    except Exception as e:
+        logger.warning("USDA search failed for %r: %s", q, e)
+        raise HTTPException(502, "USDA FDC upstream error")
     if result is None:
-        raise HTTPException(503, "USDA FDC service unavailable (API key not configured or API error)")
+        raise HTTPException(
+            503, "USDA FDC service unavailable (API key not configured)"
+        )
     return result
 
 
 @router.get("/food/{fdc_id}", summary="Get USDA FDC food by ID")
 async def usda_food(fdc_id: int):
     """Get detailed nutritional data for a specific food by its FDC ID."""
-    result = await usda_fdc.get_food(fdc_id)
+    try:
+        result = await usda_fdc.get_food(fdc_id)
+    except Exception as e:
+        logger.warning("USDA get_food(%s) failed: %s", fdc_id, e)
+        raise HTTPException(404, "Food not found or USDA FDC upstream error")
     if result is None:
-        raise HTTPException(404, "Food not found or USDA FDC service unavailable")
+        raise HTTPException(
+            503, "USDA FDC service unavailable (API key not configured)"
+        )
     return result
 
 
@@ -40,7 +56,11 @@ async def usda_lookup_by_upc(upc: str):
     Searches Branded Foods in the USDA database and returns the first match
     with full nutritional details.
     """
-    result = await usda_fdc.search_by_upc(upc)
+    try:
+        result = await usda_fdc.search_by_upc(upc)
+    except Exception as e:
+        logger.warning("USDA UPC lookup failed for %s: %s", upc, e)
+        raise HTTPException(502, "USDA FDC upstream error")
     if result is None:
         raise HTTPException(404, "No USDA data found for this UPC/GTIN")
     return result

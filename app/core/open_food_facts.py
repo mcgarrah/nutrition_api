@@ -91,44 +91,38 @@ def _format_product(data: dict) -> dict:
 async def get_product(barcode: str) -> dict | None:
     """Look up a product by barcode (UPC/EAN/GTIN).
 
-    Returns a formatted dict with product info and nutrients, or None.
+    Returns a formatted dict with product info and nutrients, or None
+    if not found. Upstream API errors propagate to the caller.
     """
     api = _get_off_api()
     if not api:
         return None
-    try:
-        data = await _run_sync(
-            api.product.get, barcode, fields=_OFF_FIELDS,
-        )
-        if not data or not data.get("product_name"):
-            return None
-        return _format_product(data)
-    except Exception as e:
-        logger.warning("OFF get_product(%s) failed: %s", barcode, e)
+    data = await _run_sync(
+        api.product.get, barcode, fields=_OFF_FIELDS,
+    )
+    if not data or not data.get("product_name"):
         return None
+    return _format_product(data)
 
 
 async def search(query: str, page_size: int = 25) -> dict | None:
     """Search OFF by text query.
 
     Returns a dict with total count and list of products, or None.
+    Upstream API errors propagate to the caller.
     """
     api = _get_off_api()
     if not api:
         return None
-    try:
-        data = await _run_sync(
-            api.product.text_search, query, page_size=page_size,
-        )
-        if not data or "products" not in data:
-            return None
-        return {
-            "total": data.get("count", 0),
-            "products": [_format_product(p) for p in data["products"]],
-        }
-    except Exception as e:
-        logger.warning("OFF search(%s) failed: %s", query, e)
+    data = await _run_sync(
+        api.product.text_search, query, page_size=page_size,
+    )
+    if not data or "products" not in data:
         return None
+    return {
+        "total": data.get("count", 0),
+        "products": [_format_product(p) for p in data["products"]],
+    }
 
 
 async def check_connectivity() -> dict:

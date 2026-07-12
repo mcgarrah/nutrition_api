@@ -9,7 +9,6 @@ Licensed under MIT License
 """
 import asyncio
 import logging
-import os
 from functools import partial
 from typing import Any
 
@@ -57,29 +56,26 @@ def is_available() -> bool:
 async def search(query: str, page_size: int = 25) -> dict | None:
     """Search USDA FDC for foods matching a query string.
 
-    Returns the raw SearchResult as a dict, or None if unavailable.
+    Returns the raw SearchResult as a dict, or None if no client is
+    configured. Upstream API errors propagate to the caller.
     """
     client = _get_fdc_client()
     if not client:
         return None
-    try:
-        result = await _run_sync(client.search, query, page_size=page_size)
-        return {
-            "total_hits": result.total_hits,
-            "foods": [
-                {
-                    "fdc_id": f.fdc_id,
-                    "description": f.description,
-                    "data_type": f.data_type,
-                    "brand_owner": f.brand_owner,
-                    "brand_name": f.brand_name,
-                }
-                for f in result.foods
-            ],
-        }
-    except Exception as e:
-        logger.warning("USDA FDC search failed: %s", e)
-        return None
+    result = await _run_sync(client.search, query, page_size=page_size)
+    return {
+        "total_hits": result.total_hits,
+        "foods": [
+            {
+                "fdc_id": f.fdc_id,
+                "description": f.description,
+                "data_type": f.data_type,
+                "brand_owner": f.brand_owner,
+                "brand_name": f.brand_name,
+            }
+            for f in result.foods
+        ],
+    }
 
 
 async def get_food(fdc_id: int | str) -> dict | None:
@@ -90,47 +86,40 @@ async def get_food(fdc_id: int | str) -> dict | None:
     client = _get_fdc_client()
     if not client:
         return None
-    try:
-        food = await _run_sync(client.get_food, fdc_id)
-        return {
-            "fdc_id": food.fdc_id,
-            "description": food.description,
-            "data_type": food.data_type,
-            "brand_owner": food.brand_owner,
-            "brand_name": food.brand_name,
-            "ingredients": food.ingredients,
-            "serving_size": food.serving_size,
-            "serving_size_unit": food.serving_size_unit,
-            "nutrients": {
-                n.name: {"amount": n.amount, "unit": n.unit_name}
-                for n in food.nutrients
-            },
-        }
-    except Exception as e:
-        logger.warning("USDA FDC get_food(%s) failed: %s", fdc_id, e)
-        return None
+    food = await _run_sync(client.get_food, fdc_id)
+    return {
+        "fdc_id": food.fdc_id,
+        "description": food.description,
+        "data_type": food.data_type,
+        "brand_owner": food.brand_owner,
+        "brand_name": food.brand_name,
+        "ingredients": food.ingredients,
+        "serving_size": food.serving_size,
+        "serving_size_unit": food.serving_size_unit,
+        "nutrients": {
+            n.name: {"amount": n.amount, "unit": n.unit_name}
+            for n in food.nutrients
+        },
+    }
 
 
 async def search_by_upc(upc: str) -> dict | None:
     """Search USDA FDC for a food by UPC/GTIN barcode.
 
     Uses the FDC search API with the UPC as the query, filtered to Branded foods.
-    Returns the first matching food's full details, or None.
+    Returns the first matching food's full details, or None if not found /
+    no client is configured. Upstream API errors propagate to the caller.
     """
     client = _get_fdc_client()
     if not client:
         return None
-    try:
-        result = await _run_sync(
-            client.search, upc, data_type=["Branded"], page_size=5,
-        )
-        if not result.foods:
-            return None
-        # Get full details for the first match
-        return await get_food(result.foods[0].fdc_id)
-    except Exception as e:
-        logger.warning("USDA FDC search_by_upc(%s) failed: %s", upc, e)
+    result = await _run_sync(
+        client.search, upc, data_type=["Branded"], page_size=5,
+    )
+    if not result.foods:
         return None
+    # Get full details for the first match
+    return await get_food(result.foods[0].fdc_id)
 
 
 async def check_connectivity() -> dict:

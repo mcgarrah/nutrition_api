@@ -11,6 +11,7 @@ Repository: https://github.com/mcgarrah/nutrition_api
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from .database import close_db
 from .gpc.routes import router as gpc_router
 from .core.usda_routes import router as usda_router
@@ -23,7 +24,8 @@ async def lifespan(app: FastAPI):
     # Build or update GPC database on startup
     from .database import DB_PATH
     scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
-    import subprocess, sys
+    import subprocess
+    import sys
     import_script = str(scripts_dir / "import_gpc_xml.py")
 
     if not DB_PATH.exists():
@@ -72,6 +74,14 @@ app = FastAPI(
     license_info={"name": "MIT", "url": "https://opensource.org/licenses/MIT"},
     contact={"name": "Michael McGarrah", "url": "https://mcgarrah.org"},
     lifespan=lifespan,
+)
+
+# Public read-only data API — allow cross-origin GETs from anywhere
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
 )
 
 app.include_router(lookup_router)
