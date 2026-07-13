@@ -20,6 +20,7 @@ import time
 from urllib.parse import urlsplit
 
 from cachetools import TTLCache
+from usda_fdc.exceptions import FdcRateLimitError
 
 from .models import CanonicalProduct, NutrientValue
 from . import usda_fdc
@@ -72,10 +73,11 @@ async def _fetch_usda(barcode: str) -> tuple[dict | None, float]:
 
     try:
         data = await usda_breaker.call(lambda: usda_fdc.search_by_upc(barcode))
-    except ratelimit.RateLimitedError as e:
-        # Overrunning FDC's ceiling gets the key throttled, which degrades
-        # every user rather than only this one.
-        logger.warning("USDA budget exhausted for %s (%s)", barcode, e)
+    except (ratelimit.RateLimitedError, FdcRateLimitError) as e:
+        # Either we refused our own call to stay inside FDC's ceiling, or FDC
+        # refused it for us. Both are budgeting facts rather than outages, so
+        # they degrade the response without blaming the upstream's health.
+        logger.warning("USDA rate limited for %s (%s)", barcode, e)
         data = None
     except CircuitOpenError:
         logger.info("USDA circuit open; skipping fetch for %s", barcode)

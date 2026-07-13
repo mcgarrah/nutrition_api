@@ -212,7 +212,12 @@ def test_usda_food_by_id(monkeypatch):
     async def ok(fdc_id):
         return {"fdc_id": fdc_id, "description": "COLA"}
 
+    # is_available() must be stubbed too: the route settles the configuration
+    # question before calling, and CI has no FDC_API_KEY. Without this the test
+    # passes only on a machine that happens to have a key configured.
+    monkeypatch.setattr(usda_fdc, "is_available", lambda: True)
     monkeypatch.setattr(usda_fdc, "get_food", ok)
+
     assert client.get("/api/v1/usda/food/123").json()["fdc_id"] == 123
 
 
@@ -221,19 +226,31 @@ def test_usda_food_rejects_non_numeric_id():
 
 
 def test_usda_food_503_when_unconfigured(monkeypatch):
-    async def unconfigured(fdc_id):
-        return None
-
-    monkeypatch.setattr(usda_fdc, "get_food", unconfigured)
+    monkeypatch.setattr(usda_fdc, "is_available", lambda: False)
     assert client.get("/api/v1/usda/food/123").status_code == 503
 
 
-def test_usda_food_404_on_upstream_error(monkeypatch):
+def test_usda_food_404_when_the_food_does_not_exist(monkeypatch):
+    """A question with no answer is a 404. It used to be reported as 503 —
+    blaming the service for the absence of a food nobody had."""
+    async def missing(fdc_id):
+        return None
+
+    monkeypatch.setattr(usda_fdc, "is_available", lambda: True)
+    monkeypatch.setattr(usda_fdc, "get_food", missing)
+
+    resp = client.get("/api/v1/usda/food/999999999")
+    assert resp.status_code == 404
+    assert "999999999" in resp.json()["detail"]
+
+
+def test_usda_food_502_on_upstream_error(monkeypatch):
     async def boom(fdc_id):
         raise ConnectionError("down")
 
+    monkeypatch.setattr(usda_fdc, "is_available", lambda: True)
     monkeypatch.setattr(usda_fdc, "get_food", boom)
-    assert client.get("/api/v1/usda/food/123").status_code == 404
+    assert client.get("/api/v1/usda/food/123").status_code == 502
 
 
 def test_usda_upc_lookup_returns_food(monkeypatch):

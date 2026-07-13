@@ -22,6 +22,8 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Any, Awaitable, Callable
 
+from usda_fdc.exceptions import FdcRateLimitError, FdcResourceNotFoundError
+
 from .ratelimit import RateLimitedError
 
 logger = logging.getLogger(__name__)
@@ -160,10 +162,15 @@ class CircuitBreaker:
             raise CircuitOpenError(f"{self.name} circuit is open")
         try:
             result = await asyncio.wait_for(coro_fn(), timeout=UPSTREAM_TIMEOUT_S)
-        except RateLimitedError:
-            # Our budget, not their health. Recording this as a failure would
-            # trip the circuit and keep the source shut out long after the
-            # budget refilled — punishing the upstream for our own busy minute.
+        except (RateLimitedError, FdcRateLimitError):
+            # A rate limit — ours or theirs — is a budgeting fact, not an
+            # outage. Recording it as a failure would trip the circuit and keep
+            # the source shut out long after the limit had reset, punishing the
+            # upstream for our own busy minute.
+            raise
+        except FdcResourceNotFoundError:
+            # The upstream answered, and its answer was "no such thing". That
+            # is a healthy API doing its job, not a failing one.
             raise
         except Exception:
             self.record_failure()

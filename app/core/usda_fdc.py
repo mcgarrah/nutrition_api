@@ -12,6 +12,7 @@ import logging
 from typing import Any
 
 from dotenv import load_dotenv
+from usda_fdc.exceptions import FdcResourceNotFoundError
 
 from . import ratelimit
 from . import resilience
@@ -106,7 +107,17 @@ async def get_food(fdc_id: int | str) -> dict | None:
 
     ratelimit.spend(ratelimit.usda_limiter, "USDA_FDC")
 
-    food = await _run_sync(client.get_food, fdc_id)
+    try:
+        food = await _run_sync(client.get_food, fdc_id)
+    except FdcResourceNotFoundError:
+        # A food that does not exist is an answer, not an upstream failure.
+        # Before usda-fdc 0.2.0 this arrived as an undifferentiated
+        # FdcApiError, so five lookups of missing foods in a row would trip
+        # the circuit breaker and shut USDA out entirely — punishing the
+        # upstream for being asked about things that were never there.
+        logger.info("USDA FDC has no food with id %s", fdc_id)
+        return None
+
     return {
         "fdc_id": food.fdc_id,
         "description": food.description,
