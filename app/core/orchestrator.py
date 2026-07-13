@@ -14,6 +14,7 @@ Licensed under MIT License
 """
 import asyncio
 import logging
+import math
 import os
 import time
 
@@ -116,37 +117,40 @@ async def _fetch_gpc_categories(off_categories: list[str]) -> tuple[list[str], f
 
 
 def _num(value) -> float | None:
-    """Coerce an upstream scalar to float, or None if it isn't numeric.
+    """Coerce an upstream scalar to a finite float, or None if it isn't one.
 
-    Assigning a junk value straight onto the model is not caught until FastAPI
-    serializes the response, which surfaces as a 500 rather than a partial
-    result — so filter it here.
+    Two failure modes, both of which reach the client as a broken response:
+
+    * Not a number at all. Open Food Facts nutriments are crowdsourced and
+      arrive as whatever was typed off the label — ">100", "trace", "" all
+      occur. float() raises on those, and an unhandled ValueError turns a
+      partial result into a 500, which this service must never return.
+
+    * NaN or Infinity. These *are* floats, so they pass float() silently, but
+      JSON has no literal for them: they serialize as the bare tokens NaN and
+      Infinity, which strict parsers reject — poisoning the whole response,
+      not just the one field. Python's json module accepts them on input, so
+      they can arrive from upstream, and the string "nan" converts happily.
     """
     if value is None:
         return None
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         logger.warning("Discarding non-numeric value %r", value)
         return None
+    if not math.isfinite(number):
+        logger.warning("Discarding non-finite value %r", value)
+        return None
+    return number
 
 
 def _nv(value, unit="g") -> NutrientValue | None:
-    """Create a NutrientValue, or None if the value isn't a usable number.
-
-    Open Food Facts nutriments are crowdsourced and arrive as whatever was
-    typed off the label — ">100", "trace", "" all occur. float() raises on
-    those, and an unhandled ValueError here turns a partial result into a 500,
-    which this service is explicitly not allowed to return. Drop the bad
-    nutrient and keep the rest of the product instead.
-    """
-    if value is None:
+    """Create a NutrientValue, or None if the value isn't a finite number."""
+    number = _num(value)
+    if number is None:
         return None
-    try:
-        return NutrientValue(value=float(value), unit=unit)
-    except (TypeError, ValueError):
-        logger.warning("Discarding non-numeric nutrient value %r", value)
-        return None
+    return NutrientValue(value=number, unit=unit)
 
 
 def _usda_nutrient(nutrients: dict, name: str) -> float | None:
