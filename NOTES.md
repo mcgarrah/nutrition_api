@@ -29,30 +29,22 @@ be reviewed and modified as part of this work.
 
 ## Known upstream issues
 
-### 1. `usda_fdc` drops `gtinUpc` — highest-value upstream fix
+### 1. ~~`usda_fdc` drops `gtinUpc`~~ — RESOLVED
 
-Its food and search models don't expose the barcode field at all, even though
-the raw FDC API returns it.
+Fixed upstream in
+[usda_fdc_python#8](https://github.com/mcgarrah/usda_fdc_python/pull/8) and
+released as **usda-fdc 0.1.10**, which exposes `gtin_upc` on `Food` and
+`SearchResultFood` — and also adds a request `timeout`, since `requests` has no
+default and a stalled FDC socket used to block its thread forever.
 
-This matters because FDC has no barcode-lookup endpoint: `search_by_upc` queries
-a *full-text* search, which happily returns unrelated products for an unknown
-barcode (querying `00000000` returned a food whose real barcode was
-`0099447210127`). Verifying the match is the only thing standing between us and
-serving one product's nutrition under another product's barcode.
+This repo now pins `usda-fdc>=0.1.10`, verifies the barcode through the public
+`client.search()`, and has **deleted** the `_make_request` workaround. It also
+passes `timeout=UPSTREAM_TIMEOUT_S` to the client, which is what finally
+releases a thread stuck on a stalled socket — `asyncio.wait_for` never could.
 
-Since the model drops the field, `app/core/usda_fdc.py:search_by_upc` reaches
-past the library's public API and reads the raw search payload via
-`client._make_request`.
-
-**Fix is in flight upstream:**
-[usda_fdc_python#8](https://github.com/mcgarrah/usda_fdc_python/pull/8) adds
-`gtin_upc` to both models (v0.1.10).
-
-**This repo is blocked on a release, not on the code.** CI installs `usda-fdc`
-from PyPI, where the latest is 0.1.9 and has no `gtin_upc`. So the cleanup here
-must wait until 0.1.10 is published; only then can we bump the pin, switch
-`search_by_upc` to the public `client.search()`, and delete the `_make_request`
-workaround. Doing it sooner just breaks CI.
+That repo also had no CI at all and published to PyPI without running its
+tests; both are fixed
+([usda_fdc_python#9](https://github.com/mcgarrah/usda_fdc_python/pull/9)).
 
 ### 2. We import `gpcc._crawlers`, a private module
 

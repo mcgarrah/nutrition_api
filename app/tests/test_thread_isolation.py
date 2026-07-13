@@ -159,3 +159,39 @@ async def test_run_sync_still_returns_values_and_propagates_errors(wrapper):
 
     with pytest.raises(ConnectionError):
         await wrapper._run_sync(boom)
+
+
+# ── the socket timeout: what actually releases a stuck thread ──────────
+
+def test_the_fdc_client_is_built_with_a_socket_timeout(monkeypatch):
+    """Dedicated pools *contain* a stalled upstream; only a socket timeout
+    releases the thread.
+
+    asyncio.wait_for cancels the await, never the blocking SDK call beneath
+    it, so without a client timeout a stalled FDC socket held its thread for
+    the life of the process — requests has no default timeout. usda-fdc 0.1.10
+    added one; this pins that we actually set it.
+    """
+    captured = {}
+
+    class FakeFdcClient:
+        def __init__(self, timeout=None, **kwargs):
+            captured["timeout"] = timeout
+
+    monkeypatch.setattr(usda_fdc, "_fdc_client", None)
+    monkeypatch.setattr(usda_fdc, "_fdc_available", None)
+    monkeypatch.setattr("usda_fdc.FdcClient", FakeFdcClient)
+
+    usda_fdc._get_fdc_client()
+
+    assert captured["timeout"] == resilience.UPSTREAM_TIMEOUT_S
+    assert captured["timeout"] > 0
+
+
+def test_the_library_supports_a_timeout():
+    """Canary: if usda_fdc drops the timeout parameter, threads leak again."""
+    import inspect
+
+    from usda_fdc import FdcClient
+
+    assert "timeout" in inspect.signature(FdcClient.__init__).parameters
