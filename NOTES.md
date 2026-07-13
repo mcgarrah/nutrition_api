@@ -29,6 +29,25 @@ be reviewed and modified as part of this work.
 
 ## Known upstream issues
 
+### 0. `usda-fdc` release history (we pin >= 0.2.0)
+
+- **0.1.10** — `gtin_upc` on the models (our fix); request timeout + `FdcTimeoutError`.
+- **0.1.11** — **security**: the API key travelled in the query string, and
+  `requests` embeds the full URL in its exception text, so the first network
+  hiccup wrote the real key into any log that records exceptions. *We log
+  exceptions.* Now sent as an `X-Api-Key` header and redacted. Also fixed
+  kJ-being-served-as-kcal in its own analysis layer — the same defect we found
+  independently downstream.
+- **0.2.0** — 404/403/400 now raise `FdcResourceNotFoundError` / `FdcAuthError` /
+  `FdcValidationError`, all still deriving from `FdcApiError`; exceptions carry
+  `status_code`.
+
+The 0.2.0 breaking changes do not touch us (we catch broadly and never use the
+DRI/analysis layer), but the new exception types fixed a real bug on our side —
+see the commit for `claude/usda-fdc-0.2.0`: a missing food and a rate limit were
+both being counted as *upstream failures*, so five lookups of absent foods in a
+row would trip the circuit breaker and shut USDA out for everyone.
+
 ### 1. ~~`usda_fdc` drops `gtinUpc`~~ — RESOLVED
 
 Fixed upstream in

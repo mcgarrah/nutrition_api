@@ -167,3 +167,91 @@ def test_the_library_still_exposes_gtin_upc():
         "gtinUpc": "028400642255",
     })
     assert food.gtin_upc == "028400642255"
+
+
+# ── usda-fdc 0.2.0: telling "absent" and "throttled" apart from "broken" ──
+
+def test_the_library_does_not_leak_the_api_key_in_errors():
+    """A security canary.
+
+    Before 0.1.11 the key travelled in the query string, and requests embeds
+    the full URL in its exception text — so the first network hiccup wrote the
+    real key into our logs, which log those exceptions verbatim.
+    """
+    from usda_fdc import FdcClient
+
+    client = FdcClient(
+        api_key="SECRET_KEY_12345",
+        base_url="https://127.0.0.1:9/fdc/v1/",
+        timeout=1,
+    )
+
+    with pytest.raises(Exception) as exc:
+        client.search("cola")
+
+    assert "SECRET_KEY_12345" not in str(exc.value)
+
+
+def test_the_library_still_distinguishes_its_failure_modes():
+    """Canary on 0.2.0: if these collapse back into a bare FdcApiError, a
+    missing food becomes indistinguishable from a broken API and starts
+    tripping the circuit breaker again."""
+    from usda_fdc.exceptions import (
+        FdcApiError, FdcRateLimitError, FdcResourceNotFoundError,
+    )
+
+    assert issubclass(FdcResourceNotFoundError, FdcApiError)
+    assert issubclass(FdcRateLimitError, FdcApiError)
+    assert FdcResourceNotFoundError is not FdcRateLimitError
+
+
+async def test_a_missing_food_is_not_an_upstream_failure(monkeypatch):
+    """FDC answering "no such food" is a healthy API doing its job. Counting it
+    as a failure meant five lookups of missing foods in a row would open the
+    circuit and shut USDA out for everyone."""
+    from usda_fdc.exceptions import FdcResourceNotFoundError
+
+    from app.core import resilience
+
+    class Client:
+        def get_food(self, fdc_id):
+            raise FdcResourceNotFoundError("not found")
+
+    monkeypatch.setattr(usda_fdc, "_get_fdc_client", lambda: Client())
+
+    for _ in range(resilience.usda_breaker.failure_threshold + 2):
+        assert await usda_fdc.get_food(999999) is None
+
+    assert not resilience.usda_breaker.is_open
+    assert resilience.usda_breaker._consecutive_failures == 0
+
+
+async def test_fdc_rate_limiting_us_does_not_trip_the_breaker(monkeypatch):
+    """Their 429 is a budgeting fact, not an outage. Opening the circuit on it
+    would keep USDA shut out long after the limit had reset."""
+    from usda_fdc.exceptions import FdcRateLimitError
+
+    from app.core import resilience
+
+    async def throttled():
+        raise FdcRateLimitError("rate limit exceeded")
+
+    for _ in range(resilience.usda_breaker.failure_threshold + 2):
+        with pytest.raises(FdcRateLimitError):
+            await resilience.usda_breaker.call(throttled)
+
+    assert not resilience.usda_breaker.is_open
+
+
+async def test_a_real_outage_still_trips_the_breaker(monkeypatch):
+    """The exemptions must not swallow genuine failures."""
+    from app.core import resilience
+
+    async def down():
+        raise ConnectionError("FDC unreachable")
+
+    for _ in range(resilience.usda_breaker.failure_threshold):
+        with pytest.raises(ConnectionError):
+            await resilience.usda_breaker.call(down)
+
+    assert resilience.usda_breaker.is_open

@@ -45,6 +45,15 @@ async def usda_search(
 @router.get("/food/{fdc_id}", summary="Get USDA FDC food by ID")
 async def usda_food(fdc_id: int):
     """Get detailed nutritional data for a specific food by its FDC ID."""
+    # "Not configured" and "no such food" both used to arrive as None, so a
+    # missing food was reported as 503 Service Unavailable — blaming the
+    # service for a question with no answer. Settle the configuration question
+    # first, and None afterwards can only mean the food does not exist.
+    if not usda_fdc.is_available():
+        raise HTTPException(
+            503, "USDA FDC service unavailable (API key not configured)"
+        )
+
     try:
         result = await usda_fdc.get_food(fdc_id)
     except ratelimit.RateLimitedError as e:
@@ -55,11 +64,10 @@ async def usda_food(fdc_id: int):
         )
     except Exception as e:
         logger.warning("USDA get_food(%s) failed: %s", fdc_id, e)
-        raise HTTPException(404, "Food not found or USDA FDC upstream error")
+        raise HTTPException(502, "USDA FDC upstream error")
+
     if result is None:
-        raise HTTPException(
-            503, "USDA FDC service unavailable (API key not configured)"
-        )
+        raise HTTPException(404, f"No USDA food with id {fdc_id}")
     return result
 
 
