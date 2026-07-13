@@ -115,17 +115,44 @@ async def _fetch_gpc_categories(off_categories: list[str]) -> tuple[list[str], f
     return hierarchy, elapsed
 
 
+def _num(value) -> float | None:
+    """Coerce an upstream scalar to float, or None if it isn't numeric.
+
+    Assigning a junk value straight onto the model is not caught until FastAPI
+    serializes the response, which surfaces as a 500 rather than a partial
+    result — so filter it here.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        logger.warning("Discarding non-numeric value %r", value)
+        return None
+
+
 def _nv(value, unit="g") -> NutrientValue | None:
-    """Create a NutrientValue if value is not None."""
-    if value is not None:
+    """Create a NutrientValue, or None if the value isn't a usable number.
+
+    Open Food Facts nutriments are crowdsourced and arrive as whatever was
+    typed off the label — ">100", "trace", "" all occur. float() raises on
+    those, and an unhandled ValueError here turns a partial result into a 500,
+    which this service is explicitly not allowed to return. Drop the bad
+    nutrient and keep the rest of the product instead.
+    """
+    if value is None:
+        return None
+    try:
         return NutrientValue(value=float(value), unit=unit)
-    return None
+    except (TypeError, ValueError):
+        logger.warning("Discarding non-numeric nutrient value %r", value)
+        return None
 
 
 def _usda_nutrient(nutrients: dict, name: str) -> float | None:
     """Extract a nutrient amount from USDA nutrients dict by name."""
     entry = nutrients.get(name)
-    if entry and entry.get("amount") is not None:
+    if isinstance(entry, dict) and entry.get("amount") is not None:
         return entry["amount"]
     return None
 
@@ -164,7 +191,7 @@ async def lookup(gtin: str) -> CanonicalProduct:
 
         # Provisional nutrition from OFF (per 100g)
         nutr = off_data.get("nutrients_per_100g", {})
-        product.calories_kcal = nutr.get("calories_kcal")
+        product.calories_kcal = _num(nutr.get("calories_kcal"))
         product.protein = _nv(nutr.get("protein_g"))
         product.fat = _nv(nutr.get("fat_g"))
         product.carbohydrates = _nv(nutr.get("carbohydrates_g"))
@@ -187,7 +214,7 @@ async def lookup(gtin: str) -> CanonicalProduct:
         nutrients = usda_data.get("nutrients", {})
         if nutrients:
             # Override nutrition with USDA values (authoritative)
-            energy = _usda_nutrient(nutrients, "Energy")
+            energy = _num(_usda_nutrient(nutrients, "Energy"))
             if energy is not None:
                 product.calories_kcal = energy
             protein = _usda_nutrient(nutrients, "Protein")
