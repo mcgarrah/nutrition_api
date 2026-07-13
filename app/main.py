@@ -12,6 +12,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from .database import close_db
 from .gpc.routes import router as gpc_router
 from .core.usda_routes import router as usda_router
@@ -88,6 +90,15 @@ app.include_router(lookup_router)
 app.include_router(gpc_router)
 app.include_router(usda_router)
 app.include_router(off_router)
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
+
+
+@app.get("/", include_in_schema=False)
+async def index():
+    """Serve the lookup tester UI at the root."""
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/api/v1/health", tags=["Operations"], summary="Health check")
