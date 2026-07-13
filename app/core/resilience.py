@@ -18,12 +18,44 @@ import asyncio
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
 # Max seconds we wait on any single upstream call (CLAUDE.md: max 2.0s)
 UPSTREAM_TIMEOUT_S = float(os.environ.get("UPSTREAM_TIMEOUT_S", "2.0"))
+
+# Threads reserved for each upstream. Both vendor SDKs are synchronous, so
+# every call occupies a thread for its whole duration.
+UPSTREAM_MAX_THREADS = int(os.environ.get("UPSTREAM_MAX_THREADS", "8"))
+
+
+def make_executor(name: str) -> ThreadPoolExecutor:
+    """Create a bounded thread pool dedicated to one upstream.
+
+    The vendor SDKs are blocking, so they run in an executor. Sharing asyncio's
+    default executor means a stalled upstream holds threads that a *healthy*
+    one then cannot get: with the default pool of 8, a hung Open Food Facts
+    starves USDA, and a perfectly good source times out waiting for a thread.
+
+    The circuit breakers cannot prevent that — the contention is underneath
+    them. asyncio.wait_for also cancels only the await, never the blocking call
+    itself, so a stalled thread stays occupied until the SDK's own socket gives
+    up. Giving each source its own bounded pool contains the damage to the
+    source that caused it.
+    """
+    return ThreadPoolExecutor(
+        max_workers=UPSTREAM_MAX_THREADS,
+        thread_name_prefix=f"upstream-{name}",
+    )
+
+
+async def run_in_executor(executor: ThreadPoolExecutor, func, *args, **kwargs) -> Any:
+    """Run a blocking callable on a specific (per-source) executor."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(executor, partial(func, *args, **kwargs))
 
 
 class CircuitOpenError(Exception):

@@ -350,7 +350,12 @@ async def test_reported_latency_tracks_actual_upstream_time(monkeypatch, gpc_db)
 
 async def test_one_upstream_tripping_does_not_trip_the_other(monkeypatch, gpc_db):
     """The breakers are per-source. If a USDA outage also silenced OFF, a
-    single vendor could take the whole service dark."""
+    single vendor could take the whole service dark.
+
+    Note this only covers breaker *state*. It mocks the upstreams away, so it
+    says nothing about the thread pool underneath them — which is precisely how
+    the shared-executor starvation bug hid. See test_thread_isolation.
+    """
     async def off_ok(barcode):
         return {"product_name": "Cola", "nutrients_per_100g": {}, "categories": []}
 

@@ -11,12 +11,14 @@ Licensed under MIT License
 """
 import asyncio
 import logging
-from functools import partial
 from typing import Any
 
 from . import resilience
 
 logger = logging.getLogger(__name__)
+
+# Threads dedicated to Open Food Facts, so a stall here cannot starve USDA
+_executor = resilience.make_executor("off")
 
 # Fields we request from OFF to minimize payload
 _OFF_FIELDS = [
@@ -47,9 +49,12 @@ def _get_off_api():
 
 
 async def _run_sync(func, *args, **kwargs) -> Any:
-    """Run a synchronous function in the default thread pool executor."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, partial(func, *args, **kwargs))
+    """Run a blocking OFF call on this source's own thread pool.
+
+    Not the default executor: a stalled OFF would hold threads that USDA then
+    could not get. See resilience.make_executor.
+    """
+    return await resilience.run_in_executor(_executor, func, *args, **kwargs)
 
 
 def _extract_nutrients(nutriments: dict) -> dict:

@@ -9,7 +9,6 @@ Licensed under MIT License
 """
 import asyncio
 import logging
-from functools import partial
 from typing import Any
 
 from dotenv import load_dotenv
@@ -19,6 +18,9 @@ from . import resilience
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Threads dedicated to USDA FDC, so a stall here cannot starve Open Food Facts
+_executor = resilience.make_executor("usda")
 
 # Lazy-initialized singleton client
 _fdc_client = None
@@ -34,7 +36,13 @@ def _get_fdc_client():
         return _fdc_client
     try:
         from usda_fdc import FdcClient
-        _fdc_client = FdcClient()  # reads FDC_API_KEY from env
+        # Bound the socket itself, not just the await. asyncio.wait_for frees
+        # the caller but cannot cancel the blocking SDK call underneath, so
+        # without a client timeout a stalled FDC socket holds its thread for
+        # the life of the process (usda-fdc >= 0.1.10).
+        _fdc_client = FdcClient(  # reads FDC_API_KEY from env
+            timeout=resilience.UPSTREAM_TIMEOUT_S,
+        )
         _fdc_available = True
         logger.info("USDA FDC client initialized (API key configured).")
         return _fdc_client
@@ -45,9 +53,12 @@ def _get_fdc_client():
 
 
 async def _run_sync(func, *args, **kwargs) -> Any:
-    """Run a synchronous function in the default thread pool executor."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, partial(func, *args, **kwargs))
+    """Run a blocking USDA call on this source's own thread pool.
+
+    Not the default executor: a stalled USDA would hold threads that OFF then
+    could not get. See resilience.make_executor.
+    """
+    return await resilience.run_in_executor(_executor, func, *args, **kwargs)
 
 
 def is_available() -> bool:
@@ -129,9 +140,8 @@ async def search_by_upc(upc: str) -> dict | None:
     is "0099447210127"). Taking the top hit on trust would attribute one
     product's nutrition to a different product's barcode — silent wrong data.
 
-    So we verify each candidate's own gtinUpc against the requested barcode
-    and return only a genuine match. We read the raw search payload because
-    the usda_fdc models drop gtinUpc entirely.
+    So we verify each candidate's own gtin_upc against the requested barcode
+    and return only a genuine match.
 
     Returns the matching food's full details, or None if nothing matches /
     no client is configured. Upstream API errors propagate to the caller.
@@ -144,15 +154,13 @@ async def search_by_upc(upc: str) -> dict | None:
     if not target:
         return None
 
-    raw = await _run_sync(
-        client._make_request,
-        "foods/search",
-        params={"query": upc, "dataType": ["Branded"], "pageSize": 10},
+    result = await _run_sync(
+        client.search, upc, data_type=["Branded"], page_size=10,
     )
 
-    for food in raw.get("foods", []):
-        if normalize_gtin(food.get("gtinUpc", "")) == target:
-            return await get_food(food["fdcId"])
+    for food in result.foods:
+        if normalize_gtin(food.gtin_upc or "") == target:
+            return await get_food(food.fdc_id)
 
     logger.info("USDA FDC has no branded food matching GTIN %s", upc)
     return None
