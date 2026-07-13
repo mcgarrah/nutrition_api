@@ -133,25 +133,45 @@ def unlimited(monkeypatch):
     return install
 
 
+class _FakeOffSdk:
+    """Stands in for the openfoodfacts SDK, *beneath* the rate-limit gate.
+
+    The budget is spent inside off.get_product(), so a test that patches
+    get_product itself jumps straight over the thing it means to test — which
+    is exactly how the direct /api/v1/off/* endpoints came to bypass the
+    budget in the first place.
+    """
+
+    def __init__(self):
+        self.calls = []
+
+        class _Product:
+            def get(inner, barcode, fields=None):
+                self.calls.append(barcode)
+                return {"code": barcode, "product_name": "Cola", "nutriments": {}}
+
+            def text_search(inner, query, page_size=25):
+                self.calls.append(f"search:{query}")
+                return {"count": 0, "products": []}
+
+        self.product = _Product()
+
+
 async def test_off_is_skipped_once_its_budget_is_spent(monkeypatch, unlimited, gpc_db):
     """Over-spending OFF's budget is not a failed request — it is an IP ban."""
     unlimited(off_rate=2)
-    calls = []
-
-    async def off_counting(barcode):
-        calls.append(barcode)
-        return {"product_name": "Cola", "nutrients_per_100g": {}, "categories": []}
+    sdk = _FakeOffSdk()
 
     async def usda_none(upc):
         return None
 
-    monkeypatch.setattr(off, "get_product", off_counting)
+    monkeypatch.setattr(off, "_get_off_api", lambda: sdk)
     monkeypatch.setattr(usda_fdc, "search_by_upc", usda_none)
 
     for i in range(5):
         await orchestrator.lookup(f"11111111000{i}")
 
-    assert len(calls) == 2          # the budget, and not one call more
+    assert len(sdk.calls) == 2      # the budget, and not one call more
 
 
 async def test_a_spent_budget_degrades_rather_than_failing(monkeypatch, unlimited, gpc_db):
@@ -186,47 +206,42 @@ async def test_a_spent_budget_does_not_trip_the_circuit_breaker(
     a busy minute would open the circuit and keep OFF shut out long after the
     budget refilled."""
     unlimited(off_rate=0.0001)
-
-    async def off_never_called(barcode):
-        raise AssertionError("should not be called")
+    sdk = _FakeOffSdk()
 
     async def usda_none(upc):
         return None
 
-    monkeypatch.setattr(off, "get_product", off_never_called)
+    monkeypatch.setattr(off, "_get_off_api", lambda: sdk)
     monkeypatch.setattr(usda_fdc, "search_by_upc", usda_none)
 
     for i in range(resilience.off_breaker.failure_threshold + 3):
         await orchestrator.lookup(f"22222222000{i}")
 
+    assert sdk.calls == []                      # never reached the SDK
     assert not resilience.off_breaker.is_open
     assert resilience.off_breaker._consecutive_failures == 0
 
 
 async def test_the_budget_refills(monkeypatch, unlimited, gpc_db):
     clock = unlimited(off_rate=60)      # one per second
-    calls = []
-
-    async def off_counting(barcode):
-        calls.append(barcode)
-        return {"product_name": "Cola", "nutrients_per_100g": {}, "categories": []}
+    sdk = _FakeOffSdk()
 
     async def usda_none(upc):
         return None
 
-    monkeypatch.setattr(off, "get_product", off_counting)
+    monkeypatch.setattr(off, "_get_off_api", lambda: sdk)
     monkeypatch.setattr(usda_fdc, "search_by_upc", usda_none)
 
     for i in range(60):
         await orchestrator.lookup(f"3333333300{i:02d}")
-    assert len(calls) == 60
+    assert len(sdk.calls) == 60
 
     await orchestrator.lookup("444444444444")
-    assert len(calls) == 60              # budget spent
+    assert len(sdk.calls) == 60          # budget spent
 
     clock.advance(5)
     await orchestrator.lookup("555555555555")
-    assert len(calls) == 61              # refilled
+    assert len(sdk.calls) == 61          # refilled
 
 
 async def test_a_cache_hit_costs_no_upstream_budget(monkeypatch, unlimited, gpc_db):
@@ -369,3 +384,105 @@ def test_the_inbound_limit_is_also_divided_across_workers():
 
     if ratelimit.UPSTREAM_WORKERS > 1:
         assert ratelimit.inbound_limiter.rate < ratelimit.INBOUND_RATE_PER_MIN
+
+
+# ══ The direct source endpoints must spend from the same budget ════════
+# They call the wrappers straight, so guarding only the orchestrator left them
+# free to overrun Open Food Facts: a client inbound-limited to 60/min could
+# drive 60 searches/min at /api/v1/off/search — against OFF's limit of 10.
+
+def test_off_search_has_its_own_stricter_budget():
+    """OFF limits search to 10/min but product reads to 15. Sharing one bucket
+    would silently overrun the tighter of the two."""
+    assert ratelimit.OFF_SEARCH_RATE_PER_MIN == 10
+    assert ratelimit.OFF_RATE_PER_MIN == 15
+    assert ratelimit.off_search_limiter is not ratelimit.off_limiter
+    assert ratelimit.off_search_limiter.rate < ratelimit.off_limiter.rate
+
+
+async def test_the_direct_off_product_endpoint_spends_the_budget(monkeypatch, unlimited):
+    unlimited(off_rate=2)
+    sdk = _FakeOffSdk()
+    monkeypatch.setattr(off, "_get_off_api", lambda: sdk)
+
+    codes = [
+        client.get(f"/api/v1/off/product/00000000000{i}").status_code
+        for i in range(4)
+    ]
+
+    assert len(sdk.calls) == 2                  # the budget, not one call more
+    assert codes[2:] == [429, 429]              # the rest are refused
+
+
+async def test_the_direct_off_search_endpoint_spends_its_own_budget(
+    monkeypatch, unlimited,
+):
+    """This is the endpoint that could have earned the IP ban."""
+    clock = FakeClock()
+    monkeypatch.setattr(
+        ratelimit, "off_search_limiter",
+        TokenBucket(rate=2, per=60.0, timer=clock),
+    )
+    sdk = _FakeOffSdk()
+    monkeypatch.setattr(off, "_get_off_api", lambda: sdk)
+
+    codes = [
+        client.get("/api/v1/off/search", params={"q": f"cola{i}"}).status_code
+        for i in range(4)
+    ]
+
+    assert len([c for c in sdk.calls if c.startswith("search:")]) == 2
+    assert codes[2:] == [429, 429]
+
+
+async def test_a_refused_direct_call_carries_retry_after(monkeypatch):
+    monkeypatch.setattr(
+        ratelimit, "off_limiter", ratelimit.TokenBucket(rate=0.0001, per=60.0),
+    )
+    monkeypatch.setattr(off, "_get_off_api", lambda: _FakeOffSdk())
+
+    resp = client.get("/api/v1/off/product/3017620422003")
+
+    assert resp.status_code == 429
+    assert int(resp.headers["Retry-After"]) >= 1
+
+
+async def test_the_direct_usda_endpoints_spend_the_budget(monkeypatch, unlimited):
+    unlimited(usda_rate=2)
+
+    class Client:
+        def __init__(self):
+            self.calls = 0
+
+        def search(self, query, data_type=None, page_size=50, **kw):
+            self.calls += 1
+
+            class R:
+                total_hits = 0
+                foods = []
+            return R()
+
+    fake = Client()
+    monkeypatch.setattr(usda_fdc, "_get_fdc_client", lambda: fake)
+
+    codes = [
+        client.get("/api/v1/usda/search", params={"q": f"cola{i}"}).status_code
+        for i in range(4)
+    ]
+
+    assert fake.calls == 2
+    assert codes[2:] == [429, 429]
+
+
+async def test_a_refused_upstream_call_is_429_not_502(monkeypatch):
+    """A refusal is our own throttle, not an upstream fault — reporting it as a
+    502 would blame Open Food Facts for our budgeting."""
+    monkeypatch.setattr(
+        ratelimit, "off_limiter", ratelimit.TokenBucket(rate=0.0001, per=60.0),
+    )
+    monkeypatch.setattr(off, "_get_off_api", lambda: _FakeOffSdk())
+
+    resp = client.get("/api/v1/off/product/3017620422003")
+
+    assert resp.status_code == 429
+    assert resp.status_code != 502

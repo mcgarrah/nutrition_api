@@ -49,8 +49,15 @@ Retrieves a standardized, consolidated profile of a food product using its GTIN/
 
 | Upstream | Published limit | On breach |
 | :--- | :--- | :--- |
-| Open Food Facts | **15 product reads/minute per IP** | *"we reserve the right to deny you access… through IP address ban"* |
+| Open Food Facts — product reads | **15/minute per IP** | *"we reserve the right to deny you access… through IP address ban"* |
+| Open Food Facts — search | **10/minute per IP** | as above; also `503` when their *global* limit is exceeded |
 | USDA FDC | 3600/hour (`x-ratelimit-limit`) | key throttled |
+
+Search is limited more strictly than product reads, so it has its own budget rather than sharing one and quietly overrunning the tighter of the two.
+
+Budgets are spent by the upstream **clients**, not by one of their callers, so every path is covered by construction: the canonical lookup, the direct `/api/v1/off/*` and `/api/v1/usda/*` endpoints, and the health probes. Guarding only the lookup left the direct endpoints free to overrun — a caller inbound-limited to 60/min could have driven 60 searches/minute at Open Food Facts, six times their limit.
+
+A call refused for budget returns **429** with `Retry-After` on the direct endpoints (it is our throttle, not an upstream fault, so it is not a 502) and **degrades to a partial 200** on the canonical lookup. It is never recorded as a circuit-breaker failure: our own busy minute says nothing about the upstream's health.
 
 One *uncached* lookup spends one call at each. When a budget is exhausted the service **degrades** — that source is skipped and the response comes back partial, with the source absent from `data_sources` — rather than overrunning the limit and getting blocked. This is deliberately not treated as an upstream failure, so it never trips the circuit breaker.
 

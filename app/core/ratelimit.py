@@ -31,6 +31,23 @@ from collections import OrderedDict
 logger = logging.getLogger(__name__)
 
 
+class RateLimitedError(Exception):
+    """Raised when an upstream call is refused because our budget is spent.
+
+    Deliberately distinct from any upstream error. A spent budget is *our*
+    decision and says nothing about the upstream's health — recording it as a
+    failure would trip the circuit breaker and keep the source shut out long
+    after the budget refilled.
+    """
+
+    def __init__(self, source: str, retry_after: float):
+        self.source = source
+        self.retry_after = retry_after
+        super().__init__(
+            f"{source} rate budget exhausted; retry in {retry_after:.1f}s"
+        )
+
+
 class TokenBucket:
     """Allow `rate` events per `per` seconds, tolerating a burst of `burst`."""
 
@@ -123,6 +140,11 @@ UPSTREAM_WORKERS = int(os.environ.get("UPSTREAM_WORKERS", "2"))
 # Open Food Facts: 15 product reads/minute per IP, enforced with an IP ban.
 OFF_RATE_PER_MIN = float(os.environ.get("OFF_RATE_PER_MIN", "15"))
 
+# ...and only 10 search queries/minute. Search is limited more strictly than
+# product reads, so it needs its own budget rather than sharing one and
+# quietly overrunning the tighter of the two.
+OFF_SEARCH_RATE_PER_MIN = float(os.environ.get("OFF_SEARCH_RATE_PER_MIN", "10"))
+
 # USDA FDC: reports x-ratelimit-limit: 3600 per hour.
 USDA_RATE_PER_MIN = float(os.environ.get("USDA_RATE_PER_MIN", "60"))
 
@@ -139,7 +161,24 @@ def _per_worker(total: float) -> float:
 
 # Outbound: one bucket per upstream, sized to this worker's share of the budget.
 off_limiter = TokenBucket(rate=_per_worker(OFF_RATE_PER_MIN), per=60.0)
+off_search_limiter = TokenBucket(
+    rate=_per_worker(OFF_SEARCH_RATE_PER_MIN), per=60.0,
+)
 usda_limiter = TokenBucket(rate=_per_worker(USDA_RATE_PER_MIN), per=60.0)
+
+
+def spend(bucket: TokenBucket, source: str) -> None:
+    """Take a token, or refuse the call.
+
+    Called by the upstream *wrappers* rather than by one of their callers: the
+    budget belongs to the client that spends it, so every path through it —
+    the canonical lookup, the direct source endpoints, the health probes — is
+    covered by construction. Guarding only the orchestrator left the direct
+    endpoints free to overrun Open Food Facts' limits and earn an IP ban.
+    """
+    if not bucket.try_acquire():
+        raise RateLimitedError(source, bucket.retry_after())
+
 
 # Inbound: one bucket per client IP.
 #
