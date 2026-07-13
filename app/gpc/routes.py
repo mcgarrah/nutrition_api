@@ -37,10 +37,16 @@ DEFAULT_PAGE_SIZE = 20
 
 
 def _paginate_url(request: Request, page: int | None, page_size: int) -> str | None:
+    """Build a next/previous link that keeps the caller's filters.
+
+    Rebuilding the URL from the path alone drops every other query parameter,
+    so following `next` on a filtered list silently returns the *unfiltered*
+    page 2 — a different result set than the `count` beside it describes.
+    include_query_params keeps everything and overrides only the paging keys.
+    """
     if page is None:
         return None
-    url = str(request.url).split("?")[0]
-    return f"{url}?page={page}&page_size={page_size}"
+    return str(request.url.include_query_params(page=page, page_size=page_size))
 
 
 def _page_params(page: int, page_size: int, total: int):
