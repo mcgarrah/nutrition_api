@@ -148,3 +148,35 @@ def test_every_brick_resolves_to_a_full_breadcrumb(real_db):
            OR c.description IS NULL OR b.description IS NULL
     """)[0][0]
     assert incomplete == 0
+
+
+def test_search_against_the_real_taxonomy_is_bounded(real_db, monkeypatch):
+    """The case that motivated the cap: against the real 879-brick taxonomy a
+    single-character query matched almost everything."""
+    import app.database as database
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    db, _ = real_db
+    monkeypatch.setattr(database, "DB_PATH", db)
+    monkeypatch.setattr(database, "_db", None)
+    client = TestClient(app)
+
+    try:
+        body = client.get("/api/gpc/search/", params={"q": "e"}).json()
+
+        # Hundreds of real matches, but the response is capped
+        assert body["counts"]["bricks"] > 200
+        assert len(body["bricks"]) <= 50
+        assert body["truncated"] is True
+
+        # A wildcard cannot opt out of the cap either
+        wild = client.get("/api/gpc/search/", params={"q": "%"}).json()
+        assert len(wild["bricks"]) <= 50
+        assert wild["truncated"] is True
+    finally:
+        import asyncio
+        if database._db is not None:
+            asyncio.run(database._db.close())
+        database._db = None

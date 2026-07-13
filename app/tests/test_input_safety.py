@@ -41,7 +41,8 @@ def test_search_endpoint_is_not_injectable(payload, gpc_db):
 
     assert resp.status_code == 200
     # The payload is treated as a literal search term, matching nothing
-    assert resp.json() == {"segments": [], "families": [], "classes": [], "bricks": []}
+    body = resp.json()
+    assert all(body[k] == [] for k in ("segments", "families", "classes", "bricks"))
 
     # ...and the database is intact
     conn = sqlite3.connect(gpc_db)

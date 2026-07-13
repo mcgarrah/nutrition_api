@@ -186,7 +186,9 @@ def test_search_matches_on_code_as_well_as_text():
 
 def test_search_no_match_returns_empty_lists():
     body = client.get("/api/gpc/search/", params={"q": "zzzznothing"}).json()
-    assert body == {"segments": [], "families": [], "classes": [], "bricks": []}
+    assert all(body[k] == [] for k in ("segments", "families", "classes", "bricks"))
+    assert body["counts"] == {"segments": 0, "families": 0, "classes": 0, "bricks": 0}
+    assert body["truncated"] is False
 
 
 def test_search_rejects_an_unknown_category():
@@ -271,3 +273,67 @@ def test_paging_links_do_not_duplicate_parameters():
     assert body["next"].count("page=") == 1
     assert body["next"].count("page_size=") == 1
     assert "page=2" in body["next"]
+
+
+# ── Search is bounded ─────────────────────────────────────────────────
+
+def test_search_caps_results_at_the_limit(gpc_db):
+    """Unbounded, '?q=e' returned 921 rows in a 67 KB response against the real
+    taxonomy — every caller paying for an answer nobody asked for."""
+    body = client.get("/api/gpc/search/", params={"q": "0", "limit": 1}).json()
+
+    assert len(body["bricks"]) == 1
+    assert len(body["segments"]) == 1
+
+
+def test_search_reports_the_real_match_count_when_truncated(gpc_db):
+    """A truncated answer must be visible, not silent — otherwise a client
+    believes the slice it got is the whole result set."""
+    body = client.get("/api/gpc/search/", params={"q": "0", "limit": 1}).json()
+
+    assert body["truncated"] is True
+    assert body["counts"]["bricks"] == 3      # 3 matched, 1 returned
+    assert len(body["bricks"]) == 1
+
+
+def test_search_is_not_truncated_when_everything_fits(gpc_db):
+    body = client.get("/api/gpc/search/", params={"q": "Cola"}).json()
+
+    assert body["truncated"] is False
+    assert body["counts"]["bricks"] == len(body["bricks"]) == 1
+
+
+def test_search_counts_only_the_requested_category(gpc_db):
+    body = client.get(
+        "/api/gpc/search/", params={"q": "0", "category": "bricks"},
+    ).json()
+
+    assert set(body["counts"]) == {"bricks"}
+    assert body["segments"] == []
+
+
+def test_search_default_limit_is_applied(gpc_db):
+    """The default must be a real cap, not unbounded."""
+    from app.gpc.routes import DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT
+
+    assert 0 < DEFAULT_SEARCH_LIMIT <= MAX_SEARCH_LIMIT
+
+    body = client.get("/api/gpc/search/", params={"q": "0"}).json()
+    for entity in ("segments", "families", "classes", "bricks"):
+        assert len(body[entity]) <= DEFAULT_SEARCH_LIMIT
+
+
+@pytest.mark.parametrize("limit", [0, -1, 201, 10000])
+def test_search_rejects_an_out_of_range_limit(limit, gpc_db):
+    """A caller must not be able to opt out of the cap."""
+    resp = client.get("/api/gpc/search/", params={"q": "cola", "limit": limit})
+    assert resp.status_code == 422
+
+
+def test_search_limit_is_published_with_its_bounds(gpc_db):
+    spec = client.get("/openapi.json").json()
+    params = spec["paths"]["/api/gpc/search/"]["get"]["parameters"]
+    limit = next(p for p in params if p["name"] == "limit")
+
+    assert limit["schema"]["maximum"] == 200
+    assert limit["schema"]["minimum"] == 1

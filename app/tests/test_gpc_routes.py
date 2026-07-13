@@ -118,4 +118,6 @@ def test_search_category_filter():
 
 def test_search_empty_query_returns_empty_response():
     body = client.get("/api/gpc/search/").json()
-    assert body == {"segments": [], "families": [], "classes": [], "bricks": []}
+    assert all(body[k] == [] for k in ("segments", "families", "classes", "bricks"))
+    assert body["counts"] == {}
+    assert body["truncated"] is False
