@@ -13,6 +13,8 @@ import asyncio
 import logging
 from typing import Any
 
+from . import nutrients
+from . import ratelimit
 from . import resilience
 
 logger = logging.getLogger(__name__)
@@ -63,22 +65,17 @@ async def _run_sync(func, *args, **kwargs) -> Any:
 
 
 def _extract_nutrients(nutriments: dict) -> dict:
-    """Extract key nutrients from OFF nutriments dict (per 100g values)."""
-    keys = {
-        "energy-kcal_100g": "calories_kcal",
-        "proteins_100g": "protein_g",
-        "fat_100g": "fat_g",
-        "carbohydrates_100g": "carbohydrates_g",
-        "fiber_100g": "fiber_g",
-        "sugars_100g": "sugars_g",
-        "sodium_100g": "sodium_g",
-        "salt_100g": "salt_g",
-    }
+    """Extract the nutrients we publish from OFF's per-100g payload.
+
+    Keyed by our own field names (see app/core/nutrients.py) so that both
+    upstreams hand the orchestrator the same shape, and the unit conversions
+    OFF needs live in one place.
+    """
     result = {}
-    for off_key, our_key in keys.items():
-        val = nutriments.get(off_key)
-        if val is not None:
-            result[our_key] = val
+    for spec in nutrients.NUTRIENTS:
+        value = nutriments.get(spec.off_key)
+        if value is not None:
+            result[spec.field] = value
     return result
 
 
@@ -137,22 +134,44 @@ async def search(query: str, page_size: int = 25) -> dict | None:
     }
 
 
+_probe = resilience.CachedProbe("OpenFoodFacts")
+
+
 async def check_connectivity() -> dict:
     """Check if the OFF API is reachable. For the health endpoint.
 
-    Bounded by the upstream timeout. An unbounded probe means a stalled third
-    party hangs /health indefinitely, and the platform's health check then
-    kills a container that was perfectly able to keep serving degraded
-    responses — the opposite of what this design promises.
+    Cached, and charged to the outbound budget. /health is polled every 60s by
+    the platform and is exempt from the inbound rate limiter — it has to be,
+    since a 429 there reads as "unhealthy" and gets the container restarted.
+    An unbounded probe turned that exemption into an amplifier: every poll made
+    a live call to Open Food Facts, so any caller could loop /health and drive
+    unlimited traffic at a nonprofit's API through us. Their stated remedy for
+    that is an IP ban.
+
+    Also bounded by the upstream timeout: an unbounded probe lets a stalled
+    third party hang /health, which kills a container that was perfectly able
+    to keep serving degraded responses.
     """
+    cached = _probe.fresh()
+    if cached is not None:
+        return cached
+
+    # Charge the probe to the same budget the lookups spend from — otherwise
+    # health checks quietly push us past Open Food Facts' 15/minute allowance.
+    if not ratelimit.off_limiter.try_acquire():
+        stale = _probe.last_known()
+        if stale is not None:
+            return stale
+        return {"status": "unknown", "detail": "rate budget exhausted; not probed"}
+
     timeout = resilience.UPSTREAM_TIMEOUT_S
     try:
         # Look up a well-known product as a connectivity test
         result = await asyncio.wait_for(get_product("3017620422003"), timeout)  # Nutella
     except asyncio.TimeoutError:
-        return {"status": "error", "detail": f"timed out after {timeout}s"}
+        return _probe.store({"status": "error", "detail": f"timed out after {timeout}s"})
     except Exception as e:
-        return {"status": "error", "detail": str(e)}
+        return _probe.store({"status": "error", "detail": str(e)})
     if result:
-        return {"status": "ok"}
-    return {"status": "error", "detail": "Test product not found"}
+        return _probe.store({"status": "ok"})
+    return _probe.store({"status": "error", "detail": "Test product not found"})

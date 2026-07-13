@@ -13,6 +13,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from . import ratelimit
 from . import resilience
 
 load_dotenv()
@@ -109,10 +110,14 @@ async def get_food(fdc_id: int | str) -> dict | None:
         "ingredients": food.ingredients,
         "serving_size": food.serving_size,
         "serving_size_unit": food.serving_size_unit,
-        "nutrients": {
-            n.name: {"amount": n.amount, "unit": n.unit_name}
+        # A list, not a dict keyed by name: FDC publishes energy twice under
+        # the identical name "Energy" (kcal id 1008, kJ id 1062), so a
+        # name-keyed dict keeps whichever arrived last — and served cheddar at
+        # 1710 kcal. Identity lives in the id.
+        "nutrients": [
+            {"id": n.id, "name": n.name, "amount": n.amount, "unit": n.unit_name}
             for n in food.nutrients
-        },
+        ],
     }
 
 
@@ -166,23 +171,40 @@ async def search_by_upc(upc: str) -> dict | None:
     return None
 
 
+_probe = resilience.CachedProbe("USDA_FDC")
+
+
 async def check_connectivity() -> dict:
     """Check if the USDA FDC API is reachable. For the health endpoint.
 
-    Bounded by the upstream timeout — see the note in open_food_facts: an
-    unbounded probe lets a stalled upstream hang /health, which gets the
-    container restarted rather than reported as degraded.
+    Cached and charged to the outbound budget — see the note in
+    open_food_facts. /health is polled every 60s and exempt from the inbound
+    limiter, so an unbounded probe lets any caller amplify /health into
+    unlimited upstream load. Also bounded by the upstream timeout, so a stalled
+    upstream cannot hang the endpoint the platform uses to decide whether we
+    are alive.
     """
     if not is_available():
         return {"status": "unconfigured", "detail": "FDC_API_KEY not set"}
+
+    cached = _probe.fresh()
+    if cached is not None:
+        return cached
+
+    if not ratelimit.usda_limiter.try_acquire():
+        stale = _probe.last_known()
+        if stale is not None:
+            return stale
+        return {"status": "unknown", "detail": "rate budget exhausted; not probed"}
+
     timeout = resilience.UPSTREAM_TIMEOUT_S
     try:
         result = await asyncio.wait_for(
             _run_sync(_get_fdc_client().search, "test", page_size=1),
             timeout,
         )
-        return {"status": "ok", "total_foods": result.total_hits}
+        return _probe.store({"status": "ok", "total_foods": result.total_hits})
     except asyncio.TimeoutError:
-        return {"status": "error", "detail": f"timed out after {timeout}s"}
+        return _probe.store({"status": "error", "detail": f"timed out after {timeout}s"})
     except Exception as e:
-        return {"status": "error", "detail": str(e)}
+        return _probe.store({"status": "error", "detail": str(e)})

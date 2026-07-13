@@ -31,14 +31,27 @@ class CanonicalProduct(BaseModel):
         description="GS1 category path: Segment > Family > Class > Brick",
     )
 
-    # Normalized nutrition facts (per 100g or 100mL)
+    # Normalized nutrition facts (per 100g or 100mL).
+    #
+    # This is the complete US Nutrition Facts panel — what a consumer expects to
+    # find on a label — rather than an arbitrary subset. Units are OURS, not the
+    # source's: sodium is always mg whether it came from USDA (mg) or Open Food
+    # Facts (grams), so the same field never changes unit with its provenance.
     calories_kcal: float | None = None
     protein: NutrientValue | None = None
     fat: NutrientValue | None = None
+    saturated_fat: NutrientValue | None = None
+    trans_fat: NutrientValue | None = None
+    cholesterol: NutrientValue | None = None
     carbohydrates: NutrientValue | None = None
     fiber: NutrientValue | None = None
     sugars: NutrientValue | None = None
+    added_sugars: NutrientValue | None = None
     sodium: NutrientValue | None = None
+    potassium: NutrientValue | None = None
+    calcium: NutrientValue | None = None
+    iron: NutrientValue | None = None
+    vitamin_d: NutrientValue | None = None
 
     # Product metadata from OFF (images, ingredients, labels)
     image_url: str | None = None
@@ -64,5 +77,14 @@ class CanonicalProduct(BaseModel):
         description=(
             "True when this response was served from the in-memory cache "
             "without contacting any upstream."
+        ),
+    )
+    attribution: dict[str, dict[str, str]] = Field(
+        default_factory=dict,
+        description=(
+            "Source, licence and attribution for each contributing source. "
+            "Open Food Facts data is ODbL 1.0 (images CC BY-SA 3.0) and its "
+            "licence *requires* attribution, so the notice travels with the "
+            "data rather than living only in the documentation."
         ),
     )

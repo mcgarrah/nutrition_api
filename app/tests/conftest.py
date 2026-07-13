@@ -14,17 +14,19 @@ import sqlite3
 import pytest
 
 import app.database as database
+from app.core import open_food_facts as off
 from app.core import orchestrator
 from app.core import ratelimit
 from app.core import resilience
+from app.core import usda_fdc
 
 
 @pytest.fixture(autouse=True)
 def reset_shared_state():
     """Reset the process-wide singletons between tests.
 
-    The lookup cache, the circuit breakers, and the rate-limit buckets all
-    persist for the life of the process. Without this a cached product, a
+    The lookup cache, the circuit breakers, the rate-limit buckets and the
+    cached health probes all persist for the life of the process. Without this a cached product, a
     tripped breaker, or a bucket drained by an earlier test leaks into
     unrelated ones — and the rate limiter in particular would shed the rest of
     the suite, since every test hits the API as the same client.
@@ -33,6 +35,8 @@ def reset_shared_state():
     for breaker in (resilience.usda_breaker, resilience.off_breaker):
         breaker.record_success()
     _refill_rate_limiters()
+    off._probe.clear()
+    usda_fdc._probe.clear()
     yield
     orchestrator._lookup_cache.clear()
 
@@ -160,30 +164,43 @@ def off_product():
         "categories": ["en:beverages", "en:carbonated-drinks"],
         "allergens": [],
         "labels": [],
+        # Keyed by our field names — open_food_facts._extract_nutrients maps
+        # OFF's per-100g keys onto them, so both upstreams hand the
+        # orchestrator the same shape.
         "nutrients_per_100g": {
             "calories_kcal": 44.0,
-            "protein_g": 0.1,
-            "fat_g": 0.2,
-            "carbohydrates_g": 11.0,
-            "sugars_g": 10.6,
+            "protein": 0.1,
+            "fat": 0.2,
+            "carbohydrates": 11.0,
+            "sugars": 10.6,
         },
     }
 
 
+def usda_nutrient(fdc_id: int, name: str, amount, unit: str) -> dict:
+    """One entry as app/core/usda_fdc.get_food() emits it."""
+    return {"id": fdc_id, "name": name, "amount": amount, "unit": unit}
+
+
 @pytest.fixture
 def usda_food():
-    """A representative formatted USDA FDC branded food."""
+    """A representative formatted USDA FDC branded food.
+
+    `nutrients` is a *list* carrying ids, matching what FDC actually returns —
+    it publishes energy twice under the identical name "Energy" (kcal id 1008,
+    kJ id 1062), so a dict keyed by name silently keeps whichever came last.
+    """
     return {
         "fdc_id": 123456,
         "description": "COCA-COLA CLASSIC",
         "brand_owner": "The Coca-Cola Company",
         "brand_name": None,
         "ingredients": "CARBONATED WATER, HIGH FRUCTOSE CORN SYRUP, CARAMEL COLOR",
-        "nutrients": {
-            "Energy": {"amount": 42.0, "unit": "KCAL"},
-            "Protein": {"amount": 0.0, "unit": "G"},
-            "Total lipid (fat)": {"amount": 0.0, "unit": "G"},
-            "Carbohydrate, by difference": {"amount": 10.6, "unit": "G"},
-            "Sodium, Na": {"amount": 4.0, "unit": "MG"},
-        },
+        "nutrients": [
+            usda_nutrient(1008, "Energy", 42.0, "KCAL"),
+            usda_nutrient(1003, "Protein", 0.0, "G"),
+            usda_nutrient(1004, "Total lipid (fat)", 0.0, "G"),
+            usda_nutrient(1005, "Carbohydrate, by difference", 10.6, "G"),
+            usda_nutrient(1093, "Sodium, Na", 4.0, "MG"),
+        ],
     }

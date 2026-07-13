@@ -33,7 +33,8 @@ def reset_singletons(monkeypatch):
 # ══ USDA FDC ══════════════════════════════════════════════════════════
 
 class _FakeNutrient:
-    def __init__(self, name, amount, unit_name):
+    def __init__(self, name, amount, unit_name, id=1008):
+        self.id = id
         self.name, self.amount, self.unit_name = name, amount, unit_name
 
 
@@ -125,7 +126,10 @@ async def test_get_food_returns_none_when_unconfigured(monkeypatch):
     assert await usda_fdc.get_food(123) is None
 
 
-async def test_get_food_maps_nutrients_by_name(monkeypatch):
+async def test_get_food_keeps_nutrient_ids(monkeypatch):
+    """Identity lives in the id, not the name: FDC publishes energy twice under
+    the identical name "Energy" (kcal 1008, kJ 1062), so a name-keyed dict
+    would silently keep whichever arrived last."""
     class Client:
         def get_food(self, fdc_id):
             return _FakeFood()
@@ -135,7 +139,9 @@ async def test_get_food_maps_nutrients_by_name(monkeypatch):
 
     assert food["description"] == "COLA"
     assert food["serving_size"] == 355.0
-    assert food["nutrients"] == {"Energy": {"amount": 42.0, "unit": "KCAL"}}
+    assert food["nutrients"] == [
+        {"id": 1008, "name": "Energy", "amount": 42.0, "unit": "KCAL"}
+    ]
 
 
 async def test_get_food_propagates_upstream_errors(monkeypatch):
@@ -243,7 +249,7 @@ async def test_get_product_formats_the_payload(monkeypatch):
     assert p["categories"] == ["en:spreads"]
     assert p["allergens"] == ["en:milk"]
     assert p["labels"] == ["en:no-gluten"]
-    assert p["nutrients_per_100g"] == {"calories_kcal": 539.0, "fat_g": 30.9}
+    assert p["nutrients_per_100g"] == {"calories_kcal": 539.0, "fat": 30.9}
 
 
 async def test_get_product_requests_only_the_fields_we_use(monkeypatch):
@@ -322,17 +328,19 @@ async def test_off_search_propagates_upstream_errors(monkeypatch):
 # ── nutrient extraction ───────────────────────────────────────────────
 
 def test_extract_nutrients_ignores_unknown_keys():
-    assert off._extract_nutrients({"fat_100g": 1.0, "nutrition-score-fr": 12}) == {"fat_g": 1.0}
+    assert off._extract_nutrients({"fat_100g": 1.0, "nutrition-score-fr": 12}) == {"fat": 1.0}
 
 
 def test_extract_nutrients_keeps_explicit_zero():
     """0 g of fat is a fact, not a missing value — it must not be dropped."""
-    assert off._extract_nutrients({"fat_100g": 0})["fat_g"] == 0
+    assert off._extract_nutrients({"fat_100g": 0})["fat"] == 0
 
 
-def test_extract_nutrients_maps_salt_and_sodium_separately():
-    result = off._extract_nutrients({"sodium_100g": 0.4, "salt_100g": 1.0})
-    assert result == {"sodium_g": 0.4, "salt_g": 1.0}
+def test_extract_nutrients_uses_our_field_names():
+    """Both upstreams hand the orchestrator the same shape, keyed by the fields
+    we publish rather than each vendor's own spelling."""
+    result = off._extract_nutrients({"sodium_100g": 0.4, "saturated-fat_100g": 2.5})
+    assert result == {"sodium": 0.4, "saturated_fat": 2.5}
 
 
 def test_extract_nutrients_of_empty_payload():

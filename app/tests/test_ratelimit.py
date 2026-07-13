@@ -162,7 +162,12 @@ async def test_a_spent_budget_degrades_rather_than_failing(monkeypatch, unlimite
         raise AssertionError("OFF was called despite an exhausted budget")
 
     async def usda_ok(upc):
-        return {"description": "COLA", "nutrients": {"Energy": {"amount": 42.0}}}
+        return {
+            "description": "COLA",
+            "nutrients": [
+                {"id": 1008, "name": "Energy", "amount": 42.0, "unit": "KCAL"}
+            ],
+        }
 
     monkeypatch.setattr(off, "get_product", off_never_called)
     monkeypatch.setattr(usda_fdc, "search_by_upc", usda_ok)

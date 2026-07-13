@@ -24,6 +24,8 @@ from cachetools import TTLCache
 from .models import CanonicalProduct, NutrientValue
 from . import usda_fdc
 from . import open_food_facts as off
+from . import attribution
+from . import nutrients as nutrient_spec
 from . import ratelimit
 from .resilience import off_breaker, usda_breaker, CircuitOpenError
 from ..database import get_db
@@ -242,6 +244,25 @@ def _cache_key(gtin: str) -> str:
     return usda_fdc.normalize_gtin(gtin) or gtin
 
 
+def _apply_nutrients(product: CanonicalProduct, values: dict) -> None:
+    """Write nutrient values onto the product in the units *we* publish.
+
+    A source that lacks a nutrient must never erase one another source
+    supplied, so only present values are written.
+    """
+    for spec in nutrient_spec.NUTRIENTS:
+        if spec.field not in values:
+            continue
+        if spec.field == "calories_kcal":
+            number = _num(values[spec.field])
+            if number is not None:
+                product.calories_kcal = number
+            continue
+        nutrient = _nv(values[spec.field], unit=spec.unit)
+        if nutrient is not None:
+            setattr(product, spec.field, nutrient)
+
+
 async def lookup(gtin: str) -> CanonicalProduct:
     """Look up a product by GTIN/UPC and merge data from all sources.
 
@@ -279,15 +300,11 @@ async def lookup(gtin: str) -> CanonicalProduct:
         product.allergens = _str_list(off_data.get("allergens"))
         product.labels = _str_list(off_data.get("labels"))
 
-        # Provisional nutrition from OFF (per 100g)
-        nutr = off_data.get("nutrients_per_100g", {})
-        product.calories_kcal = _num(nutr.get("calories_kcal"))
-        product.protein = _nv(nutr.get("protein_g"))
-        product.fat = _nv(nutr.get("fat_g"))
-        product.carbohydrates = _nv(nutr.get("carbohydrates_g"))
-        product.fiber = _nv(nutr.get("fiber_g"))
-        product.sugars = _nv(nutr.get("sugars_g"))
-        product.sodium = _nv(nutr.get("sodium_g"))
+        # Provisional nutrition from OFF (per 100g). Values arrive in grams
+        # even for nutrients a label shows in mg — from_off converts them.
+        _apply_nutrients(product, nutrient_spec.from_off(
+            off_data.get("nutrients_per_100g") or {}
+        ))
 
     # --- Layer 2: USDA FDC (authoritative nutrition overrides OFF) ---
     if usda_data:
@@ -301,30 +318,13 @@ async def lookup(gtin: str) -> CanonicalProduct:
         if usda_brand:
             product.brand = usda_brand
 
-        nutrients = usda_data.get("nutrients")
-        if isinstance(nutrients, dict) and nutrients:
-            # Override nutrition with USDA values (authoritative)
-            energy = _num(_usda_nutrient(nutrients, "Energy"))
-            if energy is not None:
-                product.calories_kcal = energy
-            protein = _usda_nutrient(nutrients, "Protein")
-            if protein is not None:
-                product.protein = _nv(protein)
-            fat = _usda_nutrient(nutrients, "Total lipid (fat)")
-            if fat is not None:
-                product.fat = _nv(fat)
-            carbs = _usda_nutrient(nutrients, "Carbohydrate, by difference")
-            if carbs is not None:
-                product.carbohydrates = _nv(carbs)
-            fiber = _usda_nutrient(nutrients, "Fiber, total dietary")
-            if fiber is not None:
-                product.fiber = _nv(fiber)
-            sugars = _usda_nutrient(nutrients, "Sugars, total including NLEA")
-            if sugars is not None:
-                product.sugars = _nv(sugars)
-            sodium = _usda_nutrient(nutrients, "Sodium, Na")
-            if sodium is not None:
-                product.sodium = _nv(sodium, unit="mg")
+        # USDA is authoritative for nutrition and overrides OFF. Selected by
+        # nutrient *id*: FDC publishes energy twice under the same name
+        # ("Energy" in kcal and in kJ), so matching by name served whichever
+        # arrived last — cheddar at 1710 kcal instead of 409.
+        usda_nutrients = usda_data.get("nutrients")
+        if isinstance(usda_nutrients, list):
+            _apply_nutrients(product, nutrient_spec.from_usda(usda_nutrients))
 
         # Use USDA ingredients if OFF didn't have them
         if not product.ingredients_text:
@@ -343,6 +343,10 @@ async def lookup(gtin: str) -> CanonicalProduct:
             tag.split(":")[-1].replace("-", " ").title() if ":" in tag else tag
             for tag in off_categories[:5]
         ]
+
+    # Attribution is a licence condition for Open Food Facts (ODbL), so it
+    # accompanies the data it describes rather than living only in the docs.
+    product.attribution = attribution.for_sources(product.data_sources)
 
     if product.data_sources:
         _lookup_cache[key] = product.model_copy(deep=True)

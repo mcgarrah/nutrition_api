@@ -28,10 +28,18 @@ CANONICAL_FIELDS = {
     "calories_kcal",
     "protein",
     "fat",
+    "saturated_fat",
+    "trans_fat",
+    "cholesterol",
     "carbohydrates",
     "fiber",
     "sugars",
+    "added_sugars",
     "sodium",
+    "potassium",
+    "calcium",
+    "iron",
+    "vitamin_d",
     "image_url",
     "ingredients_text",
     "allergens",
@@ -39,6 +47,7 @@ CANONICAL_FIELDS = {
     "data_sources",
     "upstream_latency_ms",
     "cached",
+    "attribution",
 }
 
 SOURCE_NAMES = {"USDA_FDC", "OpenFoodFacts", "GS1_GPC"}

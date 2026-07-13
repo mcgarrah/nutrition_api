@@ -30,10 +30,10 @@ def test_extract_nutrients_maps_per_100g_keys():
     result = off._extract_nutrients(nutriments)
     assert result == {
         "calories_kcal": 44.0,
-        "protein_g": 0.1,
-        "fat_g": 0.0,
-        "carbohydrates_g": 11.0,
-        "sugars_g": 10.6,
+        "protein": 0.1,
+        "fat": 0.0,
+        "carbohydrates": 11.0,
+        "sugars": 10.6,
     }
 
 
@@ -49,7 +49,7 @@ def test_format_product_shapes_off_response():
     assert result["barcode"] == "123"
     assert result["product_name"] == "Test Cola"
     assert result["categories"] == ["en:beverages"]
-    assert result["nutrients_per_100g"] == {"fat_g": 1.5}
+    assert result["nutrients_per_100g"] == {"fat": 1.5}
     # Absent fields come through as None / empty, never KeyError
     assert result["image_url"] is None
     assert result["allergens"] == []
