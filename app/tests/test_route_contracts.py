@@ -212,7 +212,12 @@ def test_usda_food_by_id(monkeypatch):
     async def ok(fdc_id):
         return {"fdc_id": fdc_id, "description": "COLA"}
 
+    # is_available() must be stubbed too: the route settles the configuration
+    # question before calling, and CI has no FDC_API_KEY. Without this the test
+    # passes only on a machine that happens to have a key configured.
+    monkeypatch.setattr(usda_fdc, "is_available", lambda: True)
     monkeypatch.setattr(usda_fdc, "get_food", ok)
+
     assert client.get("/api/v1/usda/food/123").json()["fdc_id"] == 123
 
 
