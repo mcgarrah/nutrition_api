@@ -281,7 +281,9 @@ function render(p, rtt) {
           <h2>Round trip</h2>
           <div class="stat">${rtt.toFixed(0)}<small>ms</small></div>
           <p class="sub" style="margin:.35rem 0 0;font-size:.8125rem">
-            Repeat the same GTIN — the TTL cache should make it near-instant.</p>
+            ${p.cached
+              ? "Served from cache — the latencies below are from the original fetch, not this request."
+              : "Fresh fetch. Repeat the same GTIN to see the cache respond."}</p>
         </div>
         <div class="card" style="margin-bottom:0">
           <h2>Sources</h2>
@@ -291,7 +293,7 @@ function render(p, rtt) {
     </div>
 
     <div class="card">
-      <h2>Upstream latency</h2>
+      <h2>Upstream latency${p.cached ? " · from the original fetch" : ""}</h2>
       <div class="lat">${latencyBars(p)}</div>
     </div>
 

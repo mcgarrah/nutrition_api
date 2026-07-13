@@ -53,5 +53,16 @@ class CanonicalProduct(BaseModel):
     )
     upstream_latency_ms: dict[str, float] = Field(
         default_factory=dict,
-        description="Response time from each upstream source in milliseconds",
+        description=(
+            "Milliseconds each upstream took on the fetch that produced this "
+            "data. On a cached response these are the timings of that original "
+            "fetch, not of the request you just made — see `cached`."
+        ),
+    )
+    cached: bool = Field(
+        default=False,
+        description=(
+            "True when this response was served from the in-memory cache "
+            "without contacting any upstream."
+        ),
     )

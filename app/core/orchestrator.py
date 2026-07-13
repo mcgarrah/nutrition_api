@@ -17,6 +17,7 @@ import logging
 import math
 import os
 import time
+from urllib.parse import urlsplit
 
 from cachetools import TTLCache
 
@@ -165,6 +166,25 @@ def _text(value) -> str | None:
     return None
 
 
+def _http_url(value) -> str | None:
+    """Accept only an http(s) URL.
+
+    image_url comes from Open Food Facts, which is crowdsourced — the value is
+    attacker-influenceable, and we hand it to every consumer that renders it.
+    Unvalidated, "javascript:...", "data:text/html,<script>..." and
+    "file:///etc/passwd" all passed straight through. SPECS.md has always
+    documented this field as an HttpUrl; nothing enforced it.
+    """
+    text = _text(value)
+    if not text:
+        return None
+    parts = urlsplit(text.strip())
+    if parts.scheme in ("http", "https") and parts.netloc:
+        return text.strip()
+    logger.warning("Discarding non-http image URL %r", value)
+    return None
+
+
 def _str_list(value) -> list[str]:
     """Coerce an upstream tag list.
 
@@ -186,6 +206,17 @@ def _usda_nutrient(nutrients: dict, name: str) -> float | None:
     return None
 
 
+def _cache_key(gtin: str) -> str:
+    """Key the cache on the normalized barcode.
+
+    GTIN-8/12/13/14 are the same identifier at different zero-paddings, so
+    "028400642255" and "28400642255" name one product. Keying on the raw
+    string gives them separate entries and duplicate upstream fetches for
+    data we already hold.
+    """
+    return usda_fdc.normalize_gtin(gtin) or gtin
+
+
 async def lookup(gtin: str) -> CanonicalProduct:
     """Look up a product by GTIN/UPC and merge data from all sources.
 
@@ -193,10 +224,15 @@ async def lookup(gtin: str) -> CanonicalProduct:
     Results with data are cached in-memory for CACHE_TTL_S seconds;
     misses are not cached so transient upstream failures can recover.
     """
-    cached = _lookup_cache.get(gtin)
-    if cached is not None:
+    key = _cache_key(gtin)
+    hit = _lookup_cache.get(key)
+    if hit is not None:
         # Deep copy so callers can't mutate the cached entry
-        return cached.model_copy(deep=True)
+        product = hit.model_copy(deep=True)
+        # Echo the barcode as the caller wrote it, not as it was first cached
+        product.gtin = gtin
+        product.cached = True
+        return product
 
     # Parallel fetch from OFF and USDA
     (off_data, off_ms), (usda_data, usda_ms) = await asyncio.gather(
@@ -213,7 +249,7 @@ async def lookup(gtin: str) -> CanonicalProduct:
         product.data_sources.append("OpenFoodFacts")
         product.product_name = _text(off_data.get("product_name")) or product.product_name
         product.brand = _text(off_data.get("brands")) or product.brand
-        product.image_url = _text(off_data.get("image_url"))
+        product.image_url = _http_url(off_data.get("image_url"))
         product.ingredients_text = _text(off_data.get("ingredients_text"))
         product.allergens = _str_list(off_data.get("allergens"))
         product.labels = _str_list(off_data.get("labels"))
@@ -284,6 +320,6 @@ async def lookup(gtin: str) -> CanonicalProduct:
         ]
 
     if product.data_sources:
-        _lookup_cache[gtin] = product.model_copy(deep=True)
+        _lookup_cache[key] = product.model_copy(deep=True)
 
     return product
