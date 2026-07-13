@@ -13,10 +13,13 @@ product, so most of these tests pin that boundary.
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
+import asyncio
+import time
+
 import pytest
 
 from app.core import open_food_facts as off
-from app.core import usda_fdc
+from app.core import resilience, usda_fdc
 
 
 @pytest.fixture(autouse=True)
@@ -371,3 +374,46 @@ async def test_off_connectivity_error_is_reported_not_raised(monkeypatch):
     status = await off.check_connectivity()
     assert status["status"] == "error"
     assert "unreachable" in status["detail"]
+
+
+# ══ Health probes must be bounded ═════════════════════════════════════
+
+async def test_off_health_probe_times_out_rather_than_hanging(monkeypatch):
+    """The availability trap: /health is what DigitalOcean and systemd poll.
+    An unbounded probe lets a stalled *third party* hang the health endpoint,
+    so the platform declares us unhealthy and restarts a container that was
+    perfectly able to keep serving degraded responses."""
+    monkeypatch.setattr(resilience, "UPSTREAM_TIMEOUT_S", 0.1)
+
+    async def stalls(barcode):
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(off, "get_product", stalls)
+
+    start = time.monotonic()
+    status = await off.check_connectivity()
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 2.0, f"health probe hung for {elapsed:.1f}s"
+    assert status["status"] == "error"
+    assert "timed out" in status["detail"]
+
+
+async def test_usda_health_probe_times_out_rather_than_hanging(monkeypatch):
+    monkeypatch.setattr(resilience, "UPSTREAM_TIMEOUT_S", 0.1)
+
+    class StallingClient:
+        def search(self, query, page_size=1):
+            # Outlives the timeout, but stays short: wait_for cancels the
+            # await, not the blocking thread underneath it.
+            time.sleep(0.5)
+
+    monkeypatch.setattr(usda_fdc, "_get_fdc_client", lambda: StallingClient())
+
+    start = time.monotonic()
+    status = await usda_fdc.check_connectivity()
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 2.0, f"health probe hung for {elapsed:.1f}s"
+    assert status["status"] == "error"
+    assert "timed out" in status["detail"]

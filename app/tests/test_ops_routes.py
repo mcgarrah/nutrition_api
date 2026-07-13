@@ -100,3 +100,46 @@ def test_health_degraded_when_gpc_database_is_broken(monkeypatch, healthy_upstre
     assert body["status"] == "degraded"
     assert body["gpc"]["status"] == "error"
     assert "no such table" in body["gpc"]["detail"]
+
+
+# ── /health must be bounded ───────────────────────────────────────────
+
+def test_health_reports_a_stalled_upstream_as_degraded_not_500(monkeypatch, healthy_upstreams):
+    """A sick upstream degrades the report; it never fails the endpoint."""
+    async def timed_out():
+        return {"status": "error", "detail": "timed out after 2.0s"}
+
+    monkeypatch.setattr(off, "check_connectivity", timed_out)
+
+    resp = client.get("/api/v1/health")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "degraded"
+    assert "timed out" in body["open_food_facts"]["detail"]
+    assert body["gpc"]["status"] == "ok"        # the parts that work still work
+
+
+async def test_health_probes_run_concurrently(monkeypatch, gpc_db):
+    """Serial probes would cost the sum of the timeouts, not the max."""
+    import asyncio as _asyncio
+    import time
+
+    from app.main import health
+
+    async def slow_usda():
+        await _asyncio.sleep(0.15)
+        return {"status": "ok"}
+
+    async def slow_off():
+        await _asyncio.sleep(0.15)
+        return {"status": "ok"}
+
+    monkeypatch.setattr(usda_fdc, "check_connectivity", slow_usda)
+    monkeypatch.setattr(off, "check_connectivity", slow_off)
+
+    start = time.monotonic()
+    await health()
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 0.28, f"probes ran serially ({elapsed:.2f}s)"

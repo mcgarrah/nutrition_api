@@ -203,3 +203,71 @@ def test_search_category_enum_is_published_in_the_schema():
     assert set(category["schema"]["enum"]) == {
         "all", "segments", "families", "classes", "bricks",
     }
+
+
+# ── Pagination links must preserve the caller's filters ───────────────
+
+def test_next_link_preserves_a_code_filter():
+    """Following `next` on a filtered list must stay inside that filter.
+    Rebuilding the URL from the path alone dropped it, so page 2 silently
+    returned rows from the whole taxonomy — a different set than the `count`
+    beside it described."""
+    body = client.get(
+        "/api/gpc/bricks/", params={"class_code": "50202300", "page_size": 1},
+    ).json()
+
+    assert body["count"] == 2                   # Cola Drinks + Lemonade
+    assert "class_code=50202300" in body["next"]
+
+    page2 = client.get(body["next"]).json()
+    assert page2["count"] == 2                  # still the filtered total
+    assert page2["results"][0]["brick_code"] == "10000202"   # Lemonade, not a
+    assert "class_code=50202300" in page2["previous"]        # random brick
+
+
+def test_next_link_preserves_a_search_filter():
+    # "e" matches Lemonade and Apples, but not Cola Drinks — two results
+    body = client.get(
+        "/api/gpc/bricks/", params={"search": "e", "page_size": 1},
+    ).json()
+
+    assert body["count"] == 2
+    assert "search=e" in body["next"]
+
+    page2 = client.get(body["next"]).json()
+    assert page2["count"] == 2                  # still the filtered total
+    assert page2["results"][0]["brick_code"] == "10005900"   # Apples
+
+
+def test_pagination_links_preserve_combined_filters():
+    body = client.get(
+        "/api/gpc/families/",
+        params={"search": "e", "segment_code": "50000000", "page_size": 1},
+    ).json()
+
+    assert "search=e" in body["next"]
+    assert "segment_code=50000000" in body["next"]
+
+    page2 = client.get(body["next"]).json()
+    assert page2["count"] == body["count"]
+
+
+def test_following_next_then_previous_returns_the_first_page():
+    """The round trip a paging client actually performs."""
+    first = client.get(
+        "/api/gpc/bricks/", params={"class_code": "50202300", "page_size": 1},
+    ).json()
+    second = client.get(first["next"]).json()
+    back = client.get(second["previous"]).json()
+
+    assert back["results"] == first["results"]
+    assert back["count"] == first["count"]
+
+
+def test_paging_links_do_not_duplicate_parameters():
+    """include_query_params must override page/page_size, not append to them."""
+    body = client.get("/api/gpc/bricks/", params={"page": 1, "page_size": 1}).json()
+
+    assert body["next"].count("page=") == 1
+    assert body["next"].count("page_size=") == 1
+    assert "page=2" in body["next"]
