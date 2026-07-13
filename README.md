@@ -59,6 +59,29 @@ sudo install -m 644 deploy/nutrition-api.service /etc/systemd/system/
 sudo systemctl enable --now nutrition-api.service
 ```
 
+### Cached upstream responses
+
+Every Open Food Facts and USDA response is written to `data/responses/` as an individual JSON record — the payload as it arrived, plus a UTC timestamp — and served from there on a repeat lookup.
+
+This is not only an optimisation. Open Food Facts allows **15 requests per minute per IP** and enforces it with an IP ban, and the in-memory cache dies with the process — so before this, *every deploy re-spent that entire allowance* re-fetching barcodes already seen. A stored response costs no request and no rate-limit budget.
+
+```bash
+# Turn the corpus into a queryable database
+python scripts/import_store_to_sqlite.py
+
+sqlite3 data/responses.sqlite3 \
+  "SELECT description, amount, unit FROM usda_foods f
+     JOIN usda_nutrients n USING (fdc_id) WHERE n.nutrient_id = 1008;"
+```
+
+| Setting | Default | |
+| :--- | :--- | :--- |
+| `RESPONSE_STORE_DIR` | `data/responses` | where records are written |
+| `RESPONSE_STORE_TTL_DAYS` | `30` | how long a record is served before re-fetching |
+| `RESPONSE_STORE_ENABLED` | `1` | set `0` to disable |
+
+Timestamps are UTC ISO-8601 with an explicit offset, so they sort correctly as text in SQLite. Nutrients are keyed by **id**, never by name — FDC publishes energy twice under the name "Energy" (kcal and kJ), and a name key silently keeps whichever came last.
+
 ### Tests & Linting
 
 ```bash

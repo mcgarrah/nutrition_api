@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from .core import attribution
 from .core import ratelimit
+from .core import store
 from .database import close_db
 from .gpc.routes import router as gpc_router
 from .core.usda_routes import router as usda_router
@@ -195,6 +196,11 @@ async def health():
     result["open_food_facts"] = off_status
     if off_status["status"] == "error":
         result["status"] = "degraded"
+
+    # The response store is what keeps repeat lookups off the upstreams, so its
+    # state is worth reporting: a store that has quietly stopped writing means
+    # every restart goes back to spending Open Food Facts' allowance.
+    result["response_store"] = store.stats()
 
     return result
 

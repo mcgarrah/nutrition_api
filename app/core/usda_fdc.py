@@ -16,6 +16,7 @@ from usda_fdc.exceptions import FdcResourceNotFoundError
 
 from . import ratelimit
 from . import resilience
+from . import store
 
 load_dotenv()
 
@@ -105,6 +106,10 @@ async def get_food(fdc_id: int | str) -> dict | None:
     if not client:
         return None
 
+    stored = store.get(store.USDA_FOOD, fdc_id)
+    if stored is not None:
+        return stored
+
     ratelimit.spend(ratelimit.usda_limiter, "USDA_FDC")
 
     try:
@@ -118,7 +123,7 @@ async def get_food(fdc_id: int | str) -> dict | None:
         logger.info("USDA FDC has no food with id %s", fdc_id)
         return None
 
-    return {
+    record = {
         "fdc_id": food.fdc_id,
         "description": food.description,
         "data_type": food.data_type,
@@ -136,6 +141,9 @@ async def get_food(fdc_id: int | str) -> dict | None:
             for n in food.nutrients
         ],
     }
+
+    store.put(store.USDA_FOOD, fdc_id, record)
+    return record
 
 
 def normalize_gtin(gtin: str) -> str:
@@ -176,6 +184,13 @@ async def search_by_upc(upc: str) -> dict | None:
     if not target:
         return None
 
+    # A barcode's FDC id does not change. Remembering it lets us skip the
+    # *search* — the call that spends budget and that FDC answers fuzzily —
+    # and go straight to the food.
+    known_id = store.get(store.USDA_UPC, target)
+    if known_id is not None:
+        return await get_food(known_id)
+
     ratelimit.spend(ratelimit.usda_limiter, "USDA_FDC")
 
     result = await _run_sync(
@@ -184,6 +199,7 @@ async def search_by_upc(upc: str) -> dict | None:
 
     for food in result.foods:
         if normalize_gtin(food.gtin_upc or "") == target:
+            store.put(store.USDA_UPC, target, food.fdc_id)
             return await get_food(food.fdc_id)
 
     logger.info("USDA FDC has no branded food matching GTIN %s", upc)

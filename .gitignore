@@ -219,3 +219,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Cached upstream responses (the corpus; rebuild with the service or import to SQLite)
+data/responses/
+data/responses.sqlite3
