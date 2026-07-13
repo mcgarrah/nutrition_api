@@ -9,7 +9,6 @@ Licensed under MIT License
 """
 import asyncio
 import logging
-from functools import partial
 from typing import Any
 
 from dotenv import load_dotenv
@@ -19,6 +18,9 @@ from . import resilience
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Threads dedicated to USDA FDC, so a stall here cannot starve Open Food Facts
+_executor = resilience.make_executor("usda")
 
 # Lazy-initialized singleton client
 _fdc_client = None
@@ -45,9 +47,12 @@ def _get_fdc_client():
 
 
 async def _run_sync(func, *args, **kwargs) -> Any:
-    """Run a synchronous function in the default thread pool executor."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, partial(func, *args, **kwargs))
+    """Run a blocking USDA call on this source's own thread pool.
+
+    Not the default executor: a stalled USDA would hold threads that OFF then
+    could not get. See resilience.make_executor.
+    """
+    return await resilience.run_in_executor(_executor, func, *args, **kwargs)
 
 
 def is_available() -> bool:
