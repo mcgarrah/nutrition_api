@@ -28,6 +28,7 @@ from . import open_food_facts as off
 from . import attribution
 from . import nutrients as nutrient_spec
 from . import ratelimit
+from . import resilience
 from .resilience import off_breaker, usda_breaker, CircuitOpenError
 from ..database import get_db
 
@@ -39,6 +40,11 @@ logger = logging.getLogger(__name__)
 CACHE_MAX_SIZE = int(os.environ.get("LOOKUP_CACHE_MAX_SIZE", "1024"))
 CACHE_TTL_S = float(os.environ.get("LOOKUP_CACHE_TTL_S", "300"))
 _lookup_cache: TTLCache = TTLCache(maxsize=CACHE_MAX_SIZE, ttl=CACHE_TTL_S)
+
+# A USDA barcode lookup costs two round trips: the fuzzy search, and then the
+# food it matched. The store collapses this to one on a repeat visit, but a
+# cold lookup needs the budget for both.
+USDA_LOOKUP_ROUND_TRIPS = 2
 
 
 async def _fetch_off(barcode: str) -> tuple[dict | None, float]:
@@ -72,7 +78,14 @@ async def _fetch_usda(barcode: str) -> tuple[dict | None, float]:
     start = time.monotonic()
 
     try:
-        data = await usda_breaker.call(lambda: usda_fdc.search_by_upc(barcode))
+        # search_by_upc is two round trips to FDC — a search, then the food it
+        # matched — and each is separately bounded by the client's own socket
+        # timeout. Giving the pair a single call's allowance timed the second
+        # one out and silently dropped USDA from the response.
+        data = await usda_breaker.call(
+            lambda: usda_fdc.search_by_upc(barcode),
+            timeout=resilience.UPSTREAM_TIMEOUT_S * USDA_LOOKUP_ROUND_TRIPS,
+        )
     except (ratelimit.RateLimitedError, FdcRateLimitError) as e:
         # Either we refused our own call to stay inside FDC's ceiling, or FDC
         # refused it for us. Both are budgeting facts rather than outages, so

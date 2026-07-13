@@ -16,6 +16,7 @@ from typing import Any
 from . import nutrients
 from . import ratelimit
 from . import resilience
+from . import store
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,14 @@ async def get_product(barcode: str) -> dict | None:
     if not api:
         return None
 
+    # Consult the disk store first. A stored response costs no request, so it
+    # is checked *before* the budget is spent — Open Food Facts allows fifteen
+    # requests a minute, and re-fetching a barcode we already hold is exactly
+    # the waste that allowance cannot afford.
+    stored = store.get(store.OFF_PRODUCT, barcode)
+    if stored is not None:
+        return _format_product(stored)
+
     # 15 product reads/minute per IP, enforced with an IP ban. Spent at the
     # client, so every caller is covered — the canonical lookup, the direct
     # /api/v1/off/product endpoint, and the health probe alike.
@@ -117,6 +126,10 @@ async def get_product(barcode: str) -> dict | None:
     )
     if not data or not data.get("product_name"):
         return None
+
+    # Store what the upstream actually said, not what we made of it: our
+    # formatting changes, the record of their answer should not.
+    store.put(store.OFF_PRODUCT, barcode, data)
     return _format_product(data)
 
 

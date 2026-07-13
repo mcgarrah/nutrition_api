@@ -151,17 +151,28 @@ class CircuitBreaker:
                 )
             self._opened_at = time.monotonic()
 
-    async def call(self, coro_fn: Callable[[], Awaitable[Any]]) -> Any:
+    async def call(
+        self,
+        coro_fn: Callable[[], Awaitable[Any]],
+        timeout: float | None = None,
+    ) -> Any:
         """Run an async callable through the breaker with a timeout.
 
-        Raises CircuitOpenError when the circuit is open, TimeoutError
-        when the call exceeds UPSTREAM_TIMEOUT_S. Any exception (including
-        timeout) counts as a failure.
+        `timeout` defaults to UPSTREAM_TIMEOUT_S, which bounds a single upstream
+        call. An operation that makes *several* round trips needs a budget for
+        each of them: a USDA barcode lookup is a search followed by a fetch, and
+        holding the pair to one call's allowance timed it out and dropped USDA
+        from the response — intermittently, depending on how quick FDC felt.
+
+        Raises CircuitOpenError when the circuit is open, TimeoutError when the
+        allowance is exceeded. A timeout counts as a failure; a rate limit and a
+        "not found" do not.
         """
         if self.is_open:
             raise CircuitOpenError(f"{self.name} circuit is open")
+        budget = UPSTREAM_TIMEOUT_S if timeout is None else timeout
         try:
-            result = await asyncio.wait_for(coro_fn(), timeout=UPSTREAM_TIMEOUT_S)
+            result = await asyncio.wait_for(coro_fn(), timeout=budget)
         except (RateLimitedError, FdcRateLimitError):
             # A rate limit — ours or theirs — is a budgeting fact, not an
             # outage. Recording it as a failure would trip the circuit and keep

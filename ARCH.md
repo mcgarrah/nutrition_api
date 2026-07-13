@@ -45,6 +45,12 @@ To optimize hosting costs on the **DigitalOcean App Platform** and avoid relianc
 
 The taxonomy import is **atomic and cross-process locked**. Every uvicorn worker runs the startup lifespan, so `--workers N` means N processes reach the importer on the same boot. It builds into a temporary file and `os.replace()`s it into position, and holds an exclusive `flock` for the whole decide-and-import sequence — so a second worker waits, then finds the work already done rather than re-downloading 27 MB and rebuilding the same file underneath the first.
 
+3. **On-Disk Response Store:** every upstream response is kept as an individual JSON record under `data/responses/`, with the payload as it arrived and a UTC timestamp, and served on a repeat lookup within its TTL (default 30 days — food composition is close to static).
+
+   This is load-bearing rather than decorative. The in-memory cache dies with the process, so every deploy re-spent Open Food Facts' entire 15-requests-per-minute allowance re-fetching barcodes already seen; and it is per-worker, so two workers paid twice. A record on disk costs neither a request nor a rate-limit token. It also removes the *search* call from a USDA barcode lookup on the second visit, by remembering which FDC id a barcode resolved to.
+
+   Writes are atomic (temp file + `os.replace`), so nothing ever reads a half-written record, and `scripts/import_store_to_sqlite.py` turns the corpus into a queryable database — the payload preserved verbatim, with the fields worth querying lifted out beside it.
+
 ### 3. Thread Isolation Between Upstreams
 
 Both vendor SDKs (`usda-fdc`, `openfoodfacts`) are synchronous, so every call occupies a thread for its entire duration. Each source therefore gets its **own bounded thread pool** (`UPSTREAM_MAX_THREADS`, default 8) rather than sharing asyncio's default executor.

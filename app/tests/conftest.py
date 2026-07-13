@@ -18,7 +18,22 @@ from app.core import open_food_facts as off
 from app.core import orchestrator
 from app.core import ratelimit
 from app.core import resilience
+from app.core import store
 from app.core import usda_fdc
+
+
+@pytest.fixture(autouse=True)
+def isolated_response_store(tmp_path, monkeypatch):
+    """Point the on-disk response store at a fresh directory for every test.
+
+    Without this the suite reads and writes the developer's real corpus: tests
+    would pass because a record happened to be cached, and a rate-limit test
+    would never spend a token because the store answered first. The suite must
+    depend on nothing outside itself — the same lesson CI taught when a test
+    quietly borrowed a configured FDC_API_KEY.
+    """
+    monkeypatch.setattr(store, "STORE_DIR", tmp_path / "responses")
+    monkeypatch.setattr(store, "STORE_ENABLED", True)
 
 
 @pytest.fixture(autouse=True)
