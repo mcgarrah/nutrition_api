@@ -3,6 +3,10 @@ uvicorn[standard]>=0.32.0
 pydantic>=2.10.0
 aiosqlite>=0.20.0
 gs1-gpc>=0.3.3
+# Imported directly by scripts/import_gpc_xml.py for the GS1 version check.
+# It arrives transitively via gs1-gpc, but a direct import deserves a direct
+# dependency: otherwise gs1-gpc dropping it breaks us with no warning here.
+gpcc>=1.1.0
 usda-fdc>=0.1.10
 python-dotenv>=1.0.0
 openfoodfacts>=5.0.0

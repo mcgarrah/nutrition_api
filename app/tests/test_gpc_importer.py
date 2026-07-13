@@ -319,9 +319,9 @@ def test_remote_version_returns_latest_publication(monkeypatch):
     async def fake_get_publications(lang):
         return [Pub()]
 
-    import gpcc._crawlers as crawlers
-    monkeypatch.setattr(crawlers, "get_language", fake_get_language)
-    monkeypatch.setattr(crawlers, "get_publications", fake_get_publications)
+    import gpcc
+    monkeypatch.setattr(gpcc, "get_language", fake_get_language)
+    monkeypatch.setattr(gpcc, "get_publications", fake_get_publications)
 
     assert importer.get_latest_remote_version() == "v20260520"
 
@@ -333,9 +333,9 @@ def test_remote_version_none_when_no_publications(monkeypatch):
     async def fake_get_publications(lang):
         return []
 
-    import gpcc._crawlers as crawlers
-    monkeypatch.setattr(crawlers, "get_language", fake_get_language)
-    monkeypatch.setattr(crawlers, "get_publications", fake_get_publications)
+    import gpcc
+    monkeypatch.setattr(gpcc, "get_language", fake_get_language)
+    monkeypatch.setattr(gpcc, "get_publications", fake_get_publications)
 
     assert importer.get_latest_remote_version() is None
 
@@ -345,8 +345,8 @@ def test_remote_version_none_when_gs1_errors(monkeypatch):
     async def boom(code):
         raise RuntimeError("403 Forbidden")
 
-    import gpcc._crawlers as crawlers
-    monkeypatch.setattr(crawlers, "get_language", boom)
+    import gpcc
+    monkeypatch.setattr(gpcc, "get_language", boom)
 
     assert importer.get_latest_remote_version() is None
 
@@ -375,8 +375,8 @@ def test_remote_version_none_on_timeout(monkeypatch):
     async def hangs(code):
         raise asyncio.TimeoutError()
 
-    import gpcc._crawlers as crawlers
-    monkeypatch.setattr(crawlers, "get_language", hangs)
+    import gpcc
+    monkeypatch.setattr(gpcc, "get_language", hangs)
 
     assert importer.get_latest_remote_version() is None
 
@@ -425,3 +425,46 @@ def test_unusable_remote_version_is_ignored():
     """Symmetrically: never rebuild the database on a garbage remote version."""
     assert importer.is_remote_newer("garbage", "20251127") is False
     assert importer.is_remote_newer(None, "20251127") is False
+
+
+# ── gpcc is used through its public API ───────────────────────────────
+
+def test_gs1_version_check_uses_the_public_gpcc_api():
+    """We import get_language/get_publications from the gpcc package root.
+
+    They were previously taken from gpcc._crawlers — a private module — for no
+    benefit: gpcc re-exports both and lists them in __all__. A private module
+    can be renamed in a patch release and silently break the auto-update.
+    """
+    import inspect
+
+    source = inspect.getsource(importer.get_latest_remote_version)
+
+    assert "from gpcc import get_language, get_publications" in source
+    assert "from gpcc._crawlers import" not in source
+
+
+def test_gpcc_still_exports_what_we_import():
+    """Canary on the dependency: if gpcc stops exporting these, the GS1
+    version check breaks and the taxonomy quietly stops auto-updating."""
+    import gpcc
+
+    assert "get_language" in gpcc.__all__
+    assert "get_publications" in gpcc.__all__
+    assert callable(gpcc.get_language)
+    assert callable(gpcc.get_publications)
+
+
+def test_gpcc_is_a_declared_dependency():
+    """We import gpcc directly, so it must be declared directly.
+
+    It arrives transitively via gs1-gpc today; if that ever changes, an
+    undeclared import breaks with no warning from the requirements file.
+    """
+    from pathlib import Path
+
+    requirements = (
+        Path(__file__).resolve().parents[2] / "requirements.txt"
+    ).read_text()
+
+    assert "gpcc" in requirements
