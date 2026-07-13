@@ -8,6 +8,7 @@ exist to keep it that way, because the failure mode is silent and total.
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
+import json
 import sqlite3
 
 import pytest
@@ -291,3 +292,34 @@ async def test_upstream_returning_null_name_does_not_500(monkeypatch, gpc_db):
 
     resp = client.get("/api/v1/lookup/028400642255")
     assert resp.status_code != 500
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), "nan", "Infinity"])
+async def test_non_finite_nutrient_never_reaches_the_response(value, monkeypatch, gpc_db):
+    """NaN/Infinity are valid floats but invalid JSON: Python emits the bare
+    tokens NaN/Infinity, which strict parsers (Go, Jackson, JSON.parse) reject
+    — breaking the whole response, not just the field."""
+    async def off_junk(barcode):
+        return {
+            "product_name": "Weird",
+            "categories": [],
+            "nutrients_per_100g": {"protein_g": value, "calories_kcal": value},
+        }
+
+    async def usda_none(upc):
+        return None
+
+    monkeypatch.setattr(off, "get_product", off_junk)
+    monkeypatch.setattr(usda_fdc, "search_by_upc", usda_none)
+
+    resp = client.get("/api/v1/lookup/028400642255")
+
+    assert resp.status_code == 200
+    assert resp.json()["protein"] is None
+    assert resp.json()["calories_kcal"] is None
+    # The payload must parse under a strict JSON reader
+    json.loads(resp.text, parse_constant=_reject_constant)
+
+
+def _reject_constant(token):
+    raise AssertionError(f"response contains non-JSON token: {token}")

@@ -344,3 +344,50 @@ async def test_reported_latency_tracks_actual_upstream_time(monkeypatch, gpc_db)
 
     assert product.upstream_latency_ms["OpenFoodFacts"] >= 50
     assert product.upstream_latency_ms["USDA_FDC"] < 50
+
+
+# ══ Breaker isolation ═════════════════════════════════════════════════
+
+async def test_one_upstream_tripping_does_not_trip_the_other(monkeypatch, gpc_db):
+    """The breakers are per-source. If a USDA outage also silenced OFF, a
+    single vendor could take the whole service dark."""
+    async def off_ok(barcode):
+        return {"product_name": "Cola", "nutrients_per_100g": {}, "categories": []}
+
+    async def usda_down(upc):
+        raise ConnectionError("FDC down")
+
+    monkeypatch.setattr(off, "get_product", off_ok)
+    monkeypatch.setattr(usda_fdc, "search_by_upc", usda_down)
+
+    for i in range(resilience.usda_breaker.failure_threshold + 2):
+        product = await orchestrator.lookup(f"11111111000{i}")
+
+    assert resilience.usda_breaker.is_open
+    assert not resilience.off_breaker.is_open
+    assert product.data_sources == ["OpenFoodFacts"]     # OFF still serving
+
+
+async def test_breakers_are_independent_objects():
+    assert resilience.usda_breaker is not resilience.off_breaker
+    assert resilience.usda_breaker.name != resilience.off_breaker.name
+
+
+# ══ Configuration ═════════════════════════════════════════════════════
+
+def test_upstream_timeout_is_configurable_and_bounded():
+    """CLAUDE.md caps upstream calls at 2.0s — the default must honour that."""
+    assert resilience.UPSTREAM_TIMEOUT_S <= 2.0
+
+
+def test_cache_is_bounded_by_default():
+    """An unbounded cache is a memory leak under barcode churn."""
+    assert orchestrator.CACHE_MAX_SIZE > 0
+    assert orchestrator.CACHE_TTL_S > 0
+    assert orchestrator._lookup_cache.maxsize == orchestrator.CACHE_MAX_SIZE
+
+
+def test_breaker_defaults_are_sane():
+    for breaker in (resilience.usda_breaker, resilience.off_breaker):
+        assert breaker.failure_threshold >= 1
+        assert breaker.cooldown_s > 0
