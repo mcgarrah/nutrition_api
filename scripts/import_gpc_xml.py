@@ -17,7 +17,10 @@ Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
 import argparse
+import contextlib
+import fcntl
 import logging
+import os
 import sqlite3
 import sys
 import xml.etree.ElementTree as ET
@@ -307,10 +310,21 @@ def import_food_gpc(xml_path: str, db_path: Path) -> dict:
     gpc_version = extract_version_from_path(xml_path, xml_date)
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    if db_path.exists():
-        db_path.unlink()
 
-    conn = sqlite3.connect(db_path)
+    # Build into a temporary file beside the target, then swap it in atomically.
+    #
+    # Deleting the live database and rebuilding it in place was destructive in
+    # three ways: a worker already serving requests kept an open handle to the
+    # unlinked inode, a second importer writing the same file hit "disk I/O
+    # error", and a crash part-way through left a half-built database that the
+    # next boot happily mistook for a good one. os.replace is atomic on POSIX
+    # within a filesystem: readers see either the old database or the new one,
+    # never a partial one.
+    tmp_path = db_path.with_name(f"{db_path.name}.building-{os.getpid()}")
+    if tmp_path.exists():
+        tmp_path.unlink()
+
+    conn = sqlite3.connect(tmp_path)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
 
@@ -397,7 +411,35 @@ def import_food_gpc(xml_path: str, db_path: Path) -> dict:
 
     conn.commit()
     conn.close()
+
+    # Atomic swap: the target either is the old database or is the new one.
+    os.replace(tmp_path, db_path)
+
     return counts
+
+
+@contextlib.contextmanager
+def import_lock(db_path: Path):
+    """Serialize importers across processes.
+
+    Every uvicorn worker runs the startup lifespan, so `--workers 2` means two
+    processes reach this code at the same boot. Both would decide an import is
+    due, and both would build the same database — which in practice means one
+    of them dies with "disk I/O error" while the other is mid-write.
+
+    The lock is held for the whole decide-and-import sequence, and it blocks
+    rather than skipping: a worker that arrives second must not race ahead and
+    start serving before the database it needs actually exists. It waits, then
+    re-checks and finds the work already done.
+    """
+    lock_path = db_path.with_name(f"{db_path.name}.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "w") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 def main():
@@ -411,6 +453,14 @@ def main():
     )
     args = parser.parse_args()
 
+    # Held for the whole decide-and-import sequence: two uvicorn workers boot
+    # at once, and without this both conclude an import is due and then race to
+    # build the same file.
+    with import_lock(args.db):
+        _run_import(args)
+
+
+def _run_import(args) -> None:
     # Auto-update mode: compare local version to remote, skip if current
     if args.auto_update:
         stored = get_stored_version(args.db)

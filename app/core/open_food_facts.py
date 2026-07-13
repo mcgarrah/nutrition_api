@@ -38,8 +38,13 @@ def _get_off_api():
         return _off_api
     try:
         import openfoodfacts
+        # Bound the socket to the same window we bound the await to. The SDK
+        # defaults to 10s, but asyncio.wait_for gives up at UPSTREAM_TIMEOUT_S
+        # and cannot cancel the blocking call underneath — so a stalled OFF
+        # would keep holding its thread long after the caller had moved on.
         _off_api = openfoodfacts.API(
             user_agent="NutritionAPI/0.1 (mcgarrah@gmail.com)",
+            timeout=resilience.UPSTREAM_TIMEOUT_S,
         )
         logger.info("Open Food Facts client initialized.")
         return _off_api
