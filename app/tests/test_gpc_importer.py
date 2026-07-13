@@ -468,3 +468,92 @@ def test_gpcc_is_a_declared_dependency():
     ).read_text()
 
     assert "gpcc" in requirements
+
+
+# ── Atomic build & cross-process locking ──────────────────────────────
+# Every uvicorn worker runs the startup lifespan, so `--workers 2` means two
+# processes reach the importer at the same boot. It used to unlink the live
+# database and rebuild it in place, which meant: a worker already serving held
+# an open handle to a deleted inode, a second importer hit "disk I/O error"
+# mid-write, and a crash part-way left a half-built database that the next boot
+# mistook for a good one.
+
+def test_import_is_atomic_no_partial_database_is_ever_visible(food_xml, db_path, monkeypatch):
+    """A failure part-way through must leave the previous database untouched,
+    not a half-written one that looks valid."""
+    importer.import_food_gpc(str(food_xml), db_path)
+    good_bricks = scalar(db_path, "SELECT COUNT(*) FROM bricks")
+    assert good_bricks == 2
+
+    # Blow up after the schema is created but before the swap
+    real_replace = importer.os.replace
+
+    def explode(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(importer.os, "replace", explode)
+
+    with pytest.raises(OSError):
+        importer.import_food_gpc(str(food_xml), db_path)
+
+    monkeypatch.setattr(importer.os, "replace", real_replace)
+
+    # The original database is still intact and complete
+    assert scalar(db_path, "SELECT COUNT(*) FROM bricks") == good_bricks
+    assert rows(db_path, "PRAGMA integrity_check")[0][0] == "ok"
+
+
+def test_import_does_not_unlink_the_live_database(food_xml, db_path):
+    """The old code deleted the target first. A worker already serving from it
+    kept an open handle to the deleted inode."""
+    importer.import_food_gpc(str(food_xml), db_path)
+    original_inode = db_path.stat().st_ino
+
+    importer.import_food_gpc(str(food_xml), db_path)
+
+    # The file was replaced atomically, so it is a *new* inode — the old one
+    # was never truncated out from under an open reader.
+    assert db_path.stat().st_ino != original_inode
+    assert scalar(db_path, "SELECT COUNT(*) FROM bricks") == 2
+
+
+def test_import_leaves_no_temporary_files_behind(food_xml, db_path):
+    importer.import_food_gpc(str(food_xml), db_path)
+
+    leftovers = list(db_path.parent.glob("*.building-*"))
+    assert leftovers == []
+
+
+def test_import_lock_serializes_two_processes(tmp_path):
+    """The lock must actually exclude — not merely exist."""
+    import multiprocessing
+    import time
+
+    db = tmp_path / "gpc.sqlite3"
+    order = multiprocessing.Manager().list()
+
+    def hold_lock(tag, hold_s):
+        with importer.import_lock(db):
+            order.append(f"{tag}-enter")
+            time.sleep(hold_s)
+            order.append(f"{tag}-exit")
+
+    first = multiprocessing.Process(target=hold_lock, args=("a", 0.4))
+    first.start()
+    time.sleep(0.1)                       # let it take the lock
+    second = multiprocessing.Process(target=hold_lock, args=("b", 0.0))
+    second.start()
+
+    first.join(timeout=10)
+    second.join(timeout=10)
+
+    # b must not have entered while a was inside
+    assert list(order) == ["a-enter", "a-exit", "b-enter", "b-exit"]
+
+
+def test_import_lock_is_reentrant_across_sequential_calls(tmp_path):
+    db = tmp_path / "gpc.sqlite3"
+    with importer.import_lock(db):
+        pass
+    with importer.import_lock(db):
+        pass    # must not deadlock on the second acquisition

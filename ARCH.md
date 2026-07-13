@@ -43,6 +43,8 @@ To optimize hosting costs on the **DigitalOcean App Platform** and avoid relianc
    The cache is **per worker process**. Running `--workers N` gives N independent caches, so each worker warms separately and a repeated GTIN can miss until every worker has seen it. That is the accepted cost of avoiding a shared cache tier (see the Redis note above); with the default two workers it means at most one extra upstream fetch per hot barcode.
 2. **Bundled SQLite Database:** Serves as a static read-only cache baked into the Docker image at build time, storing the GS1 Global Product Classification taxonomy (food segments) to enable immediate local lookups without network overhead. At runtime the app can self-update the taxonomy from GS1 when a newer release is published.
 
+The taxonomy import is **atomic and cross-process locked**. Every uvicorn worker runs the startup lifespan, so `--workers N` means N processes reach the importer on the same boot. It builds into a temporary file and `os.replace()`s it into position, and holds an exclusive `flock` for the whole decide-and-import sequence — so a second worker waits, then finds the work already done rather than re-downloading 27 MB and rebuilding the same file underneath the first.
+
 ### 3. Thread Isolation Between Upstreams
 
 Both vendor SDKs (`usda-fdc`, `openfoodfacts`) are synchronous, so every call occupies a thread for its entire duration. Each source therefore gets its **own bounded thread pool** (`UPSTREAM_MAX_THREADS`, default 8) rather than sharing asyncio's default executor.

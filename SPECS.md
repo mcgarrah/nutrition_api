@@ -39,6 +39,22 @@ Retrieves a standardized, consolidated profile of a food product using its GTIN/
 #### Error Responses
 - `404 Not Found` — no upstream source has any data for the GTIN.
 - `422 Unprocessable Entity` — the GTIN is not a valid numeric barcode string.
+- `429 Too Many Requests` — the caller exceeded the inbound rate limit. Carries a `Retry-After` header (seconds).
+
+## 4. Rate Limits
+
+**Inbound** — 60 requests/minute per client IP, burst 20 (`INBOUND_RATE_PER_MIN`, `INBOUND_BURST`). `/api/v1/health`, `/api/v1/version`, the docs, and the UI are exempt: the platform polls `/health`, and a 429 there reads as "unhealthy".
+
+**Outbound** — the service throttles its *own* upstream usage to stay inside what each vendor permits. These are the binding constraints on the whole service:
+
+| Upstream | Published limit | On breach |
+| :--- | :--- | :--- |
+| Open Food Facts | **15 product reads/minute per IP** | *"we reserve the right to deny you access… through IP address ban"* |
+| USDA FDC | 3600/hour (`x-ratelimit-limit`) | key throttled |
+
+One *uncached* lookup spends one call at each. When a budget is exhausted the service **degrades** — that source is skipped and the response comes back partial, with the source absent from `data_sources` — rather than overrunning the limit and getting blocked. This is deliberately not treated as an upstream failure, so it never trips the circuit breaker.
+
+The in-memory cache is what makes a 15/minute budget workable: repeat scans of the same barcode cost nothing.
 
 Upstream failures never surface as `5xx`: the response degrades to a partial `200 OK` with the failed source absent from `data_sources`.
 
