@@ -38,6 +38,7 @@ CANONICAL_FIELDS = {
     "labels",
     "data_sources",
     "upstream_latency_ms",
+    "cached",
 }
 
 SOURCE_NAMES = {"USDA_FDC", "OpenFoodFacts", "GS1_GPC"}

@@ -96,7 +96,13 @@ async def test_successful_lookup_is_cached(monkeypatch, off_product):
     second = await orchestrator.lookup("04963406021372")
 
     assert calls["off"] == 1  # second hit served from cache
-    assert second == first
+
+    # The data is identical, but the response says it came from the cache —
+    # otherwise a 1 ms cache hit still claims it spent 500 ms querying USDA.
+    assert first.cached is False
+    assert second.cached is True
+    assert second.model_dump(exclude={"cached"}) == first.model_dump(exclude={"cached"})
+
     # Cached copies are independent — mutating one must not poison the cache
     second.product_name = "MUTATED"
     third = await orchestrator.lookup("04963406021372")
