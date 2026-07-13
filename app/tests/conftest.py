@@ -15,21 +15,34 @@ import pytest
 
 import app.database as database
 from app.core import orchestrator
+from app.core import ratelimit
 from app.core import resilience
 
 
 @pytest.fixture(autouse=True)
 def reset_shared_state():
-    """Clear the lookup cache and reset circuit breakers between tests.
+    """Reset the process-wide singletons between tests.
 
-    These are process-wide singletons, so without this a cached product or a
-    tripped breaker would leak into unrelated tests.
+    The lookup cache, the circuit breakers, and the rate-limit buckets all
+    persist for the life of the process. Without this a cached product, a
+    tripped breaker, or a bucket drained by an earlier test leaks into
+    unrelated ones — and the rate limiter in particular would shed the rest of
+    the suite, since every test hits the API as the same client.
     """
     orchestrator._lookup_cache.clear()
     for breaker in (resilience.usda_breaker, resilience.off_breaker):
         breaker.record_success()
+    _refill_rate_limiters()
     yield
     orchestrator._lookup_cache.clear()
+
+
+def _refill_rate_limiters():
+    """Hand every rate-limit bucket a full allowance again."""
+    for bucket in (ratelimit.off_limiter, ratelimit.usda_limiter):
+        bucket._tokens = bucket.capacity
+        bucket._updated = bucket._timer()
+    ratelimit.inbound_limiter._buckets.clear()
 
 
 # ── GPC fixture database ──────────────────────────────────────────────

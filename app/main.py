@@ -9,17 +9,21 @@ Licensed under MIT License
 Repository: https://github.com/mcgarrah/nutrition_api
 """
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from .core import ratelimit
 from .database import close_db
 from .gpc.routes import router as gpc_router
 from .core.usda_routes import router as usda_router
 from .core.off_routes import router as off_router
 from .core.lookup_routes import router as lookup_router
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -86,6 +90,51 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+# Paths the limiter must never shed. /health is polled by the platform, and a
+# 429 there reads as "unhealthy" — the rate limiter would get the container
+# restarted. The docs and UI are static and cost no upstream calls.
+_RATE_LIMIT_EXEMPT = ("/api/v1/health", "/api/v1/version", "/docs", "/redoc",
+                      "/openapi.json", "/ui")
+
+
+def _client_key(request: Request) -> str:
+    """Identify the caller for rate limiting.
+
+    Behind DigitalOcean's router the socket address is the proxy, so the real
+    client is the first hop in X-Forwarded-For. Trusting that header is only
+    safe because we are always behind a proxy that sets it; exposed directly,
+    a caller could spoof it to dodge the limit.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    """Shed sustained excess from a single caller.
+
+    This is what keeps our *upstream* spend inside Open Food Facts' budget of
+    15 requests/minute per IP — a budget they enforce with an IP ban. Without
+    it, one enthusiastic client walking distinct barcodes gets the whole
+    deployment blocked for everybody.
+    """
+    if request.url.path.startswith(_RATE_LIMIT_EXEMPT) or request.url.path == "/":
+        return await call_next(request)
+
+    key = _client_key(request)
+    if not ratelimit.inbound_limiter.try_acquire(key):
+        retry_after = ratelimit.inbound_limiter.retry_after(key)
+        logger.warning("Rate limit exceeded for %s on %s", key, request.url.path)
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded. Slow down."},
+            headers={"Retry-After": str(max(1, int(retry_after) + 1))},
+        )
+
+    return await call_next(request)
 
 app.include_router(lookup_router)
 app.include_router(gpc_router)

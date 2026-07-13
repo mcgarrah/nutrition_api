@@ -24,6 +24,7 @@ from cachetools import TTLCache
 from .models import CanonicalProduct, NutrientValue
 from . import usda_fdc
 from . import open_food_facts as off
+from . import ratelimit
 from .resilience import off_breaker, usda_breaker, CircuitOpenError
 from ..database import get_db
 
@@ -40,6 +41,20 @@ _lookup_cache: TTLCache = TTLCache(maxsize=CACHE_MAX_SIZE, ttl=CACHE_TTL_S)
 async def _fetch_off(barcode: str) -> tuple[dict | None, float]:
     """Fetch from Open Food Facts, returning (data, latency_ms)."""
     start = time.monotonic()
+
+    # Open Food Facts allows 15 reads/minute per IP and enforces it with an IP
+    # ban. Spending a token we do not have is not a request that fails — it is
+    # a request that gets the whole deployment blocked. Degrade instead.
+    #
+    # Note this is deliberately NOT recorded as a breaker failure: the call was
+    # never made, and our own budget running dry says nothing about OFF's health.
+    if not ratelimit.off_limiter.try_acquire():
+        logger.warning(
+            "OFF rate budget exhausted; skipping fetch for %s (retry in %.1fs)",
+            barcode, ratelimit.off_limiter.retry_after(),
+        )
+        return None, (time.monotonic() - start) * 1000
+
     try:
         data = await off_breaker.call(lambda: off.get_product(barcode))
     except CircuitOpenError:
@@ -58,6 +73,16 @@ async def _fetch_off(barcode: str) -> tuple[dict | None, float]:
 async def _fetch_usda(barcode: str) -> tuple[dict | None, float]:
     """Fetch from USDA FDC by UPC, returning (data, latency_ms)."""
     start = time.monotonic()
+
+    # USDA reports its ceiling in x-ratelimit-limit: 3600/hour. Overrunning it
+    # gets the key throttled, which degrades every user rather than this one.
+    if not ratelimit.usda_limiter.try_acquire():
+        logger.warning(
+            "USDA rate budget exhausted; skipping fetch for %s (retry in %.1fs)",
+            barcode, ratelimit.usda_limiter.retry_after(),
+        )
+        return None, (time.monotonic() - start) * 1000
+
     try:
         data = await usda_breaker.call(lambda: usda_fdc.search_by_upc(barcode))
     except CircuitOpenError:

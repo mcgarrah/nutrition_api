@@ -16,7 +16,8 @@ import pytest
 from cachetools import TTLCache
 
 from app.core import open_food_facts as off
-from app.core import orchestrator, resilience, usda_fdc
+from app.core import orchestrator, ratelimit, resilience, usda_fdc
+from app.core.ratelimit import TokenBucket
 from app.core.resilience import CircuitBreaker, CircuitOpenError
 
 
@@ -31,6 +32,18 @@ class FakeClock:
 
     def advance(self, seconds):
         self.now += seconds
+
+
+@pytest.fixture
+def ample_upstream_budget(monkeypatch):
+    """Lift the outbound rate limits for tests about concurrency, not quota.
+
+    The real budgets are genuinely tiny — Open Food Facts allows 15 reads a
+    minute per IP — so a burst of parallel lookups would otherwise be shed by
+    the limiter rather than exercising the thing under test.
+    """
+    monkeypatch.setattr(ratelimit, "off_limiter", TokenBucket(rate=10_000, per=60.0))
+    monkeypatch.setattr(ratelimit, "usda_limiter", TokenBucket(rate=10_000, per=60.0))
 
 
 # ══ Concurrency ═══════════════════════════════════════════════════════
@@ -81,7 +94,9 @@ async def test_a_slow_upstream_does_not_delay_a_fast_one(monkeypatch, gpc_db):
     assert elapsed < 1.0            # bounded by the timeout, not the 10s sleep
 
 
-async def test_concurrent_lookups_of_the_same_gtin_all_succeed(monkeypatch, gpc_db):
+async def test_concurrent_lookups_of_the_same_gtin_all_succeed(
+    monkeypatch, gpc_db, ample_upstream_budget,
+):
     """Ten simultaneous scans of the same barcode must not corrupt the cache."""
     async def off_ok(barcode):
         await asyncio.sleep(0.01)
@@ -102,7 +117,7 @@ async def test_concurrent_lookups_of_the_same_gtin_all_succeed(monkeypatch, gpc_
 
 
 async def test_concurrent_lookups_of_different_gtins_do_not_cross_contaminate(
-    monkeypatch, gpc_db,
+    monkeypatch, gpc_db, ample_upstream_budget,
 ):
     async def off_by_barcode(barcode):
         return {
