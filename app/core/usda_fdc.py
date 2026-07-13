@@ -103,23 +103,57 @@ async def get_food(fdc_id: int | str) -> dict | None:
     }
 
 
-async def search_by_upc(upc: str) -> dict | None:
-    """Search USDA FDC for a food by UPC/GTIN barcode.
+def normalize_gtin(gtin: str) -> str:
+    """Normalize a barcode to GTIN-14 for comparison.
 
-    Uses the FDC search API with the UPC as the query, filtered to Branded foods.
-    Returns the first matching food's full details, or None if not found /
+    GTIN-8/12/13/14 are the same identifier at different zero-paddings, and
+    FDC is inconsistent about which it stores ("028400642255" vs
+    "0099447210127"). Left-padding both sides to 14 digits makes padding
+    variants compare equal. Returns "" if there are no digits, or if the
+    barcode is longer than a GTIN-14.
+    """
+    digits = "".join(c for c in str(gtin) if c.isdigit())
+    if not digits or len(digits) > 14:
+        return ""
+    return digits.zfill(14)
+
+
+async def search_by_upc(upc: str) -> dict | None:
+    """Search USDA FDC for a branded food by UPC/GTIN barcode.
+
+    FDC exposes no barcode-lookup endpoint, so this queries the full-text
+    search API. That search is fuzzy: an unknown barcode happily returns
+    unrelated products (querying "00000000" yields a food whose real barcode
+    is "0099447210127"). Taking the top hit on trust would attribute one
+    product's nutrition to a different product's barcode — silent wrong data.
+
+    So we verify each candidate's own gtinUpc against the requested barcode
+    and return only a genuine match. We read the raw search payload because
+    the usda_fdc models drop gtinUpc entirely.
+
+    Returns the matching food's full details, or None if nothing matches /
     no client is configured. Upstream API errors propagate to the caller.
     """
     client = _get_fdc_client()
     if not client:
         return None
-    result = await _run_sync(
-        client.search, upc, data_type=["Branded"], page_size=5,
-    )
-    if not result.foods:
+
+    target = normalize_gtin(upc)
+    if not target:
         return None
-    # Get full details for the first match
-    return await get_food(result.foods[0].fdc_id)
+
+    raw = await _run_sync(
+        client._make_request,
+        "foods/search",
+        params={"query": upc, "dataType": ["Branded"], "pageSize": 10},
+    )
+
+    for food in raw.get("foods", []):
+        if normalize_gtin(food.get("gtinUpc", "")) == target:
+            return await get_food(food["fdcId"])
+
+    logger.info("USDA FDC has no branded food matching GTIN %s", upc)
+    return None
 
 
 async def check_connectivity() -> dict:
