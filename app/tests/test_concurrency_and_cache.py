@@ -59,7 +59,7 @@ async def test_upstreams_are_queried_in_parallel_not_in_series(monkeypatch, gpc_
 
     async def slow_usda(upc):
         await asyncio.sleep(delay)
-        return {"description": "COLA", "nutrients": {}}
+        return {"description": "COLA", "nutrients": []}
 
     monkeypatch.setattr(off, "get_product", slow_off)
     monkeypatch.setattr(usda_fdc, "search_by_upc", slow_usda)
@@ -324,7 +324,12 @@ async def test_recovered_upstream_is_used_again(monkeypatch, gpc_db):
     async def flaky_usda(upc):
         if not state["healthy"]:
             raise ConnectionError("FDC down")
-        return {"description": "COLA", "nutrients": {"Energy": {"amount": 42.0}}}
+        return {
+            "description": "COLA",
+            "nutrients": [
+                {"id": 1008, "name": "Energy", "amount": 42.0, "unit": "KCAL"}
+            ],
+        }
 
     monkeypatch.setattr(off, "get_product", off_ok)
     monkeypatch.setattr(usda_fdc, "search_by_upc", flaky_usda)

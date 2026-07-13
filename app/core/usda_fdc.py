@@ -110,10 +110,14 @@ async def get_food(fdc_id: int | str) -> dict | None:
         "ingredients": food.ingredients,
         "serving_size": food.serving_size,
         "serving_size_unit": food.serving_size_unit,
-        "nutrients": {
-            n.name: {"amount": n.amount, "unit": n.unit_name}
+        # A list, not a dict keyed by name: FDC publishes energy twice under
+        # the identical name "Energy" (kcal id 1008, kJ id 1062), so a
+        # name-keyed dict keeps whichever arrived last — and served cheddar at
+        # 1710 kcal. Identity lives in the id.
+        "nutrients": [
+            {"id": n.id, "name": n.name, "amount": n.amount, "unit": n.unit_name}
             for n in food.nutrients
-        },
+        ],
     }
 
 

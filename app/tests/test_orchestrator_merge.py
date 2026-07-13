@@ -91,7 +91,12 @@ async def test_off_keeps_fields_usda_does_not_carry(monkeypatch, off_product, us
 
 async def test_usda_absent_nutrient_does_not_erase_off_value(monkeypatch, off_product):
     """The critical merge rule: absence must not overwrite presence."""
-    usda = {"description": "COLA", "nutrients": {"Energy": {"amount": 42.0}}}
+    usda = {
+        "description": "COLA",
+        "nutrients": [
+            {"id": 1008, "name": "Energy", "amount": 42.0, "unit": "KCAL"}
+        ],
+    }
     patch_sources(monkeypatch, off_product, usda)
     p = await orchestrator.lookup("1")
 
@@ -101,7 +106,7 @@ async def test_usda_absent_nutrient_does_not_erase_off_value(monkeypatch, off_pr
 
 
 async def test_usda_without_nutrients_leaves_off_nutrition_intact(monkeypatch, off_product):
-    patch_sources(monkeypatch, off_product, {"description": "COLA", "nutrients": {}})
+    patch_sources(monkeypatch, off_product, {"description": "COLA", "nutrients": []})
     p = await orchestrator.lookup("1")
 
     assert p.calories_kcal == 44.0            # OFF's, untouched
@@ -109,7 +114,7 @@ async def test_usda_without_nutrients_leaves_off_nutrition_intact(monkeypatch, o
 
 
 async def test_usda_without_description_keeps_off_name(monkeypatch, off_product):
-    patch_sources(monkeypatch, off_product, {"nutrients": {}, "brand_owner": "Acme"})
+    patch_sources(monkeypatch, off_product, {"nutrients": [], "brand_owner": "Acme"})
     p = await orchestrator.lookup("1")
 
     assert p.product_name == "Coca-Cola Classic"
@@ -117,7 +122,7 @@ async def test_usda_without_description_keeps_off_name(monkeypatch, off_product)
 
 
 async def test_usda_falls_back_to_brand_name(monkeypatch, off_product):
-    usda = {"description": "COLA", "brand_owner": None, "brand_name": "Coke", "nutrients": {}}
+    usda = {"description": "COLA", "brand_owner": None, "brand_name": "Coke", "nutrients": []}
     patch_sources(monkeypatch, off_product, usda)
     p = await orchestrator.lookup("1")
     assert p.brand == "Coke"
@@ -359,10 +364,10 @@ async def test_usda_fiber_and_sugars_override_off(monkeypatch, off_product):
     """The remaining two USDA nutrient mappings."""
     usda = {
         "description": "COLA",
-        "nutrients": {
-            "Fiber, total dietary": {"amount": 2.5},
-            "Sugars, total including NLEA": {"amount": 9.9},
-        },
+        "nutrients": [
+            {"id": 1079, "name": "Fiber, total dietary", "amount": 2.5, "unit": "G"},
+            {"id": 2000, "name": "Sugars, total including NLEA", "amount": 9.9, "unit": "G"},
+        ],
     }
     patch_sources(monkeypatch, off_product, usda)
     p = await orchestrator.lookup("1")

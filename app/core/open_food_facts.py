@@ -13,6 +13,7 @@ import asyncio
 import logging
 from typing import Any
 
+from . import nutrients
 from . import ratelimit
 from . import resilience
 
@@ -64,22 +65,17 @@ async def _run_sync(func, *args, **kwargs) -> Any:
 
 
 def _extract_nutrients(nutriments: dict) -> dict:
-    """Extract key nutrients from OFF nutriments dict (per 100g values)."""
-    keys = {
-        "energy-kcal_100g": "calories_kcal",
-        "proteins_100g": "protein_g",
-        "fat_100g": "fat_g",
-        "carbohydrates_100g": "carbohydrates_g",
-        "fiber_100g": "fiber_g",
-        "sugars_100g": "sugars_g",
-        "sodium_100g": "sodium_g",
-        "salt_100g": "salt_g",
-    }
+    """Extract the nutrients we publish from OFF's per-100g payload.
+
+    Keyed by our own field names (see app/core/nutrients.py) so that both
+    upstreams hand the orchestrator the same shape, and the unit conversions
+    OFF needs live in one place.
+    """
     result = {}
-    for off_key, our_key in keys.items():
-        val = nutriments.get(off_key)
-        if val is not None:
-            result[our_key] = val
+    for spec in nutrients.NUTRIENTS:
+        value = nutriments.get(spec.off_key)
+        if value is not None:
+            result[spec.field] = value
     return result
 
 

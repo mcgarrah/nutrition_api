@@ -138,7 +138,7 @@ async def test_non_string_usda_description_does_not_override_off(monkeypatch):
             "nutrients_per_100g": {},
             "categories": [],
         },
-        usda_data={"description": 12345, "nutrients": {}},
+        usda_data={"description": 12345, "nutrients": []},
     )
 
     body = client.get("/api/v1/lookup/028400642255").json()
@@ -161,7 +161,7 @@ async def test_blank_usda_ingredients_do_not_replace_missing_off_text(monkeypatc
     patch_upstreams(
         monkeypatch,
         off_data=None,
-        usda_data={"description": "COLA", "nutrients": {}, "ingredients": "   "},
+        usda_data={"description": "COLA", "nutrients": [], "ingredients": "   "},
     )
 
     body = client.get("/api/v1/lookup/028400642255").json()

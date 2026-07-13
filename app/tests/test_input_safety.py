@@ -198,7 +198,7 @@ async def test_non_numeric_nutrient_is_dropped_not_fatal(junk, monkeypatch, gpc_
         return {
             "product_name": "Weird",
             "categories": [],
-            "nutrients_per_100g": {"protein_g": junk},
+            "nutrients_per_100g": {"protein": junk},
         }
 
     async def usda_none(upc):
@@ -220,8 +220,8 @@ async def test_good_nutrients_survive_a_bad_neighbour(monkeypatch, gpc_db):
             "product_name": "Weird",
             "categories": [],
             "nutrients_per_100g": {
-                "protein_g": ">100",     # junk
-                "fat_g": 30.9,           # fine
+                "protein": ">100",     # junk
+                "fat": 30.9,           # fine
                 "calories_kcal": 539.0,  # fine
             },
         }
@@ -269,7 +269,10 @@ async def test_malformed_usda_nutrient_entry_is_ignored(monkeypatch, gpc_db):
     async def usda_malformed(upc):
         return {
             "description": "COLA",
-            "nutrients": {"Energy": "not-a-dict", "Protein": {"amount": 7.0}},
+            "nutrients": [
+                "not-a-dict",
+                {"id": 1003, "name": "Protein", "amount": 7.0, "unit": "G"},
+            ],
         }
 
     monkeypatch.setattr(off, "get_product", off_none)
@@ -304,7 +307,7 @@ async def test_non_finite_nutrient_never_reaches_the_response(value, monkeypatch
         return {
             "product_name": "Weird",
             "categories": [],
-            "nutrients_per_100g": {"protein_g": value, "calories_kcal": value},
+            "nutrients_per_100g": {"protein": value, "calories_kcal": value},
         }
 
     async def usda_none(upc):
