@@ -10,6 +10,8 @@ Licensed under MIT License
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
+
+from . import ratelimit
 from ..core import open_food_facts as off
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,12 @@ async def off_product(barcode: str):
     """
     try:
         result = await off.get_product(barcode)
+    except ratelimit.RateLimitedError as e:
+        # We refused our own call to stay inside the upstream's published
+        # limit. That is the caller's problem to pace, not an upstream fault.
+        raise HTTPException(
+            429, str(e), headers={"Retry-After": str(max(1, int(e.retry_after) + 1))},
+        )
     except Exception as e:
         logger.warning("OFF product lookup failed for %s: %s", barcode, e)
         raise HTTPException(502, "Open Food Facts upstream error")
@@ -41,6 +49,12 @@ async def off_search(
     """Search the Open Food Facts database by keyword."""
     try:
         result = await off.search(q, page_size=page_size)
+    except ratelimit.RateLimitedError as e:
+        # We refused our own call to stay inside the upstream's published
+        # limit. That is the caller's problem to pace, not an upstream fault.
+        raise HTTPException(
+            429, str(e), headers={"Retry-After": str(max(1, int(e.retry_after) + 1))},
+        )
     except Exception as e:
         logger.warning("OFF search failed for %r: %s", q, e)
         raise HTTPException(502, "Open Food Facts upstream error")

@@ -76,6 +76,9 @@ async def search(query: str, page_size: int = 25) -> dict | None:
     client = _get_fdc_client()
     if not client:
         return None
+
+    ratelimit.spend(ratelimit.usda_limiter, "USDA_FDC")
+
     result = await _run_sync(client.search, query, page_size=page_size)
     return {
         "total_hits": result.total_hits,
@@ -100,6 +103,9 @@ async def get_food(fdc_id: int | str) -> dict | None:
     client = _get_fdc_client()
     if not client:
         return None
+
+    ratelimit.spend(ratelimit.usda_limiter, "USDA_FDC")
+
     food = await _run_sync(client.get_food, fdc_id)
     return {
         "fdc_id": food.fdc_id,
@@ -159,6 +165,8 @@ async def search_by_upc(upc: str) -> dict | None:
     if not target:
         return None
 
+    ratelimit.spend(ratelimit.usda_limiter, "USDA_FDC")
+
     result = await _run_sync(
         client.search, upc, data_type=["Branded"], page_size=10,
     )
@@ -191,19 +199,19 @@ async def check_connectivity() -> dict:
     if cached is not None:
         return cached
 
-    if not ratelimit.usda_limiter.try_acquire():
-        stale = _probe.last_known()
-        if stale is not None:
-            return stale
-        return {"status": "unknown", "detail": "rate budget exhausted; not probed"}
-
     timeout = resilience.UPSTREAM_TIMEOUT_S
     try:
+        ratelimit.spend(ratelimit.usda_limiter, "USDA_FDC")
         result = await asyncio.wait_for(
             _run_sync(_get_fdc_client().search, "test", page_size=1),
             timeout,
         )
         return _probe.store({"status": "ok", "total_foods": result.total_hits})
+    except ratelimit.RateLimitedError:
+        stale = _probe.last_known()
+        if stale is not None:
+            return stale
+        return {"status": "unknown", "detail": "rate budget exhausted; not probed"}
     except asyncio.TimeoutError:
         return _probe.store({"status": "error", "detail": f"timed out after {timeout}s"})
     except Exception as e:

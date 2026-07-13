@@ -9,6 +9,8 @@ Licensed under MIT License
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
+
+from . import ratelimit
 from ..core import usda_fdc
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,12 @@ async def usda_search(
     """Search the USDA FoodData Central database by keyword."""
     try:
         result = await usda_fdc.search(q, page_size=page_size)
+    except ratelimit.RateLimitedError as e:
+        # We refused our own call to stay inside the upstream's published
+        # limit. That is the caller's problem to pace, not an upstream fault.
+        raise HTTPException(
+            429, str(e), headers={"Retry-After": str(max(1, int(e.retry_after) + 1))},
+        )
     except Exception as e:
         logger.warning("USDA search failed for %r: %s", q, e)
         raise HTTPException(502, "USDA FDC upstream error")
@@ -39,6 +47,12 @@ async def usda_food(fdc_id: int):
     """Get detailed nutritional data for a specific food by its FDC ID."""
     try:
         result = await usda_fdc.get_food(fdc_id)
+    except ratelimit.RateLimitedError as e:
+        # We refused our own call to stay inside the upstream's published
+        # limit. That is the caller's problem to pace, not an upstream fault.
+        raise HTTPException(
+            429, str(e), headers={"Retry-After": str(max(1, int(e.retry_after) + 1))},
+        )
     except Exception as e:
         logger.warning("USDA get_food(%s) failed: %s", fdc_id, e)
         raise HTTPException(404, "Food not found or USDA FDC upstream error")
@@ -58,6 +72,12 @@ async def usda_lookup_by_upc(upc: str):
     """
     try:
         result = await usda_fdc.search_by_upc(upc)
+    except ratelimit.RateLimitedError as e:
+        # We refused our own call to stay inside the upstream's published
+        # limit. That is the caller's problem to pace, not an upstream fault.
+        raise HTTPException(
+            429, str(e), headers={"Retry-After": str(max(1, int(e.retry_after) + 1))},
+        )
     except Exception as e:
         logger.warning("USDA UPC lookup failed for %s: %s", upc, e)
         raise HTTPException(502, "USDA FDC upstream error")

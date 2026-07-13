@@ -215,11 +215,18 @@ async def test_repeated_health_polls_make_one_upstream_call(monkeypatch):
 
 async def test_the_probe_is_charged_to_the_outbound_budget(monkeypatch):
     """Health checks that bypassed the budget could push us past Open Food
-    Facts' 15/minute allowance without the limiter ever knowing."""
-    async def ok(barcode):
-        return {"product_name": "Nutella"}
+    Facts' 15/minute allowance without the limiter ever knowing.
 
-    monkeypatch.setattr(off, "get_product", ok)
+    Patched at the SDK, beneath the gate: the budget is spent inside
+    get_product(), so patching get_product would step over the very thing
+    under test."""
+    class Sdk:
+        class product:
+            @staticmethod
+            def get(barcode, fields=None):
+                return {"code": barcode, "product_name": "Nutella", "nutriments": {}}
+
+    monkeypatch.setattr(off, "_get_off_api", lambda: Sdk())
     before = ratelimit.off_limiter.tokens
 
     await off.check_connectivity()

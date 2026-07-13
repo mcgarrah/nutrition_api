@@ -22,6 +22,8 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Any, Awaitable, Callable
 
+from .ratelimit import RateLimitedError
+
 logger = logging.getLogger(__name__)
 
 # Max seconds we wait on any single upstream call (CLAUDE.md: max 2.0s)
@@ -158,6 +160,11 @@ class CircuitBreaker:
             raise CircuitOpenError(f"{self.name} circuit is open")
         try:
             result = await asyncio.wait_for(coro_fn(), timeout=UPSTREAM_TIMEOUT_S)
+        except RateLimitedError:
+            # Our budget, not their health. Recording this as a failure would
+            # trip the circuit and keep the source shut out long after the
+            # budget refilled — punishing the upstream for our own busy minute.
+            raise
         except Exception:
             self.record_failure()
             raise

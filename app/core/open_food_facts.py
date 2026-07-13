@@ -106,6 +106,12 @@ async def get_product(barcode: str) -> dict | None:
     api = _get_off_api()
     if not api:
         return None
+
+    # 15 product reads/minute per IP, enforced with an IP ban. Spent at the
+    # client, so every caller is covered — the canonical lookup, the direct
+    # /api/v1/off/product endpoint, and the health probe alike.
+    ratelimit.spend(ratelimit.off_limiter, "OpenFoodFacts")
+
     data = await _run_sync(
         api.product.get, barcode, fields=_OFF_FIELDS,
     )
@@ -123,6 +129,11 @@ async def search(query: str, page_size: int = 25) -> dict | None:
     api = _get_off_api()
     if not api:
         return None
+
+    # Search is limited harder than product reads — 10/minute, not 15 — so it
+    # gets its own budget rather than sharing one and overrunning the tighter.
+    ratelimit.spend(ratelimit.off_search_limiter, "OpenFoodFacts search")
+
     data = await _run_sync(
         api.product.text_search, query, page_size=page_size,
     )
@@ -156,18 +167,17 @@ async def check_connectivity() -> dict:
     if cached is not None:
         return cached
 
-    # Charge the probe to the same budget the lookups spend from — otherwise
-    # health checks quietly push us past Open Food Facts' 15/minute allowance.
-    if not ratelimit.off_limiter.try_acquire():
+    timeout = resilience.UPSTREAM_TIMEOUT_S
+    try:
+        # Look up a well-known product as a connectivity test. get_product
+        # spends from the same budget the lookups do, so health checks cannot
+        # quietly push us past Open Food Facts' allowance.
+        result = await asyncio.wait_for(get_product("3017620422003"), timeout)  # Nutella
+    except ratelimit.RateLimitedError:
         stale = _probe.last_known()
         if stale is not None:
             return stale
         return {"status": "unknown", "detail": "rate budget exhausted; not probed"}
-
-    timeout = resilience.UPSTREAM_TIMEOUT_S
-    try:
-        # Look up a well-known product as a connectivity test
-        result = await asyncio.wait_for(get_product("3017620422003"), timeout)  # Nutella
     except asyncio.TimeoutError:
         return _probe.store({"status": "error", "detail": f"timed out after {timeout}s"})
     except Exception as e:
