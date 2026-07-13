@@ -8,6 +8,7 @@ Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 Repository: https://github.com/mcgarrah/nutrition_api
 """
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
@@ -123,12 +124,17 @@ async def health():
         result["gpc"] = {"status": "error", "detail": str(e)}
         result["status"] = "degraded"
 
-    usda_status = await usda_fdc.check_connectivity()
+    # Probe the upstreams concurrently: awaited in series, a health check that
+    # is already bounded per-source would still take the *sum* of the timeouts.
+    usda_status, off_status = await asyncio.gather(
+        usda_fdc.check_connectivity(),
+        off.check_connectivity(),
+    )
+
     result["usda_fdc"] = usda_status
     if usda_status["status"] == "error":
         result["status"] = "degraded"
 
-    off_status = await off.check_connectivity()
     result["open_food_facts"] = off_status
     if off_status["status"] == "error":
         result["status"] = "degraded"
