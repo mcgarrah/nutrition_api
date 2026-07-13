@@ -1,0 +1,37 @@
+[Unit]
+Description=Nutrition API (FastAPI/uvicorn)
+Documentation=https://github.com/mcgarrah/nutrition_api
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mcgarrah
+Group=mcgarrah
+WorkingDirectory=/opt/nutrition_api
+
+# Supplies FDC_API_KEY. Keep this file out of git (.env is gitignored).
+EnvironmentFile=/opt/nutrition_api/.env
+
+ExecStart=/opt/nutrition_api/.venv/bin/uvicorn app.main:app \
+    --host 0.0.0.0 --port 8080 --workers 2
+
+Restart=on-failure
+RestartSec=5s
+
+# Startup checks GS1 for a newer GPC release; give it room without hanging boot
+TimeoutStartSec=180s
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nutrition-api
+
+# The service only needs to read its own tree and write the GPC cache
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/nutrition_api/data
+
+[Install]
+WantedBy=multi-user.target

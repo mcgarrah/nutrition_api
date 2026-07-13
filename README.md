@@ -36,7 +36,10 @@ python scripts/import_gpc_xml.py
 uvicorn app.main:app --reload
 ```
 
-API docs at http://localhost:8000/docs (Swagger UI) or http://localhost:8000/redoc
+Then open:
+
+- `/` — browser-based lookup tester (product card, per-source contributions, upstream latency, cache round-trip)
+- `/docs` — Swagger UI, or `/redoc` for reference-style docs
 
 ### Docker
 
@@ -46,6 +49,15 @@ docker run -p 8080:8080 --env-file .env nutrition-api
 ```
 
 The image bakes the GPC SQLite database in at build time, so the container starts with no network dependency. `FDC_API_KEY` (see `.env.example`) enables the USDA source.
+
+### systemd (bare metal / VM / LXC)
+
+To run the API as a service that starts on boot, see [`deploy/`](deploy/):
+
+```bash
+sudo install -m 644 deploy/nutrition-api.service /etc/systemd/system/
+sudo systemctl enable --now nutrition-api.service
+```
 
 ### Tests & Linting
 
