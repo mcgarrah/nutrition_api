@@ -18,6 +18,8 @@ Endpoints:
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query, Request
 from ..database import get_db
 from .models import (
@@ -321,9 +323,8 @@ async def get_brick(brick_code: str):
 @router.get("/search/", response_model=SearchResponse, summary="Search across all GPC entities")
 async def search_gpc(
     q: str = Query("", description="Search query"),
-    category: str = Query(
+    category: Literal["all", "segments", "families", "classes", "bricks"] = Query(
         "all", description="Category filter",
-        enum=["all", "segments", "families", "classes", "bricks"],
     ),
 ):
     if not q:

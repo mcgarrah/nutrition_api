@@ -228,3 +228,17 @@ def test_resolve_exits_when_nothing_is_available(monkeypatch, tmp_path):
 
     with pytest.raises(SystemExit):
         importer.resolve_xml_file(_Args())
+
+
+def test_database_with_unknown_version_still_updates(tmp_path, run_main, monkeypatch):
+    """End-to-end guard for the auto-update killer: a DB whose version didn't
+    parse must not conclude it is current and freeze forever."""
+    xml = tmp_path / "gpc_cached.xml"   # no -v in the name
+    xml.write_text(FOOD_XML.replace('dateUtc="2/12/2024"', 'dateUtc="bogus"'))
+    db = tmp_path / "gpc.sqlite3"
+    importer.import_food_gpc(str(xml), db)
+    assert importer.get_stored_version(db) == "unknown"
+
+    calls = run_main(["--auto-update", "--db", str(db)], remote="v20260520")
+
+    assert len(calls["imported"]) == 1

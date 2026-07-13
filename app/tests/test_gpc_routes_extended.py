@@ -187,3 +187,19 @@ def test_search_matches_on_code_as_well_as_text():
 def test_search_no_match_returns_empty_lists():
     body = client.get("/api/gpc/search/", params={"q": "zzzznothing"}).json()
     assert body == {"segments": [], "families": [], "classes": [], "bricks": []}
+
+
+def test_search_rejects_an_unknown_category():
+    """The OpenAPI schema advertises an enum; the server must enforce it
+    rather than silently returning empty results for a typo."""
+    resp = client.get("/api/gpc/search/", params={"q": "cola", "category": "bogus"})
+    assert resp.status_code == 422
+
+
+def test_search_category_enum_is_published_in_the_schema():
+    spec = client.get("/openapi.json").json()
+    params = spec["paths"]["/api/gpc/search/"]["get"]["parameters"]
+    category = next(p for p in params if p["name"] == "category")
+    assert set(category["schema"]["enum"]) == {
+        "all", "segments", "families", "classes", "bricks",
+    }

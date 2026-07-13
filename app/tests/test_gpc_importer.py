@@ -379,3 +379,49 @@ def test_remote_version_none_on_timeout(monkeypatch):
     monkeypatch.setattr(crawlers, "get_language", hangs)
 
     assert importer.get_latest_remote_version() is None
+
+
+# ── date parsing: GS1 publishes D/M/YYYY, not M/D/YYYY ────────────────
+
+@pytest.mark.parametrize("xml_date,expected", [
+    ("27/11/2025", "20251127"),   # 27 November 2025 — day > 12, unambiguous
+    ("2/12/2024", "20241202"),    # 2 December 2024 — the bundled fallback XML
+    ("01/01/2026", "20260101"),
+])
+def test_xml_date_is_parsed_as_day_first(xml_date, expected):
+    """GS1's dateUtc is D/M/YYYY. Reading it as M/D/YYYY silently shifts the
+    version by months, or fails outright once the day exceeds 12."""
+    assert importer.extract_version_from_path("gpc_cached.xml", xml_date) == expected
+
+
+def test_unparseable_date_yields_unknown():
+    assert importer.extract_version_from_path("gpc_cached.xml", "13/13/2025") == "unknown"
+
+
+# ── version comparison ────────────────────────────────────────────────
+
+@pytest.mark.parametrize("remote,stored,expected", [
+    ("v20260520", "20251127", True),    # remote is newer
+    ("20260520", "20251127", True),     # the 'v' prefix is optional
+    ("v20251127", "20251127", False),   # same version
+    ("v20240101", "20251127", False),   # remote is older — never downgrade
+])
+def test_is_remote_newer(remote, stored, expected):
+    assert importer.is_remote_newer(remote, stored) is expected
+
+
+def test_unknown_stored_version_takes_the_remote():
+    """The auto-update killer.
+
+    A lexical compare puts "unknown" above any date ('u' > '2'), so a database
+    whose version failed to parse would decide it was already current and never
+    update again. An unusable local version must defer to the remote instead.
+    """
+    assert importer.is_remote_newer("v20260520", "unknown") is True
+    assert importer.is_remote_newer("v20260520", None) is True
+
+
+def test_unusable_remote_version_is_ignored():
+    """Symmetrically: never rebuild the database on a garbage remote version."""
+    assert importer.is_remote_newer("garbage", "20251127") is False
+    assert importer.is_remote_newer(None, "20251127") is False

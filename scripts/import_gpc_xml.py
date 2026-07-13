@@ -139,11 +139,16 @@ def resolve_xml_file(args) -> str:
     sys.exit(1)
 
 
-def extract_version_from_path(xml_path: str, xml_date: str = "unknown") -> str:
-    """Extract version string from XML filename or date attribute.
+UNKNOWN_VERSION = "unknown"
+
+
+def extract_version_from_path(xml_path: str, xml_date: str = UNKNOWN_VERSION) -> str:
+    """Extract a sortable YYYYMMDD version from the filename or the XML date.
 
     GPCDownloader names files like 'en-v20251127.xml' -> version '20251127'.
-    For other filenames, fall back to the XML dateUtc attribute (e.g., '2/12/2024' -> '20241202').
+    For other filenames we fall back to the XML's dateUtc attribute, which GS1
+    publishes as D/M/YYYY — e.g. '27/11/2025' is 27 November 2025, and the
+    bundled November-2024 file carries '2/12/2024' meaning 2 December 2024.
     """
     name = Path(xml_path).stem
     if "-v" in name:
@@ -152,16 +157,36 @@ def extract_version_from_path(xml_path: str, xml_date: str = "unknown") -> str:
         parts = name.split("-", 1)[1]
         if parts.isdigit():
             return parts
-    # Fall back to XML dateUtc attribute: "2/12/2024" -> "20241202"
-    if xml_date and xml_date != "unknown":
+
+    if xml_date and xml_date != UNKNOWN_VERSION:
+        import datetime
         try:
-            import datetime
-            # dateUtc format is "M/DD/YYYY" or "MM/DD/YYYY"
-            dt = datetime.datetime.strptime(xml_date.strip(), "%m/%d/%Y")
+            dt = datetime.datetime.strptime(xml_date.strip(), "%d/%m/%Y")
             return dt.strftime("%Y%m%d")
         except (ValueError, AttributeError):
             pass
-    return "unknown"
+    return UNKNOWN_VERSION
+
+
+def is_remote_newer(remote: str | None, stored: str | None) -> bool:
+    """Decide whether GS1's version supersedes the one we already imported.
+
+    Both are YYYYMMDD strings, so a lexical compare orders them correctly —
+    but only once we have refused to compare anything that isn't one. An
+    unparseable stored version ("unknown") must mean "we don't know what we
+    have, so take the remote", never "ours sorts higher than any date".
+    """
+    if not remote:
+        return False
+    remote = remote.lstrip("v")
+    if not remote.isdigit():
+        return False
+    if not stored:
+        return True
+    stored = stored.lstrip("v")
+    if not stored.isdigit():
+        return True  # our version is unusable — trust the remote
+    return remote > stored
 
 
 def get_stored_version(db_path: Path) -> str | None:
@@ -395,7 +420,7 @@ def main():
             # Record that we checked, regardless of outcome
             set_last_version_check(args.db)
 
-            if remote and remote.lstrip("v") <= stored.lstrip("v"):
+            if remote and not is_remote_newer(remote, stored):
                 logging.info(
                     "GPC data is current (local=%s, remote=%s). No update needed.",
                     stored, remote,
