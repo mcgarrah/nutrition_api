@@ -153,6 +153,31 @@ def _nv(value, unit="g") -> NutrientValue | None:
     return NutrientValue(value=number, unit=unit)
 
 
+def _text(value) -> str | None:
+    """Accept an upstream free-text field only if it really is text.
+
+    Pydantic does not validate on assignment, so a dict or a number assigned
+    here survives all the way into the serialized response — the model's type
+    annotations are decorative for anything the orchestrator sets.
+    """
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def _str_list(value) -> list[str]:
+    """Coerce an upstream tag list.
+
+    OFF records are sparse and user-contributed: a key can be present but
+    null, or hold non-string members. These fields are documented as always
+    being a list, so a null here would break every consumer that iterates
+    them without a None check.
+    """
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
 def _usda_nutrient(nutrients: dict, name: str) -> float | None:
     """Extract a nutrient amount from USDA nutrients dict by name."""
     entry = nutrients.get(name)
@@ -186,12 +211,12 @@ async def lookup(gtin: str) -> CanonicalProduct:
     # --- Layer 1: Open Food Facts (name, image, ingredients, provisional nutrition) ---
     if off_data:
         product.data_sources.append("OpenFoodFacts")
-        product.product_name = off_data.get("product_name") or product.product_name
-        product.brand = off_data.get("brands") or product.brand
-        product.image_url = off_data.get("image_url")
-        product.ingredients_text = off_data.get("ingredients_text")
-        product.allergens = off_data.get("allergens", [])
-        product.labels = off_data.get("labels", [])
+        product.product_name = _text(off_data.get("product_name")) or product.product_name
+        product.brand = _text(off_data.get("brands")) or product.brand
+        product.image_url = _text(off_data.get("image_url"))
+        product.ingredients_text = _text(off_data.get("ingredients_text"))
+        product.allergens = _str_list(off_data.get("allergens"))
+        product.labels = _str_list(off_data.get("labels"))
 
         # Provisional nutrition from OFF (per 100g)
         nutr = off_data.get("nutrients_per_100g", {})
@@ -207,16 +232,16 @@ async def lookup(gtin: str) -> CanonicalProduct:
     if usda_data:
         product.data_sources.append("USDA_FDC")
         # USDA name overrides OFF if available
-        usda_desc = usda_data.get("description")
+        usda_desc = _text(usda_data.get("description"))
         if usda_desc:
             product.product_name = usda_desc
         # USDA brand overrides OFF
-        usda_brand = usda_data.get("brand_owner") or usda_data.get("brand_name")
+        usda_brand = _text(usda_data.get("brand_owner")) or _text(usda_data.get("brand_name"))
         if usda_brand:
             product.brand = usda_brand
 
-        nutrients = usda_data.get("nutrients", {})
-        if nutrients:
+        nutrients = usda_data.get("nutrients")
+        if isinstance(nutrients, dict) and nutrients:
             # Override nutrition with USDA values (authoritative)
             energy = _num(_usda_nutrient(nutrients, "Energy"))
             if energy is not None:
@@ -241,15 +266,15 @@ async def lookup(gtin: str) -> CanonicalProduct:
                 product.sodium = _nv(sodium, unit="mg")
 
         # Use USDA ingredients if OFF didn't have them
-        if not product.ingredients_text and usda_data.get("ingredients"):
-            product.ingredients_text = usda_data["ingredients"]
+        if not product.ingredients_text:
+            product.ingredients_text = _text(usda_data.get("ingredients"))
 
     # --- Layer 3: GS1 GPC (category taxonomy) ---
-    off_categories = off_data.get("categories", []) if off_data else []
+    off_categories = _str_list(off_data.get("categories")) if off_data else []
     gpc_hierarchy, gpc_ms = await _fetch_gpc_categories(off_categories)
     product.upstream_latency_ms["GS1_GPC"] = round(gpc_ms, 1)
     if gpc_hierarchy:
-        product.category_hierarchy = gpc_hierarchy
+        product.category_hierarchy = _str_list(gpc_hierarchy)
         product.data_sources.append("GS1_GPC")
     elif off_categories:
         # Fallback: use OFF category tags as-is
