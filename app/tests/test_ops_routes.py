@@ -2,7 +2,7 @@
 Tests for the operations endpoints: /api/v1/health and /api/v1/version.
 
 Upstream connectivity checks are monkeypatched; the GPC portion of the
-health check runs against the fixture database from test_gpc_routes.
+health check runs against the shared fixture database.
 
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
@@ -13,9 +13,11 @@ from fastapi.testclient import TestClient
 from app.core import open_food_facts as off
 from app.core import usda_fdc
 from app.main import app
-from app.tests.test_gpc_routes import gpc_fixture_db  # noqa: F401 (fixture reuse)
 
 client = TestClient(app)
+
+# The health check reads the GPC database
+pytestmark = pytest.mark.usefixtures("gpc_db")
 
 
 @pytest.fixture
@@ -80,3 +82,64 @@ def test_version_defaults_to_dev(monkeypatch):
     monkeypatch.delenv("GIT_HASH", raising=False)
     body = client.get("/api/v1/version").json()
     assert body["git_hash"] == "dev"
+
+
+def test_health_degraded_when_gpc_database_is_broken(monkeypatch, healthy_upstreams):
+    """A corrupt/missing GPC database must degrade, not 500."""
+    import app.database as database
+
+    async def broken():
+        raise RuntimeError("no such table: segments")
+
+    monkeypatch.setattr(database, "get_db", broken)
+
+    resp = client.get("/api/v1/health")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "degraded"
+    assert body["gpc"]["status"] == "error"
+    assert "no such table" in body["gpc"]["detail"]
+
+
+# ── /health must be bounded ───────────────────────────────────────────
+
+def test_health_reports_a_stalled_upstream_as_degraded_not_500(monkeypatch, healthy_upstreams):
+    """A sick upstream degrades the report; it never fails the endpoint."""
+    async def timed_out():
+        return {"status": "error", "detail": "timed out after 2.0s"}
+
+    monkeypatch.setattr(off, "check_connectivity", timed_out)
+
+    resp = client.get("/api/v1/health")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "degraded"
+    assert "timed out" in body["open_food_facts"]["detail"]
+    assert body["gpc"]["status"] == "ok"        # the parts that work still work
+
+
+async def test_health_probes_run_concurrently(monkeypatch, gpc_db):
+    """Serial probes would cost the sum of the timeouts, not the max."""
+    import asyncio as _asyncio
+    import time
+
+    from app.main import health
+
+    async def slow_usda():
+        await _asyncio.sleep(0.15)
+        return {"status": "ok"}
+
+    async def slow_off():
+        await _asyncio.sleep(0.15)
+        return {"status": "ok"}
+
+    monkeypatch.setattr(usda_fdc, "check_connectivity", slow_usda)
+    monkeypatch.setattr(off, "check_connectivity", slow_off)
+
+    start = time.monotonic()
+    await health()
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 0.28, f"probes ran serially ({elapsed:.2f}s)"

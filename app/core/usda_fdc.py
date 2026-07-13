@@ -14,6 +14,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from . import resilience
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -157,13 +159,22 @@ async def search_by_upc(upc: str) -> dict | None:
 
 
 async def check_connectivity() -> dict:
-    """Check if the USDA FDC API is reachable. For health endpoint."""
+    """Check if the USDA FDC API is reachable. For the health endpoint.
+
+    Bounded by the upstream timeout — see the note in open_food_facts: an
+    unbounded probe lets a stalled upstream hang /health, which gets the
+    container restarted rather than reported as degraded.
+    """
     if not is_available():
         return {"status": "unconfigured", "detail": "FDC_API_KEY not set"}
+    timeout = resilience.UPSTREAM_TIMEOUT_S
     try:
-        result = await _run_sync(
-            _get_fdc_client().search, "test", page_size=1,
+        result = await asyncio.wait_for(
+            _run_sync(_get_fdc_client().search, "test", page_size=1),
+            timeout,
         )
         return {"status": "ok", "total_foods": result.total_hits}
+    except asyncio.TimeoutError:
+        return {"status": "error", "detail": f"timed out after {timeout}s"}
     except Exception as e:
         return {"status": "error", "detail": str(e)}

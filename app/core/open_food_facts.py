@@ -14,6 +14,8 @@ import logging
 from functools import partial
 from typing import Any
 
+from . import resilience
+
 logger = logging.getLogger(__name__)
 
 # Fields we request from OFF to minimize payload
@@ -126,12 +128,21 @@ async def search(query: str, page_size: int = 25) -> dict | None:
 
 
 async def check_connectivity() -> dict:
-    """Check if the OFF API is reachable. For health endpoint."""
+    """Check if the OFF API is reachable. For the health endpoint.
+
+    Bounded by the upstream timeout. An unbounded probe means a stalled third
+    party hangs /health indefinitely, and the platform's health check then
+    kills a container that was perfectly able to keep serving degraded
+    responses — the opposite of what this design promises.
+    """
+    timeout = resilience.UPSTREAM_TIMEOUT_S
     try:
         # Look up a well-known product as a connectivity test
-        result = await get_product("3017620422003")  # Nutella
-        if result:
-            return {"status": "ok"}
-        return {"status": "error", "detail": "Test product not found"}
+        result = await asyncio.wait_for(get_product("3017620422003"), timeout)  # Nutella
+    except asyncio.TimeoutError:
+        return {"status": "error", "detail": f"timed out after {timeout}s"}
     except Exception as e:
         return {"status": "error", "detail": str(e)}
+    if result:
+        return {"status": "ok"}
+    return {"status": "error", "detail": "Test product not found"}

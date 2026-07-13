@@ -14,6 +14,7 @@ Licensed under MIT License
 """
 import asyncio
 import logging
+import math
 import os
 import time
 
@@ -115,17 +116,47 @@ async def _fetch_gpc_categories(off_categories: list[str]) -> tuple[list[str], f
     return hierarchy, elapsed
 
 
+def _num(value) -> float | None:
+    """Coerce an upstream scalar to a finite float, or None if it isn't one.
+
+    Two failure modes, both of which reach the client as a broken response:
+
+    * Not a number at all. Open Food Facts nutriments are crowdsourced and
+      arrive as whatever was typed off the label — ">100", "trace", "" all
+      occur. float() raises on those, and an unhandled ValueError turns a
+      partial result into a 500, which this service must never return.
+
+    * NaN or Infinity. These *are* floats, so they pass float() silently, but
+      JSON has no literal for them: they serialize as the bare tokens NaN and
+      Infinity, which strict parsers reject — poisoning the whole response,
+      not just the one field. Python's json module accepts them on input, so
+      they can arrive from upstream, and the string "nan" converts happily.
+    """
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        logger.warning("Discarding non-numeric value %r", value)
+        return None
+    if not math.isfinite(number):
+        logger.warning("Discarding non-finite value %r", value)
+        return None
+    return number
+
+
 def _nv(value, unit="g") -> NutrientValue | None:
-    """Create a NutrientValue if value is not None."""
-    if value is not None:
-        return NutrientValue(value=float(value), unit=unit)
-    return None
+    """Create a NutrientValue, or None if the value isn't a finite number."""
+    number = _num(value)
+    if number is None:
+        return None
+    return NutrientValue(value=number, unit=unit)
 
 
 def _usda_nutrient(nutrients: dict, name: str) -> float | None:
     """Extract a nutrient amount from USDA nutrients dict by name."""
     entry = nutrients.get(name)
-    if entry and entry.get("amount") is not None:
+    if isinstance(entry, dict) and entry.get("amount") is not None:
         return entry["amount"]
     return None
 
@@ -164,7 +195,7 @@ async def lookup(gtin: str) -> CanonicalProduct:
 
         # Provisional nutrition from OFF (per 100g)
         nutr = off_data.get("nutrients_per_100g", {})
-        product.calories_kcal = nutr.get("calories_kcal")
+        product.calories_kcal = _num(nutr.get("calories_kcal"))
         product.protein = _nv(nutr.get("protein_g"))
         product.fat = _nv(nutr.get("fat_g"))
         product.carbohydrates = _nv(nutr.get("carbohydrates_g"))
@@ -187,7 +218,7 @@ async def lookup(gtin: str) -> CanonicalProduct:
         nutrients = usda_data.get("nutrients", {})
         if nutrients:
             # Override nutrition with USDA values (authoritative)
-            energy = _usda_nutrient(nutrients, "Energy")
+            energy = _num(_usda_nutrient(nutrients, "Energy"))
             if energy is not None:
                 product.calories_kcal = energy
             protein = _usda_nutrient(nutrients, "Protein")
