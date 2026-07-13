@@ -10,7 +10,7 @@ All nutrient values are normalized to per-100g basis.
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 
 
 class NutrientValue(BaseModel):

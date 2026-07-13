@@ -7,11 +7,14 @@ and returns a merged CanonicalProduct from all available data sources.
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Path
 from ..core.models import CanonicalProduct
-from ..core.orchestrator import lookup
+from ..core import orchestrator
 
 router = APIRouter(prefix="/api/v1", tags=["Lookup"])
+
+# GTIN-8 (EAN-8), GTIN-12 (UPC-A), GTIN-13 (EAN-13), or GTIN-14
+GTIN_PATTERN = r"^(\d{8}|\d{12,14})$"
 
 
 @router.get(
@@ -19,7 +22,12 @@ router = APIRouter(prefix="/api/v1", tags=["Lookup"])
     response_model=CanonicalProduct,
     summary="Unified food product lookup by GTIN/UPC",
 )
-async def lookup_product(gtin: str):
+async def lookup_product(
+    gtin: str = Path(
+        pattern=GTIN_PATTERN,
+        description="Numeric GTIN-8, GTIN-12, GTIN-13, or GTIN-14 barcode",
+    ),
+):
     """Look up a food product by its GTIN/UPC barcode.
 
     Concurrently queries USDA FoodData Central, Open Food Facts, and
@@ -32,7 +40,7 @@ async def lookup_product(gtin: str):
     - The `data_sources` field shows which sources contributed
     - The `upstream_latency_ms` field shows per-source response times
     """
-    product = await lookup(gtin)
+    product = await orchestrator.lookup(gtin)
 
     if not product.data_sources:
         raise HTTPException(

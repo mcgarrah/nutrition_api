@@ -48,7 +48,8 @@ def _page_params(page: int, page_size: int, total: int):
     return offset, next_page, prev_page
 
 
-async def _count_and_fetch(table, columns, where="", params=None, order_by="", page=1, page_size=DEFAULT_PAGE_SIZE):
+async def _count_and_fetch(table, columns, where="", params=None, order_by="",
+                           page=1, page_size=DEFAULT_PAGE_SIZE):
     """Helper: count + paginated fetch for a single table."""
     db = await get_db()
     params = params or []
@@ -86,7 +87,8 @@ async def list_segments(
     )
 
 
-@router.get("/segments/{segment_code}", response_model=SegmentDetail, summary="Retrieve a GPC Segment")
+@router.get("/segments/{segment_code}", response_model=SegmentDetail,
+            summary="Retrieve a GPC Segment")
 async def get_segment(segment_code: str):
     db = await get_db()
     rows = await db.execute_fetchall(
@@ -319,7 +321,10 @@ async def get_brick(brick_code: str):
 @router.get("/search/", response_model=SearchResponse, summary="Search across all GPC entities")
 async def search_gpc(
     q: str = Query("", description="Search query"),
-    category: str = Query("all", description="Category filter", enum=["all", "segments", "families", "classes", "bricks"]),
+    category: str = Query(
+        "all", description="Category filter",
+        enum=["all", "segments", "families", "classes", "bricks"],
+    ),
 ):
     if not q:
         return SearchResponse()
@@ -330,28 +335,32 @@ async def search_gpc(
 
     if category in ("all", "segments"):
         rows = await db.execute_fetchall(
-            "SELECT segment_code, description FROM segments WHERE segment_code LIKE ? OR description LIKE ? ORDER BY segment_code",
+            "SELECT segment_code, description FROM segments "
+            "WHERE segment_code LIKE ? OR description LIKE ? ORDER BY segment_code",
             [like, like],
         )
         result.segments = [SegmentItem(segment_code=r[0], description=r[1]) for r in rows]
 
     if category in ("all", "families"):
         rows = await db.execute_fetchall(
-            "SELECT family_code, description FROM families WHERE family_code LIKE ? OR description LIKE ? ORDER BY family_code",
+            "SELECT family_code, description FROM families "
+            "WHERE family_code LIKE ? OR description LIKE ? ORDER BY family_code",
             [like, like],
         )
         result.families = [FamilyItem(family_code=r[0], description=r[1]) for r in rows]
 
     if category in ("all", "classes"):
         rows = await db.execute_fetchall(
-            "SELECT class_code, description FROM classes WHERE class_code LIKE ? OR description LIKE ? ORDER BY class_code",
+            "SELECT class_code, description FROM classes "
+            "WHERE class_code LIKE ? OR description LIKE ? ORDER BY class_code",
             [like, like],
         )
         result.classes = [ClassItem(class_code=r[0], description=r[1]) for r in rows]
 
     if category in ("all", "bricks"):
         rows = await db.execute_fetchall(
-            "SELECT brick_code, description FROM bricks WHERE brick_code LIKE ? OR description LIKE ? ORDER BY brick_code",
+            "SELECT brick_code, description FROM bricks "
+            "WHERE brick_code LIKE ? OR description LIKE ? ORDER BY brick_code",
             [like, like],
         )
         result.bricks = [BrickItem(brick_code=r[0], description=r[1]) for r in rows]

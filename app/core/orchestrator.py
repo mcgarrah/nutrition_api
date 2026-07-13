@@ -14,21 +14,38 @@ Licensed under MIT License
 """
 import asyncio
 import logging
+import os
 import time
+
+from cachetools import TTLCache
 
 from .models import CanonicalProduct, NutrientValue
 from . import usda_fdc
 from . import open_food_facts as off
+from .resilience import off_breaker, usda_breaker, CircuitOpenError
 from ..database import get_db
 
 logger = logging.getLogger(__name__)
+
+# In-memory TTL cache for hot GTIN lookups (Phase 2). Food data is
+# effectively static, so a short TTL is safe and cuts upstream round-trips
+# for popular items. Only complete-enough results are cached (see lookup()).
+CACHE_MAX_SIZE = int(os.environ.get("LOOKUP_CACHE_MAX_SIZE", "1024"))
+CACHE_TTL_S = float(os.environ.get("LOOKUP_CACHE_TTL_S", "300"))
+_lookup_cache: TTLCache = TTLCache(maxsize=CACHE_MAX_SIZE, ttl=CACHE_TTL_S)
 
 
 async def _fetch_off(barcode: str) -> tuple[dict | None, float]:
     """Fetch from Open Food Facts, returning (data, latency_ms)."""
     start = time.monotonic()
     try:
-        data = await off.get_product(barcode)
+        data = await off_breaker.call(lambda: off.get_product(barcode))
+    except CircuitOpenError:
+        logger.info("OFF circuit open; skipping fetch for %s", barcode)
+        data = None
+    except asyncio.TimeoutError:
+        logger.warning("OFF fetch timed out for %s", barcode)
+        data = None
     except Exception as e:
         logger.warning("OFF fetch failed for %s: %s", barcode, e)
         data = None
@@ -40,7 +57,13 @@ async def _fetch_usda(barcode: str) -> tuple[dict | None, float]:
     """Fetch from USDA FDC by UPC, returning (data, latency_ms)."""
     start = time.monotonic()
     try:
-        data = await usda_fdc.search_by_upc(barcode)
+        data = await usda_breaker.call(lambda: usda_fdc.search_by_upc(barcode))
+    except CircuitOpenError:
+        logger.info("USDA circuit open; skipping fetch for %s", barcode)
+        data = None
+    except asyncio.TimeoutError:
+        logger.warning("USDA fetch timed out for %s", barcode)
+        data = None
     except Exception as e:
         logger.warning("USDA fetch failed for %s: %s", barcode, e)
         data = None
@@ -111,7 +134,14 @@ async def lookup(gtin: str) -> CanonicalProduct:
     """Look up a product by GTIN/UPC and merge data from all sources.
 
     Fires OFF and USDA queries in parallel, then layers the results.
+    Results with data are cached in-memory for CACHE_TTL_S seconds;
+    misses are not cached so transient upstream failures can recover.
     """
+    cached = _lookup_cache.get(gtin)
+    if cached is not None:
+        # Deep copy so callers can't mutate the cached entry
+        return cached.model_copy(deep=True)
+
     # Parallel fetch from OFF and USDA
     (off_data, off_ms), (usda_data, usda_ms) = await asyncio.gather(
         _fetch_off(gtin),
@@ -196,5 +226,8 @@ async def lookup(gtin: str) -> CanonicalProduct:
             tag.split(":")[-1].replace("-", " ").title() if ":" in tag else tag
             for tag in off_categories[:5]
         ]
+
+    if product.data_sources:
+        _lookup_cache[gtin] = product.model_copy(deep=True)
 
     return product

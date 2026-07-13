@@ -7,8 +7,12 @@ the Open Food Facts crowdsourced database.
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
+import logging
+
 from fastapi import APIRouter, HTTPException, Query
 from ..core import open_food_facts as off
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/off", tags=["Open Food Facts"])
 
@@ -19,7 +23,11 @@ async def off_product(barcode: str):
 
     Returns product name, brand, image, ingredients, and per-100g nutrients.
     """
-    result = await off.get_product(barcode)
+    try:
+        result = await off.get_product(barcode)
+    except Exception as e:
+        logger.warning("OFF product lookup failed for %s: %s", barcode, e)
+        raise HTTPException(502, "Open Food Facts upstream error")
     if result is None:
         raise HTTPException(404, "Product not found in Open Food Facts")
     return result
@@ -31,7 +39,11 @@ async def off_search(
     page_size: int = Query(25, ge=1, le=100, description="Results per page"),
 ):
     """Search the Open Food Facts database by keyword."""
-    result = await off.search(q, page_size=page_size)
+    try:
+        result = await off.search(q, page_size=page_size)
+    except Exception as e:
+        logger.warning("OFF search failed for %r: %s", q, e)
+        raise HTTPException(502, "Open Food Facts upstream error")
     if result is None:
         raise HTTPException(503, "Open Food Facts service unavailable")
     return result
