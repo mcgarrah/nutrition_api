@@ -1,24 +1,139 @@
 """
 Shared test fixtures.
 
+No test in this suite touches the network: the USDA, Open Food Facts, and GS1
+boundaries are always stubbed, and GPC queries run against a small fixture
+SQLite database built here rather than the 27 MB production import.
+
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
+import asyncio
+import sqlite3
+
 import pytest
 
+import app.database as database
 from app.core import orchestrator
 from app.core import resilience
 
 
 @pytest.fixture(autouse=True)
 def reset_shared_state():
-    """Clear the lookup cache and reset circuit breakers between tests."""
+    """Clear the lookup cache and reset circuit breakers between tests.
+
+    These are process-wide singletons, so without this a cached product or a
+    tripped breaker would leak into unrelated tests.
+    """
     orchestrator._lookup_cache.clear()
     for breaker in (resilience.usda_breaker, resilience.off_breaker):
         breaker.record_success()
     yield
     orchestrator._lookup_cache.clear()
 
+
+# ── GPC fixture database ──────────────────────────────────────────────
+# Mirrors the production schema, including the junction tables that let one
+# attribute type belong to many bricks (the schema fix this project exists for).
+
+GPC_SCHEMA = """
+CREATE TABLE segments (segment_code TEXT PRIMARY KEY, description TEXT);
+CREATE TABLE families (
+    family_code TEXT PRIMARY KEY, description TEXT,
+    segment_code TEXT NOT NULL REFERENCES segments(segment_code)
+);
+CREATE TABLE classes (
+    class_code TEXT PRIMARY KEY, description TEXT,
+    family_code TEXT NOT NULL REFERENCES families(family_code)
+);
+CREATE TABLE bricks (
+    brick_code TEXT PRIMARY KEY, description TEXT,
+    class_code TEXT NOT NULL REFERENCES classes(class_code)
+);
+CREATE TABLE attribute_types (att_type_code TEXT PRIMARY KEY, att_type_text TEXT);
+CREATE TABLE attribute_values (att_value_code TEXT PRIMARY KEY, att_value_text TEXT);
+CREATE TABLE brick_attribute_types (
+    brick_code TEXT NOT NULL, att_type_code TEXT NOT NULL,
+    PRIMARY KEY (brick_code, att_type_code)
+);
+CREATE TABLE attribute_type_values (
+    att_type_code TEXT NOT NULL, att_value_code TEXT NOT NULL,
+    PRIMARY KEY (att_type_code, att_value_code)
+);
+CREATE TABLE gpc_metadata (key TEXT PRIMARY KEY, value TEXT);
+"""
+
+GPC_ROWS = [
+    ("INSERT INTO segments VALUES (?, ?)", [
+        ("50000000", "Food/Beverage"),
+        ("51000000", "Healthcare"),
+    ]),
+    ("INSERT INTO families VALUES (?, ?, ?)", [
+        ("50200000", "Beverages", "50000000"),
+        ("50100000", "Fruits/Vegetables", "50000000"),
+    ]),
+    ("INSERT INTO classes VALUES (?, ?, ?)", [
+        ("50202300", "Carbonated Drinks", "50200000"),
+        ("50101800", "Fresh Fruits", "50100000"),
+    ]),
+    ("INSERT INTO bricks VALUES (?, ?, ?)", [
+        ("10000201", "Cola Drinks", "50202300"),
+        ("10000202", "Lemonade", "50202300"),
+        ("10005900", "Apples", "50101800"),
+    ]),
+    ("INSERT INTO attribute_types VALUES (?, ?)", [
+        ("20000100", "Caffeine Presence"),
+    ]),
+    ("INSERT INTO attribute_values VALUES (?, ?)", [
+        ("30000101", "Caffeinated"),
+        ("30000102", "Decaffeinated"),
+    ]),
+    ("INSERT INTO brick_attribute_types VALUES (?, ?)", [
+        ("10000201", "20000100"),
+    ]),
+    ("INSERT INTO attribute_type_values VALUES (?, ?)", [
+        ("20000100", "30000101"),
+        ("20000100", "30000102"),
+    ]),
+    ("INSERT INTO gpc_metadata VALUES (?, ?)", [
+        ("gpc_version", "test"),
+        ("xml_date", "2026-01-01"),
+        ("import_timestamp", "2026-01-01T00:00:00"),
+    ]),
+]
+
+
+def build_gpc_db(path):
+    """Create the fixture GPC database at `path`."""
+    conn = sqlite3.connect(path)
+    conn.executescript(GPC_SCHEMA)
+    for sql, rows in GPC_ROWS:
+        conn.executemany(sql, rows)
+    conn.commit()
+    conn.close()
+    return path
+
+
+@pytest.fixture
+def gpc_db(tmp_path, monkeypatch):
+    """Point app.database at a fresh fixture GPC database for one test.
+
+    The teardown must *close* the connection, not just drop the reference:
+    aiosqlite runs a non-daemon worker thread per connection, so an orphaned
+    connection keeps that thread alive and hangs the interpreter at exit.
+    """
+    db_path = build_gpc_db(tmp_path / "gpc_fixture.sqlite3")
+    monkeypatch.setattr(database, "DB_PATH", db_path)
+    monkeypatch.setattr(database, "_db", None)
+    yield db_path
+
+    conn = database._db
+    if conn is not None:
+        asyncio.run(conn.close())
+    database._db = None
+
+
+# ── Upstream payload fixtures ─────────────────────────────────────────
 
 @pytest.fixture
 def off_product():

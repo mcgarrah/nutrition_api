@@ -2,7 +2,7 @@
 Tests for the operations endpoints: /api/v1/health and /api/v1/version.
 
 Upstream connectivity checks are monkeypatched; the GPC portion of the
-health check runs against the fixture database from test_gpc_routes.
+health check runs against the shared fixture database.
 
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
@@ -13,9 +13,11 @@ from fastapi.testclient import TestClient
 from app.core import open_food_facts as off
 from app.core import usda_fdc
 from app.main import app
-from app.tests.test_gpc_routes import gpc_fixture_db  # noqa: F401 (fixture reuse)
 
 client = TestClient(app)
+
+# The health check reads the GPC database
+pytestmark = pytest.mark.usefixtures("gpc_db")
 
 
 @pytest.fixture
@@ -80,3 +82,21 @@ def test_version_defaults_to_dev(monkeypatch):
     monkeypatch.delenv("GIT_HASH", raising=False)
     body = client.get("/api/v1/version").json()
     assert body["git_hash"] == "dev"
+
+
+def test_health_degraded_when_gpc_database_is_broken(monkeypatch, healthy_upstreams):
+    """A corrupt/missing GPC database must degrade, not 500."""
+    import app.database as database
+
+    async def broken():
+        raise RuntimeError("no such table: segments")
+
+    monkeypatch.setattr(database, "get_db", broken)
+
+    resp = client.get("/api/v1/health")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "degraded"
+    assert body["gpc"]["status"] == "error"
+    assert "no such table" in body["gpc"]["detail"]

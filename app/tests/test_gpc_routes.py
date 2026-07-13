@@ -8,99 +8,15 @@ the real SQL without needing the full GS1 import.
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
-import sqlite3
-
 import pytest
 from fastapi.testclient import TestClient
 
-import app.database as database
 from app.main import app
 
 client = TestClient(app)
 
-_FIXTURE_SCHEMA = """
-CREATE TABLE segments (segment_code TEXT PRIMARY KEY, description TEXT);
-CREATE TABLE families (
-    family_code TEXT PRIMARY KEY, description TEXT,
-    segment_code TEXT NOT NULL REFERENCES segments(segment_code)
-);
-CREATE TABLE classes (
-    class_code TEXT PRIMARY KEY, description TEXT,
-    family_code TEXT NOT NULL REFERENCES families(family_code)
-);
-CREATE TABLE bricks (
-    brick_code TEXT PRIMARY KEY, description TEXT,
-    class_code TEXT NOT NULL REFERENCES classes(class_code)
-);
-CREATE TABLE attribute_types (att_type_code TEXT PRIMARY KEY, att_type_text TEXT);
-CREATE TABLE attribute_values (att_value_code TEXT PRIMARY KEY, att_value_text TEXT);
-CREATE TABLE brick_attribute_types (
-    brick_code TEXT NOT NULL, att_type_code TEXT NOT NULL,
-    PRIMARY KEY (brick_code, att_type_code)
-);
-CREATE TABLE attribute_type_values (
-    att_type_code TEXT NOT NULL, att_value_code TEXT NOT NULL,
-    PRIMARY KEY (att_type_code, att_value_code)
-);
-CREATE TABLE gpc_metadata (key TEXT PRIMARY KEY, value TEXT);
-"""
-
-_FIXTURE_ROWS = [
-    ("INSERT INTO segments VALUES (?, ?)", [
-        ("50000000", "Food/Beverage"),
-        ("51000000", "Healthcare"),
-    ]),
-    ("INSERT INTO families VALUES (?, ?, ?)", [
-        ("50200000", "Beverages", "50000000"),
-        ("50100000", "Fruits/Vegetables", "50000000"),
-    ]),
-    ("INSERT INTO classes VALUES (?, ?, ?)", [
-        ("50202300", "Carbonated Drinks", "50200000"),
-        ("50101800", "Fresh Fruits", "50100000"),
-    ]),
-    ("INSERT INTO bricks VALUES (?, ?, ?)", [
-        ("10000201", "Cola Drinks", "50202300"),
-        ("10000202", "Lemonade", "50202300"),
-        ("10005900", "Apples", "50101800"),
-    ]),
-    ("INSERT INTO attribute_types VALUES (?, ?)", [
-        ("20000100", "Caffeine Presence"),
-    ]),
-    ("INSERT INTO attribute_values VALUES (?, ?)", [
-        ("30000101", "Caffeinated"),
-        ("30000102", "Decaffeinated"),
-    ]),
-    ("INSERT INTO brick_attribute_types VALUES (?, ?)", [
-        ("10000201", "20000100"),
-    ]),
-    ("INSERT INTO attribute_type_values VALUES (?, ?)", [
-        ("20000100", "30000101"),
-        ("20000100", "30000102"),
-    ]),
-    ("INSERT INTO gpc_metadata VALUES (?, ?)", [
-        ("gpc_version", "test"),
-        ("xml_date", "2026-01-01"),
-        ("import_timestamp", "2026-01-01T00:00:00"),
-    ]),
-]
-
-
-@pytest.fixture(autouse=True)
-def gpc_fixture_db(tmp_path, monkeypatch):
-    """Point app.database at a small fixture DB for the duration of a test."""
-    db_path = tmp_path / "gpc_fixture.sqlite3"
-    conn = sqlite3.connect(db_path)
-    conn.executescript(_FIXTURE_SCHEMA)
-    for sql, rows in _FIXTURE_ROWS:
-        conn.executemany(sql, rows)
-    conn.commit()
-    conn.close()
-
-    monkeypatch.setattr(database, "DB_PATH", db_path)
-    monkeypatch.setattr(database, "_db", None)
-    yield
-    # Drop the connection so the next test reconnects to its own fixture
-    database._db = None
+# Every test in this module queries the fixture GPC database
+pytestmark = pytest.mark.usefixtures("gpc_db")
 
 
 # ── Segments ──────────────────────────────────────────────────────────
