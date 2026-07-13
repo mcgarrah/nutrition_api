@@ -14,17 +14,19 @@ import sqlite3
 import pytest
 
 import app.database as database
+from app.core import open_food_facts as off
 from app.core import orchestrator
 from app.core import ratelimit
 from app.core import resilience
+from app.core import usda_fdc
 
 
 @pytest.fixture(autouse=True)
 def reset_shared_state():
     """Reset the process-wide singletons between tests.
 
-    The lookup cache, the circuit breakers, and the rate-limit buckets all
-    persist for the life of the process. Without this a cached product, a
+    The lookup cache, the circuit breakers, the rate-limit buckets and the
+    cached health probes all persist for the life of the process. Without this a cached product, a
     tripped breaker, or a bucket drained by an earlier test leaks into
     unrelated ones — and the rate limiter in particular would shed the rest of
     the suite, since every test hits the API as the same client.
@@ -33,6 +35,8 @@ def reset_shared_state():
     for breaker in (resilience.usda_breaker, resilience.off_breaker):
         breaker.record_success()
     _refill_rate_limiters()
+    off._probe.clear()
+    usda_fdc._probe.clear()
     yield
     orchestrator._lookup_cache.clear()
 

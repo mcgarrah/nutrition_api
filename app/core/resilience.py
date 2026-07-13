@@ -58,6 +58,55 @@ async def run_in_executor(executor: ThreadPoolExecutor, func, *args, **kwargs) -
     return await loop.run_in_executor(executor, partial(func, *args, **kwargs))
 
 
+# How long a health probe's verdict stays good for.
+#
+# /health is polled by the platform every 60s and is exempt from the inbound
+# rate limiter — it has to be, since a 429 there reads as "unhealthy" and gets
+# the container restarted. But an unbounded probe turns that exemption into an
+# amplifier: every poll made a live call to Open Food Facts, so any caller could
+# loop /health and drive unlimited traffic at a nonprofit's API through us. Open
+# Food Facts' stated remedy for that is an IP ban.
+HEALTH_PROBE_TTL_S = float(os.environ.get("HEALTH_PROBE_TTL_S", "60"))
+
+
+class CachedProbe:
+    """Remember an upstream's last verdict for a while.
+
+    Bounds probe traffic to at most one call per TTL no matter how often
+    /health is polled, and gives us a last-known answer to serve when the
+    budget is spent rather than either lying or spending a token we don't have.
+    """
+
+    def __init__(self, name: str, ttl_s: float = HEALTH_PROBE_TTL_S,
+                 timer=time.monotonic):
+        self.name = name
+        self.ttl_s = ttl_s
+        self._timer = timer
+        self._result: dict | None = None
+        self._at = 0.0
+
+    def fresh(self) -> dict | None:
+        """The cached verdict, if it hasn't gone stale."""
+        if self._result is None:
+            return None
+        if self._timer() - self._at >= self.ttl_s:
+            return None
+        return dict(self._result)
+
+    def last_known(self) -> dict | None:
+        """The cached verdict even if stale — better than no answer at all."""
+        return dict(self._result) if self._result is not None else None
+
+    def store(self, result: dict) -> dict:
+        self._result = dict(result)
+        self._at = self._timer()
+        return result
+
+    def clear(self) -> None:
+        self._result = None
+        self._at = 0.0
+
+
 class CircuitOpenError(Exception):
     """Raised when a call is skipped because the circuit is open."""
 

@@ -24,6 +24,7 @@ from cachetools import TTLCache
 from .models import CanonicalProduct, NutrientValue
 from . import usda_fdc
 from . import open_food_facts as off
+from . import attribution
 from . import ratelimit
 from .resilience import off_breaker, usda_breaker, CircuitOpenError
 from ..database import get_db
@@ -343,6 +344,10 @@ async def lookup(gtin: str) -> CanonicalProduct:
             tag.split(":")[-1].replace("-", " ").title() if ":" in tag else tag
             for tag in off_categories[:5]
         ]
+
+    # Attribution is a licence condition for Open Food Facts (ODbL), so it
+    # accompanies the data it describes rather than living only in the docs.
+    product.attribution = attribution.for_sources(product.data_sources)
 
     if product.data_sources:
         _lookup_cache[key] = product.model_copy(deep=True)

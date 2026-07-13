@@ -134,6 +134,12 @@
   .err { border-color: var(--bad); }
   .err .code { color: var(--bad); font-weight: 700; }
   a { color: var(--src-off); }
+  footer {
+    margin-top: 2.5rem; padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    font-size: .75rem; line-height: 1.6; color: var(--text-muted);
+  }
+  footer p { margin: 0; }
 </style>
 </head>
 <body>
@@ -156,6 +162,18 @@
   <div class="samples" id="samples"></div>
 
   <div id="out"></div>
+
+  <footer>
+    <p>
+      Product data from <a href="https://world.openfoodfacts.org/">Open Food Facts</a>,
+      licensed <a href="https://opendatacommons.org/licenses/odbl/1.0/">ODbL 1.0</a>;
+      product images licensed
+      <a href="https://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA 3.0</a>.
+      Nutrient data from <a href="https://fdc.nal.usda.gov/">USDA FoodData Central</a>
+      (public domain). Taxonomy from
+      <a href="https://www.gs1.org/standards/gpc">GS1 GPC</a>.
+    </p>
+  </footer>
 </div>
 
 <script>

@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from .core import attribution
 from .core import ratelimit
 from .database import close_db
 from .gpc.routes import router as gpc_router
@@ -74,6 +75,13 @@ app = FastAPI(
         "Segments, Families, Classes, Bricks, and Attributes.\n\n"
         "**USDA FDC**: Search and retrieve lab-quality nutritional data.\n\n"
         "**Open Food Facts**: Crowdsourced product data — images, ingredients, labels.\n\n"
+        "---\n\n"
+        "**Attribution.** This API redistributes data from Open Food Facts, whose "
+        "database is licensed [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1.0/) "
+        "and whose product images are licensed CC BY-SA 3.0 — attribution is required "
+        "and derived databases are share-alike. USDA FoodData Central is a U.S. "
+        "Government work in the public domain. GS1 publishes the GPC taxonomy for open "
+        "use. Per-source terms: `GET /api/v1/attribution`.\n\n"
         "Author: Michael McGarrah (mcgarrah@gmail.com)\n"
         "Website: https://mcgarrah.org"
     ),
@@ -94,8 +102,8 @@ app.add_middleware(
 # Paths the limiter must never shed. /health is polled by the platform, and a
 # 429 there reads as "unhealthy" — the rate limiter would get the container
 # restarted. The docs and UI are static and cost no upstream calls.
-_RATE_LIMIT_EXEMPT = ("/api/v1/health", "/api/v1/version", "/docs", "/redoc",
-                      "/openapi.json", "/ui")
+_RATE_LIMIT_EXEMPT = ("/api/v1/health", "/api/v1/version", "/api/v1/attribution",
+                      "/docs", "/redoc", "/openapi.json", "/ui")
 
 
 def _client_key(request: Request) -> str:
@@ -189,6 +197,22 @@ async def health():
         result["status"] = "degraded"
 
     return result
+
+
+@app.get(
+    "/api/v1/attribution",
+    tags=["Operations"],
+    summary="Data sources, licences and attribution",
+)
+async def attribution_endpoint():
+    """Attribution and licence terms for every source this API redistributes.
+
+    Open Food Facts data is published under the Open Database License (ODbL
+    1.0), with product images under CC BY-SA 3.0. Both require attribution and
+    ODbL adds a share-alike obligation on derived databases — so this is a
+    licence condition, not a courtesy.
+    """
+    return {"sources": attribution.SOURCE_ATTRIBUTION}
 
 
 @app.get("/api/v1/version", tags=["Operations"], summary="API version")

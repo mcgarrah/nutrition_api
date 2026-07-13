@@ -66,3 +66,12 @@ class CanonicalProduct(BaseModel):
             "without contacting any upstream."
         ),
     )
+    attribution: dict[str, dict[str, str]] = Field(
+        default_factory=dict,
+        description=(
+            "Source, licence and attribution for each contributing source. "
+            "Open Food Facts data is ODbL 1.0 (images CC BY-SA 3.0) and its "
+            "licence *requires* attribution, so the notice travels with the "
+            "data rather than living only in the documentation."
+        ),
+    )

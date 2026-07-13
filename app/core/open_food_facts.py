@@ -13,6 +13,7 @@ import asyncio
 import logging
 from typing import Any
 
+from . import ratelimit
 from . import resilience
 
 logger = logging.getLogger(__name__)
@@ -137,22 +138,44 @@ async def search(query: str, page_size: int = 25) -> dict | None:
     }
 
 
+_probe = resilience.CachedProbe("OpenFoodFacts")
+
+
 async def check_connectivity() -> dict:
     """Check if the OFF API is reachable. For the health endpoint.
 
-    Bounded by the upstream timeout. An unbounded probe means a stalled third
-    party hangs /health indefinitely, and the platform's health check then
-    kills a container that was perfectly able to keep serving degraded
-    responses — the opposite of what this design promises.
+    Cached, and charged to the outbound budget. /health is polled every 60s by
+    the platform and is exempt from the inbound rate limiter — it has to be,
+    since a 429 there reads as "unhealthy" and gets the container restarted.
+    An unbounded probe turned that exemption into an amplifier: every poll made
+    a live call to Open Food Facts, so any caller could loop /health and drive
+    unlimited traffic at a nonprofit's API through us. Their stated remedy for
+    that is an IP ban.
+
+    Also bounded by the upstream timeout: an unbounded probe lets a stalled
+    third party hang /health, which kills a container that was perfectly able
+    to keep serving degraded responses.
     """
+    cached = _probe.fresh()
+    if cached is not None:
+        return cached
+
+    # Charge the probe to the same budget the lookups spend from — otherwise
+    # health checks quietly push us past Open Food Facts' 15/minute allowance.
+    if not ratelimit.off_limiter.try_acquire():
+        stale = _probe.last_known()
+        if stale is not None:
+            return stale
+        return {"status": "unknown", "detail": "rate budget exhausted; not probed"}
+
     timeout = resilience.UPSTREAM_TIMEOUT_S
     try:
         # Look up a well-known product as a connectivity test
         result = await asyncio.wait_for(get_product("3017620422003"), timeout)  # Nutella
     except asyncio.TimeoutError:
-        return {"status": "error", "detail": f"timed out after {timeout}s"}
+        return _probe.store({"status": "error", "detail": f"timed out after {timeout}s"})
     except Exception as e:
-        return {"status": "error", "detail": str(e)}
+        return _probe.store({"status": "error", "detail": str(e)})
     if result:
-        return {"status": "ok"}
-    return {"status": "error", "detail": "Test product not found"}
+        return _probe.store({"status": "ok"})
+    return _probe.store({"status": "error", "detail": "Test product not found"})
