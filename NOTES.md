@@ -46,13 +46,20 @@ That repo also had no CI at all and published to PyPI without running its
 tests; both are fixed
 ([usda_fdc_python#9](https://github.com/mcgarrah/usda_fdc_python/pull/9)).
 
-### 2. We import `gpcc._crawlers`, a private module
+### 2. ~~We import `gpcc._crawlers`, a private module~~ — RESOLVED
 
-`scripts/import_gpc_xml.py` does `from gpcc._crawlers import get_language,
-get_publications` to ask GS1 for the latest publication version. Same fragility
-class as the `usda_fdc` workaround above: a private API of a package I control.
-`gpcc` could expose a supported "latest publication version" call, and the
-importer could stop reaching into an underscore module.
+I was wrong about this one: it was never a `gpcc` problem. `gpcc` already
+re-exports `get_language` and `get_publications` from its package root and
+lists both in `__all__` — they are the *same function objects*. Reaching into
+`gpcc._crawlers` bought nothing and risked a private module being renamed under
+us in a patch release, which would silently stop the taxonomy auto-updating.
+
+`scripts/import_gpc_xml.py` now imports them from `gpcc` directly. No upstream
+change was needed.
+
+While fixing it: `gpcc` was only a *transitive* dependency (via `gs1-gpc`)
+despite being imported directly, so it is now declared in `requirements.txt`.
+A direct import deserves a direct dependency.
 
 ## Ideas not yet acted on
 

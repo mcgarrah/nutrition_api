@@ -269,7 +269,10 @@ def get_latest_remote_version() -> str | None:
     """
     try:
         import asyncio
-        from gpcc._crawlers import get_language, get_publications
+        # gpcc re-exports these from its package root and lists them in
+        # __all__ — reaching into gpcc._crawlers bought nothing but the risk
+        # of a private module moving under us.
+        from gpcc import get_language, get_publications
 
         async def _check():
             lang = await asyncio.wait_for(
