@@ -118,7 +118,7 @@ Example: `GET /api/v1/lookup/04963406021372` returns product name, brand, per-10
 | GET | `/api/gpc/classes/{code}` | Class detail with bricks |
 | GET | `/api/gpc/bricks/` | List bricks (filterable by class) |
 | GET | `/api/gpc/bricks/{code}` | Brick detail with attributes |
-| GET | `/api/gpc/search/?q=...` | Cross-entity search |
+| GET | `/api/gpc/search/?q=...` | Cross-entity search (capped; `limit` up to 200, `counts` reports the real totals) |
 
 ### Operations
 

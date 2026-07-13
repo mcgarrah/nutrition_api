@@ -326,13 +326,54 @@ async def get_brick(brick_code: str):
 
 # ── Search ────────────────────────────────────────────────────────────
 
+DEFAULT_SEARCH_LIMIT = 50
+MAX_SEARCH_LIMIT = 200
+
+# entity -> (table, code column, item model, attribute name on SearchResponse)
+_SEARCHABLE = [
+    ("segments", "segments", "segment_code", SegmentItem),
+    ("families", "families", "family_code", FamilyItem),
+    ("classes", "classes", "class_code", ClassItem),
+    ("bricks", "bricks", "brick_code", BrickItem),
+]
+
+
+async def _search_entity(db, table, code_column, model, like, limit):
+    """Count the matches, then fetch at most `limit` of them."""
+    total = (await db.execute_fetchall(
+        f"SELECT COUNT(*) FROM {table} "
+        f"WHERE {code_column} LIKE ? OR description LIKE ?",
+        [like, like],
+    ))[0][0]
+
+    rows = await db.execute_fetchall(
+        f"SELECT {code_column}, description FROM {table} "
+        f"WHERE {code_column} LIKE ? OR description LIKE ? "
+        f"ORDER BY {code_column} LIMIT ?",
+        [like, like, limit],
+    )
+    items = [model(**{code_column: r[0], "description": r[1]}) for r in rows]
+    return items, total
+
+
 @router.get("/search/", response_model=SearchResponse, summary="Search across all GPC entities")
 async def search_gpc(
     q: str = Query("", description="Search query"),
     category: Literal["all", "segments", "families", "classes", "bricks"] = Query(
         "all", description="Category filter",
     ),
+    limit: int = Query(
+        DEFAULT_SEARCH_LIMIT, ge=1, le=MAX_SEARCH_LIMIT,
+        description="Maximum results per entity type",
+    ),
 ):
+    """Search codes and descriptions across the GPC hierarchy.
+
+    Results are capped per entity type. Unbounded, a single-character query
+    matches most of the taxonomy — `?q=e` returns over 900 rows — so every
+    caller pays for a response nobody asked for. `counts` reports the real
+    number of matches so a truncated answer is visible rather than silent.
+    """
     if not q:
         return SearchResponse()
 
@@ -340,36 +381,13 @@ async def search_gpc(
     result = SearchResponse()
     like = f"%{q}%"
 
-    if category in ("all", "segments"):
-        rows = await db.execute_fetchall(
-            "SELECT segment_code, description FROM segments "
-            "WHERE segment_code LIKE ? OR description LIKE ? ORDER BY segment_code",
-            [like, like],
-        )
-        result.segments = [SegmentItem(segment_code=r[0], description=r[1]) for r in rows]
-
-    if category in ("all", "families"):
-        rows = await db.execute_fetchall(
-            "SELECT family_code, description FROM families "
-            "WHERE family_code LIKE ? OR description LIKE ? ORDER BY family_code",
-            [like, like],
-        )
-        result.families = [FamilyItem(family_code=r[0], description=r[1]) for r in rows]
-
-    if category in ("all", "classes"):
-        rows = await db.execute_fetchall(
-            "SELECT class_code, description FROM classes "
-            "WHERE class_code LIKE ? OR description LIKE ? ORDER BY class_code",
-            [like, like],
-        )
-        result.classes = [ClassItem(class_code=r[0], description=r[1]) for r in rows]
-
-    if category in ("all", "bricks"):
-        rows = await db.execute_fetchall(
-            "SELECT brick_code, description FROM bricks "
-            "WHERE brick_code LIKE ? OR description LIKE ? ORDER BY brick_code",
-            [like, like],
-        )
-        result.bricks = [BrickItem(brick_code=r[0], description=r[1]) for r in rows]
+    for name, table, code_column, model in _SEARCHABLE:
+        if category not in ("all", name):
+            continue
+        items, total = await _search_entity(db, table, code_column, model, like, limit)
+        setattr(result, name, items)
+        result.counts[name] = total
+        if total > len(items):
+            result.truncated = True
 
     return result

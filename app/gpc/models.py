@@ -111,7 +111,22 @@ class PaginatedResponse(BaseModel):
 # --- Search response ---
 
 class SearchResponse(BaseModel):
+    """Cross-entity search results, capped per entity type.
+
+    `counts` reports how many rows actually matched, so a caller can tell that
+    the lists were truncated instead of silently receiving a slice and
+    believing it was the whole answer.
+    """
+
     segments: list[SegmentItem] = Field(default_factory=list)
     families: list[FamilyItem] = Field(default_factory=list)
     classes: list[ClassItem] = Field(default_factory=list)
     bricks: list[BrickItem] = Field(default_factory=list)
+    counts: dict[str, int] = Field(
+        default_factory=dict,
+        description="Total matches per entity type, before the limit is applied",
+    )
+    truncated: bool = Field(
+        default=False,
+        description="True when at least one entity type had more matches than the limit",
+    )
