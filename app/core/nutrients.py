@@ -241,3 +241,26 @@ def from_off(nutrients_per_100g: dict) -> dict[str, float]:
 
 # The OFF payload keys we ask for, so the wrapper requests exactly what we use.
 OFF_KEYS: tuple[str, ...] = tuple(spec.off_key for spec in NUTRIENTS)
+
+
+def to_usda_entries(values: dict[str, float | None]) -> list[dict]:
+    """Turn mapped nutrient values back into an FDC-shaped nutrient list.
+
+    The local bulk database stores nutrients as columns, already resolved to our
+    ids and units at import time. Rendering them back into the list shape FDC
+    returns means the local tier and the live API hand the orchestrator the same
+    thing, and `from_usda` stays the single place that decides what a nutrient
+    is — rather than a second, quietly diverging copy of the mapping.
+    """
+    entries: list[dict] = []
+    for spec in NUTRIENTS:
+        amount = values.get(spec.field)
+        if amount is None:
+            continue
+        entries.append({
+            "id": spec.fdc_ids[0],
+            "name": spec.field,
+            "amount": amount,
+            "unit": _FDC_UNIT.get(spec.fdc_ids[0]),
+        })
+    return entries

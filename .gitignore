@@ -223,3 +223,12 @@ __marimo__/
 # Cached upstream responses (the corpus; rebuild with the service or import to SQLite)
 data/responses/
 data/responses.sqlite3
+
+# The expanded FDC database (321 MB) is built from the compressed archive
+# beside it; only the archive is worth keeping.
+data/fdc.sqlite3
+# The archive is published as a GitHub release asset, not committed:
+# every refresh would otherwise add ~27 MB to every clone, forever.
+data/fdc.sqlite3.xz
+data/*.expanding
+data/*.building

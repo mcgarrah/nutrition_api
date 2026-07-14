@@ -9,7 +9,7 @@ See [ARCH.md](ARCH.md) for the system architecture and [SPECS.md](SPECS.md) for 
 The API aggregates food product data from multiple sources into a single canonical interface:
 
 - **GS1 GPC** — Product taxonomy (Segment → Family → Class → Brick → Attributes), served from a local SQLite cache
-- **USDA FoodData Central** — Lab-quality nutrient data (authoritative for nutrition)
+- **USDA FoodData Central** — Lab-quality nutrient data (authoritative for nutrition), served from a local copy of the bulk dataset with the live API as fallback
 - **Open Food Facts** — Crowdsourced product metadata (images, ingredients, allergens, labels)
 
 A `DataOrchestrator` queries USDA and Open Food Facts concurrently (`asyncio.gather`), then layers the results: OFF provides the base product profile, USDA overrides nutrition, and GS1 GPC supplies the category hierarchy. Reconciled responses are returned as a `CanonicalProduct` with per-100g nutrient baselines, a `data_sources` provenance list, and per-source latency telemetry.
@@ -19,6 +19,37 @@ A `DataOrchestrator` queries USDA and Open Food Facts concurrently (`asyncio.gat
 - Per-source circuit breakers skip a failing upstream for a 60s cooldown after 5 consecutive failures
 - Hot GTIN lookups are served from an in-memory TTL cache (default 1024 entries / 300s)
 - Upstream failures degrade to a partial `200 OK` — never a `500`
+
+### Local USDA FDC copy
+
+USDA publishes its entire branded corpus twice a year (April and October) as a bulk download. The API imports it locally, so the most common request it serves — "what is this barcode?" — is a disk read rather than a network call:
+
+| | live API | local copy |
+|---|---|---|
+| barcode lookup | 200–2000 ms | **~25 µs** |
+| API key | required | not needed |
+| rate limit | 3,600/hour | none |
+| lookup method | fuzzy full-text search (FDC has no barcode endpoint) | exact index on GTIN-14 |
+
+The copy holds **442,095 distinct barcodes**. A miss is not a failure — it means the product is newer than the dataset — so the request falls through to the live API, which remains the authority for anything the copy hasn't got. Set `FDC_LOCAL_ENABLED=0` to force every lookup upstream.
+
+```bash
+# What's installed, and what USDA currently offers
+python scripts/build_fdc_db.py --check
+
+# Refresh (fetches the published 28 MB archive if there is one,
+# otherwise rebuilds from USDA's 428 MB bulk zip)
+python scripts/build_fdc_db.py --auto-update
+
+# Build from scratch and write the archive
+python scripts/build_fdc_db.py
+```
+
+The build streams USDA's CSVs straight out of the zip — the 3.1 GB of uncompressed data is never extracted, so peak memory stays around 250 MB. It takes about 5 minutes and produces a 322 MB database plus a 28 MB `.xz`.
+
+The 322 MB database is too large for git and the archive would add ~28 MB to every clone at each refresh, so **neither is committed**: the archive is published as a GitHub release asset (`fdc-YYYY-MM-DD`) and expanded on first startup.
+
+**A barcode is not unique in FDC.** It republishes a product as a new `fdc_id` whenever the label changes, so 2.0M records are really 442,095 barcodes — 4.5 revisions each on average, up to 38 — and 31% of colliding barcodes disagree on calories. The newest revision defines the product; where it is merely *silent* about a nutrient, an earlier revision fills the gap (which recovers 122,205 values).
 
 The GPC data is stored in SQLite with a corrected schema that uses junction tables to preserve the many-to-many relationships between bricks and attribute types (the same attribute type can appear on many bricks in the GS1 specification).
 
