@@ -511,6 +511,9 @@ def download_release(dataset: str, dest: Path) -> bool:
         return False
 
     os.replace(partial, dest)
+    # tempfile makes the file private (0600) and os.replace keeps that, which
+    # leaves the archive unreadable to a service running as another user.
+    os.chmod(dest, 0o644)
     logger.info("Downloaded %s (%.0f MB)", RELEASE_ASSET, dest.stat().st_size / 1e6)
     return True
 
@@ -549,6 +552,7 @@ def download(dataset: str, dest: Path) -> Path:
                 tmp.write(chunk)
         partial = Path(tmp.name)
     os.replace(partial, dest)
+    os.chmod(dest, 0o644)
     logger.info("Downloaded %.0f MB", dest.stat().st_size / 1e6)
     return dest
 
