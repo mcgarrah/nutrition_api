@@ -23,6 +23,7 @@ from cachetools import TTLCache
 from usda_fdc.exceptions import FdcRateLimitError
 
 from .models import CanonicalProduct, NutrientValue
+from . import fdc_local
 from . import usda_fdc
 from . import open_food_facts as off
 from . import attribution
@@ -74,8 +75,29 @@ async def _fetch_off(barcode: str) -> tuple[dict | None, float]:
 
 
 async def _fetch_usda(barcode: str) -> tuple[dict | None, float]:
-    """Fetch from USDA FDC by UPC, returning (data, latency_ms)."""
+    """Fetch from USDA FDC by UPC, returning (data, latency_ms).
+
+    The local copy of the bulk dataset answers first. It holds every branded
+    product FDC knew about at the last release, which is the overwhelming
+    majority of what gets scanned, and it answers in microseconds without an API
+    key, a rate-limit token, or a network call that can time out.
+
+    A miss is not a failure — it means the product is newer than the dataset, or
+    was never in it — so the request falls through to the live API, which is
+    still the authority for anything the local copy has not got.
+    """
     start = time.monotonic()
+
+    if fdc_local.is_available():
+        try:
+            local = await fdc_local.get_by_gtin(barcode)
+        except Exception as e:
+            # A broken local copy must never take the upstream down with it.
+            logger.warning("Local FDC lookup failed for %s: %s", barcode, e)
+            local = None
+        if local is not None:
+            return local, (time.monotonic() - start) * 1000
+        logger.debug("Local FDC has no %s; asking the API", barcode)
 
     try:
         # search_by_upc is two round trips to FDC — a search, then the food it

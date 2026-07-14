@@ -18,6 +18,7 @@ from app.core import open_food_facts as off
 from app.core import orchestrator
 from app.core import ratelimit
 from app.core import resilience
+from app.core import fdc_local
 from app.core import store
 from app.core import usda_fdc
 
@@ -34,6 +35,27 @@ def isolated_response_store(tmp_path, monkeypatch):
     """
     monkeypatch.setattr(store, "STORE_DIR", tmp_path / "responses")
     monkeypatch.setattr(store, "STORE_ENABLED", True)
+
+
+@pytest.fixture(autouse=True)
+def isolated_fdc_local(tmp_path, monkeypatch):
+    """Keep the tests away from any real local FDC database.
+
+    Once data/fdc.sqlite3 exists on a developer's box, the orchestrator would
+    answer barcode lookups from it — and tests that mean to exercise the upstream
+    path would quietly stop doing so, passing for the wrong reason. Every test
+    starts with no local copy; the ones that want one build their own.
+    """
+    monkeypatch.setattr(fdc_local, "DB_PATH", tmp_path / "absent.sqlite3")
+    monkeypatch.setattr(fdc_local, "ARCHIVE_PATH", tmp_path / "absent.sqlite3.xz")
+    monkeypatch.setattr(fdc_local, "_db", None)
+    monkeypatch.setattr(fdc_local, "_metadata", {})
+    yield
+    conn = fdc_local._db
+    if conn is not None:
+        # aiosqlite runs a non-daemon thread per connection; an orphan hangs exit.
+        asyncio.run(conn.close())
+    fdc_local._db = None
 
 
 @pytest.fixture(autouse=True)
