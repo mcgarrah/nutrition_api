@@ -281,3 +281,63 @@ def test_energy_in_kj_is_only_converted_when_it_really_is_kj():
     values = from_usda([usda(1062, "Energy", 1710.0, "KCAL")])
 
     assert "calories_kcal" not in values
+
+
+# ══ Values that cannot physically exist ═══════════════════════════════
+#
+# 100 g of food contains at most 100 g of anything, and fat — the densest
+# macronutrient at 9 kcal/g — caps energy near 900 kcal per 100 g. Upstream data
+# breaks both. 2,545 products in the April 2026 branded corpus (0.58%) carry an
+# impossible value: a burrito at 90,000 kcal and 12,700 g of carbohydrate per
+# 100 g, a drink mix at 151,515 kcal. They read like per-package figures filed as
+# per-100 g. A number that cannot exist is not data, and serving it is worse than
+# serving nothing.
+
+def test_a_burrito_cannot_contain_12700_grams_of_carbohydrate():
+    """The real record, from FDC. Per 100 g there are only 100 g to go around."""
+    values = from_usda([
+        usda(1005, "Carbohydrate, by difference", 12700.0, "G"),
+        usda(1003, "Protein", 3400.0, "G"),
+    ])
+
+    assert "carbohydrates" not in values
+    assert "protein" not in values
+
+
+def test_energy_above_the_physical_ceiling_is_dropped():
+    """Pure fat is ~900 kcal/100 g. 151,515 is not a food."""
+    assert "calories_kcal" not in from_usda([usda(1008, "Energy", 151515.0, "KCAL")])
+
+
+def test_energy_at_the_ceiling_is_kept():
+    """Pure oil really is ~900 kcal/100 g — the guard must not eat real food."""
+    assert from_usda([usda(1008, "Energy", 900.0, "KCAL")])["calories_kcal"] == 900.0
+
+
+def test_a_negative_nutrient_is_impossible_too():
+    assert "protein" not in from_usda([usda(1003, "Protein", -5.0, "G")])
+
+
+def test_an_impossible_value_falls_through_to_a_usable_id():
+    """Fat is (1004, 1085). A nonsense 1004 must not shadow a real 1085."""
+    values = from_usda([
+        usda(1004, "Total lipid (fat)", 3200.0, "G"),   # impossible
+        usda(1085, "Total fat (NLEA)", 32.0, "G"),      # the real figure
+    ])
+
+    assert values["fat"] == 32.0
+
+
+def test_the_guard_holds_for_milligrams_and_micrograms():
+    """31,818,182 mg of sodium is 31 kg of salt in 100 g of food."""
+    assert "sodium" not in from_usda([usda(1093, "Sodium, Na", 31_818_182.0, "MG")])
+    assert from_usda([usda(1093, "Sodium, Na", 400.0, "MG")])["sodium"] == 400.0
+
+
+def test_impossible_crowdsourced_values_are_dropped_as_well():
+    """Open Food Facts is no cleaner than FDC, and goes through the same gate.
+
+    OFF publishes in grams, so 500 g of protein per 100 g arrives as 500.0.
+    """
+    assert "protein" not in from_off({"protein": 500.0})
+    assert from_off({"protein": 7.0})["protein"] == 7.0

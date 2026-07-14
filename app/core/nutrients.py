@@ -84,6 +84,44 @@ _UNIT_ALIASES = {"MCG": "UG"}
 _MICRO_SIGNS = str.maketrans({"µ": "u", "μ": "u"})
 
 
+# The most of any nutrient that can exist in 100 g of food, in the unit we
+# publish. These are physical ceilings, not opinions: 100 g of food contains at
+# most 100 g of anything, and fat — the most energy-dense macronutrient at
+# 9 kcal/g — caps energy at about 900 kcal per 100 g.
+#
+# Upstream data violates them. In the April 2026 branded corpus 2,545 products
+# (0.58%) carry at least one impossible value: a burrito at 90,000 kcal and
+# 12,700 g of carbohydrate per 100 g, a drink mix at 151,515 kcal. They look like
+# per-package figures filed as per-100 g. A number that cannot exist is not
+# nutrition data, and serving it is worse than serving nothing — so we drop it
+# and report the nutrient as absent.
+_GRAMS_IN_100G = 100.0
+_MG_IN_100G = 100_000.0
+_UG_IN_100G = 100_000_000.0
+_MAX_KCAL_PER_100G = 902.0
+
+_PHYSICAL_MAX: dict[str, float] = {
+    "kcal": _MAX_KCAL_PER_100G,
+    "g": _GRAMS_IN_100G,
+    "mg": _MG_IN_100G,
+    "µg": _UG_IN_100G,
+}
+
+
+def is_physically_possible(field: str, amount: float) -> bool:
+    """Could 100 g of food really contain this much of this nutrient?
+
+    A negative amount is impossible too — and FDC does publish those.
+    """
+    spec = _BY_FIELD.get(field)
+    if spec is None:
+        return True
+    if amount < 0:
+        return False
+    ceiling = _PHYSICAL_MAX.get(spec.unit)
+    return ceiling is None or amount <= ceiling
+
+
 def _unit_matches(entry: dict, fdc_id: int) -> bool:
     """Is this entry denominated in the unit we expect for its id?
 
@@ -118,6 +156,8 @@ NUTRIENTS: tuple[NutrientSpec, ...] = (
     NutrientSpec("iron", (1089,), "iron_100g", "mg"),
     NutrientSpec("vitamin_d", (1114, 1110), "vitamin-d_100g", "µg"),
 )
+
+_BY_FIELD: dict[str, NutrientSpec] = {spec.field: spec for spec in NUTRIENTS}
 
 # Units Open Food Facts publishes in, where they differ from ours. OFF reports
 # every one of these in grams per 100 g, including the ones a label shows in
@@ -154,6 +194,8 @@ def from_usda(nutrients: list[dict]) -> dict[str, float]:
             scale = _FDC_SCALE.get(fdc_id)
             if scale is not None:
                 amount = round(amount * scale, 4)
+            if not is_physically_possible(spec.field, amount):
+                continue
             values[spec.field] = amount
             break
 
@@ -191,6 +233,8 @@ def from_off(nutrients_per_100g: dict) -> dict[str, float]:
             amount *= 1000.0
         elif spec.field in _OFF_GRAMS_TO_UG:
             amount *= 1_000_000.0
+        if not is_physically_possible(spec.field, amount):
+            continue
         values[spec.field] = amount
     return values
 
