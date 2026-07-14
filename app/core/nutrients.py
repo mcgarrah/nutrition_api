@@ -45,6 +45,97 @@ class NutrientSpec:
 ENERGY_KJ_ID = 1062
 KJ_PER_KCAL = 4.184
 
+# Vitamin D is the same trap in a different unit. FDC carries it under two ids —
+# 1114 in micrograms and 1110 in *International Units* — and nothing in the
+# payload warns that they are not interchangeable: 1 µg = 40 IU. Listing them as
+# plain fallbacks and publishing whichever turns up overstates vitamin D by 40x.
+#
+# This is not an edge case. In the April 2026 branded corpus, 562,567 foods carry
+# only 1110 against 128,397 carrying only 1114 — the IU id outnumbers the µg id
+# more than four to one, and just 111 foods carry both — so the preference order
+# almost never rescues us. A fortified milk at 400 IU (a normal 10 µg serving)
+# went out as 400 µg: 2,667% of the daily value.
+IU_PER_UG_VITAMIN_D = 40.0
+
+# What FDC declares each id in, so we can convert rather than assume. Anything
+# whose declared unit already matches the unit we publish needs no entry here.
+_FDC_SCALE: dict[int, float] = {
+    1110: 1.0 / IU_PER_UG_VITAMIN_D,  # IU -> µg
+}
+
+# The unit FDC is expected to declare for each id we read. An entry arriving in
+# some *other* unit is a nutrient we do not understand, and publishing its number
+# under our own unit label would be exactly the failure this module exists to
+# prevent — so we skip it and fall through to the next id instead.
+_FDC_UNIT: dict[int, str] = {
+    1008: "KCAL", 2047: "KCAL", 2048: "KCAL", 1062: "KJ",
+    1003: "G", 1004: "G", 1085: "G", 1258: "G", 1257: "G", 1005: "G",
+    1079: "G", 2033: "G", 2000: "G", 1063: "G", 1235: "G",
+    1253: "MG", 1093: "MG", 1092: "MG", 1087: "MG", 1089: "MG",
+    1114: "UG", 1110: "IU",
+}
+
+# FDC is not consistent about how it spells a unit, and neither is the SDK.
+_UNIT_ALIASES = {"MCG": "UG"}
+
+# The micro sign (U+00B5) and Greek small mu (U+03BC) both show up in the wild,
+# and neither survives .upper() intact — Python turns "µg" into "ΜG" with a Greek
+# capital Mu, which matches nothing. Fold them to a plain "u" before casefolding.
+_MICRO_SIGNS = str.maketrans({"µ": "u", "μ": "u"})
+
+
+# The most of any nutrient that can exist in 100 g of food, in the unit we
+# publish. These are physical ceilings, not opinions: 100 g of food contains at
+# most 100 g of anything, and fat — the most energy-dense macronutrient at
+# 9 kcal/g — caps energy at about 900 kcal per 100 g.
+#
+# Upstream data violates them. In the April 2026 branded corpus 2,545 products
+# (0.58%) carry at least one impossible value: a burrito at 90,000 kcal and
+# 12,700 g of carbohydrate per 100 g, a drink mix at 151,515 kcal. They look like
+# per-package figures filed as per-100 g. A number that cannot exist is not
+# nutrition data, and serving it is worse than serving nothing — so we drop it
+# and report the nutrient as absent.
+_GRAMS_IN_100G = 100.0
+_MG_IN_100G = 100_000.0
+_UG_IN_100G = 100_000_000.0
+_MAX_KCAL_PER_100G = 902.0
+
+_PHYSICAL_MAX: dict[str, float] = {
+    "kcal": _MAX_KCAL_PER_100G,
+    "g": _GRAMS_IN_100G,
+    "mg": _MG_IN_100G,
+    "µg": _UG_IN_100G,
+}
+
+
+def is_physically_possible(field: str, amount: float) -> bool:
+    """Could 100 g of food really contain this much of this nutrient?
+
+    A negative amount is impossible too — and FDC does publish those.
+    """
+    spec = _BY_FIELD.get(field)
+    if spec is None:
+        return True
+    if amount < 0:
+        return False
+    ceiling = _PHYSICAL_MAX.get(spec.unit)
+    return ceiling is None or amount <= ceiling
+
+
+def _unit_matches(entry: dict, fdc_id: int) -> bool:
+    """Is this entry denominated in the unit we expect for its id?
+
+    An entry that declares no unit is accepted — we cannot check what we were
+    not told, and rejecting it would throw away good data. An entry that
+    declares a *contradictory* unit is rejected.
+    """
+    declared = entry.get("unit")
+    if not declared:
+        return True
+    declared = str(declared).strip().translate(_MICRO_SIGNS).upper()
+    declared = _UNIT_ALIASES.get(declared, declared)
+    return declared == _FDC_UNIT.get(fdc_id, declared)
+
 
 NUTRIENTS: tuple[NutrientSpec, ...] = (
     # Macros
@@ -65,6 +156,8 @@ NUTRIENTS: tuple[NutrientSpec, ...] = (
     NutrientSpec("iron", (1089,), "iron_100g", "mg"),
     NutrientSpec("vitamin_d", (1114, 1110), "vitamin-d_100g", "µg"),
 )
+
+_BY_FIELD: dict[str, NutrientSpec] = {spec.field: spec for spec in NUTRIENTS}
 
 # Units Open Food Facts publishes in, where they differ from ours. OFF reports
 # every one of these in grams per 100 g, including the ones a label shows in
@@ -88,15 +181,29 @@ def from_usda(nutrients: list[dict]) -> dict[str, float]:
     for spec in NUTRIENTS:
         for fdc_id in spec.fdc_ids:
             entry = by_id.get(fdc_id)
-            if entry and entry.get("amount") is not None:
-                values[spec.field] = entry["amount"]
-                break
+            if not entry or entry.get("amount") is None:
+                continue
+            if not _unit_matches(entry, fdc_id):
+                continue
+            try:
+                amount = float(entry["amount"])
+            except (TypeError, ValueError):
+                continue
+            # Convert into the unit we publish. Vitamin D's 1110 is in IU, not
+            # micrograms, and taking it at face value inflates it 40-fold.
+            scale = _FDC_SCALE.get(fdc_id)
+            if scale is not None:
+                amount = round(amount * scale, 4)
+            if not is_physically_possible(spec.field, amount):
+                continue
+            values[spec.field] = amount
+            break
 
     # Energy only in kilojoules: convert rather than drop it, but never mistake
     # it for kilocalories.
     if "calories_kcal" not in values:
         kj = by_id.get(ENERGY_KJ_ID)
-        if kj and kj.get("amount") is not None:
+        if kj and kj.get("amount") is not None and _unit_matches(kj, ENERGY_KJ_ID):
             try:
                 values["calories_kcal"] = round(float(kj["amount"]) / KJ_PER_KCAL, 1)
             except (TypeError, ValueError):
@@ -126,6 +233,8 @@ def from_off(nutrients_per_100g: dict) -> dict[str, float]:
             amount *= 1000.0
         elif spec.field in _OFF_GRAMS_TO_UG:
             amount *= 1_000_000.0
+        if not is_physically_possible(spec.field, amount):
+            continue
         values[spec.field] = amount
     return values
 
