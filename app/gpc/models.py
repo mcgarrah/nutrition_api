@@ -43,6 +43,28 @@ class AttributeTypeItem(BaseModel):
     values: list[AttributeValueItem] = Field(default_factory=list)
 
 
+class AttributeMatch(BaseModel):
+    """A search hit on an attribute type or value, and the bricks it lives under.
+
+    Attributes are where the specificity lives: "olive oil" is not a brick but
+    the value "OLIVE OIL" of the attribute "Type of Edible Vegetable or Plant
+    Oil" on the brick "Oils Edible - Vegetable or Plant". Searching only brick
+    descriptions can never find it, so a match carries the bricks that hold the
+    attribute — the caller's route back into the hierarchy.
+    """
+
+    kind: str = Field(description="'value' or 'type' — what the query matched")
+    att_type_code: str
+    att_type_text: str | None = None
+    att_value_code: str | None = Field(
+        default=None, description="Set when kind == 'value'"
+    )
+    att_value_text: str | None = None
+    bricks: list[BrickItem] = Field(
+        default_factory=list, description="Bricks that carry this attribute"
+    )
+
+
 # --- Detail models (with nested children and breadcrumbs) ---
 
 class SegmentDetail(BaseModel):
@@ -122,6 +144,10 @@ class SearchResponse(BaseModel):
     families: list[FamilyItem] = Field(default_factory=list)
     classes: list[ClassItem] = Field(default_factory=list)
     bricks: list[BrickItem] = Field(default_factory=list)
+    attributes: list[AttributeMatch] = Field(
+        default_factory=list,
+        description="Attribute types/values matching the query, with their bricks",
+    )
     counts: dict[str, int] = Field(
         default_factory=dict,
         description="Total matches per entity type, before the limit is applied",

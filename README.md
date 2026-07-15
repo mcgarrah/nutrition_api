@@ -193,7 +193,9 @@ Example: `GET /api/v1/lookup/04963406021372` returns product name, brand, per-10
 | GET | `/api/v1/gpc/classes/{code}` | Class detail with bricks |
 | GET | `/api/v1/gpc/bricks/` | List bricks (filterable by class) |
 | GET | `/api/v1/gpc/bricks/{code}` | Brick detail with attributes |
-| GET | `/api/v1/gpc/search/?q=...` | Cross-entity search (capped; `limit` up to 200, `counts` reports the real totals) |
+| GET | `/api/v1/gpc/search/?q=...` | Cross-entity search over segments, families, classes, bricks **and attributes** (capped; `limit` up to 200, `counts` reports the real totals) |
+
+GPC keeps the specifics in attributes, not brick names — "olive oil" is the attribute value `OLIVE OIL` of *Type of Edible Vegetable or Plant Oil* on the generic *Oils Edible* brick, not a brick of its own. Search therefore reaches into attribute types and values, and each attribute match carries the bricks that hold it, so `?q=olive` finds the oils brick that a description-only search would miss. Filter with `category=attributes`.
 
 ### Operations
 
