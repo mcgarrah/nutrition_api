@@ -35,14 +35,20 @@ def healthy_upstreams(monkeypatch):
 def test_health_ok_when_all_sources_up(healthy_upstreams):
     body = client.get("/api/v1/health").json()
     assert body["status"] == "ok"
-    assert body["gpc"] == {
-        "status": "ok",
-        "segments": 2,
-        "version": "test",
-        "xml_date": "2026-01-01",
-        "import_timestamp": "2026-01-01T00:00:00",
+    gpc = body["gpc"]
+    assert gpc["status"] == "ok"
+    assert gpc["segments"] == 2
+    assert gpc["version"] == "test"
+    # The full hierarchy is counted, down to attributes — the fixture's rows.
+    assert gpc["counts"] == {
+        "segments": 2, "families": 2, "classes": 2,
+        "bricks": 3, "attribute_types": 1, "attribute_values": 2,
     }
+    assert gpc["scope"].startswith("Food/Beverage")
+    assert isinstance(gpc["size_mb"], (int, float))
     assert body["usda_fdc"]["status"] == "ok"
+    # The key provisioning travels with the upstream status.
+    assert body["usda_fdc"]["key"] in {"configured", "demo", "missing"}
     assert body["open_food_facts"]["status"] == "ok"
 
 

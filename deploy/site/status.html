@@ -184,16 +184,34 @@ async function load() {
         [["dataset", (o.dataset || "").replace("off-", "")],
          ["products", fmtNum(o.products)], ["imported", fmtDate(o.imported_at)],
          o.size_mb && ["size", o.size_mb + " MB"]]),
-      g && tile("GPC taxonomy", g.status,
-        [["version", g.version], ["segments", fmtNum(g.segments)],
-         ["published", g.xml_date]]),
+      g && tile("GPC taxonomy", g.status, [
+        ["version", g.version],
+        ["scope", g.scope],
+        g.counts && ["hierarchy",
+          `${fmtNum(g.counts.segments)} seg → ${fmtNum(g.counts.families)} fam → `
+          + `${fmtNum(g.counts.classes)} class → ${fmtNum(g.counts.bricks)} brick`],
+        g.counts && ["attributes",
+          `${fmtNum(g.counts.attribute_types)} types / ${fmtNum(g.counts.attribute_values)} values`],
+        g.size_mb != null && ["size", g.size_mb + " MB"],
+        ["published", g.xml_date],
+      ]),
       rs && tile("Response store", rs.enabled ? "ok" : "disabled",
         [["records", fmtNum(Object.values(rs.records || {}).reduce((a, b) => a + b, 0))],
          ["ttl", (rs.ttl_days ?? "—") + " days"]]),
     ];
+    const u = health.usda_fdc || {};
+    // A DEMO_KEY works but is throttled to a trickle, so flag it as needing
+    // attention even when the probe itself is green.
+    const usdaState = (u.key === "demo" && u.status === "ok") ? "demo"
+      : (u.key === "missing" && u.status !== "error") ? "unconfigured" : u.status;
+    const keyLabel = { configured: "real key — full rate",
+      demo: "DEMO_KEY — throttled", missing: "not set" }[u.key] || u.key;
     external = [
-      health.usda_fdc && tile("USDA FDC — live API", health.usda_fdc.status,
-        [health.usda_fdc.detail && ["detail", health.usda_fdc.detail.slice(0, 60)]]),
+      health.usda_fdc && tile("USDA FDC — live API", usdaState, [
+        ["token", keyLabel],
+        u.total_foods != null && ["reachable", "yes"],
+        u.detail && ["detail", u.detail.slice(0, 60)],
+      ]),
       health.open_food_facts && tile("Open Food Facts — live API", health.open_food_facts.status,
         [health.open_food_facts.detail && ["detail", health.open_food_facts.detail.slice(0, 60)]]),
     ];

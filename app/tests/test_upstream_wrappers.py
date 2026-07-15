@@ -425,3 +425,20 @@ async def test_usda_health_probe_times_out_rather_than_hanging(monkeypatch):
     assert elapsed < 2.0, f"health probe hung for {elapsed:.1f}s"
     assert status["status"] == "error"
     assert "timed out" in status["detail"]
+
+
+# ── FDC key provisioning (for the status page) ────────────────────────
+
+def test_key_status_reports_configured_for_a_real_key(monkeypatch):
+    monkeypatch.setenv("FDC_API_KEY", "a-real-looking-key-123")
+    assert usda_fdc.key_status() == "configured"
+
+
+def test_key_status_reports_demo_for_the_shared_demo_key(monkeypatch):
+    monkeypatch.setenv("FDC_API_KEY", "DEMO_KEY")
+    assert usda_fdc.key_status() == "demo"
+
+
+def test_key_status_reports_missing_when_unset(monkeypatch):
+    monkeypatch.delenv("FDC_API_KEY", raising=False)
+    assert usda_fdc.key_status() == "missing"

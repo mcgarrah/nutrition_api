@@ -182,13 +182,28 @@ async def health():
     from .core import open_food_facts as off
     result = {"status": "ok"}
     try:
+        from .database import DB_PATH
         db = await get_db()
-        row = await db.execute_fetchall("SELECT COUNT(*) FROM segments")
+        # Counts down the whole hierarchy — Segment → Family → Class → Brick →
+        # Attributes — so the status page can show how much taxonomy is loaded,
+        # not just that some is.
+        counts = {}
+        for table in ("segments", "families", "classes", "bricks",
+                      "attribute_types", "attribute_values"):
+            row = await db.execute_fetchall(f"SELECT COUNT(*) FROM {table}")
+            counts[table] = row[0][0]
         meta_rows = await db.execute_fetchall("SELECT key, value FROM gpc_metadata")
         metadata = {r[0]: r[1] for r in meta_rows}
+        size_mb = round(DB_PATH.stat().st_size / 1e6, 2) if DB_PATH.exists() else None
         result["gpc"] = {
             "status": "ok",
-            "segments": row[0][0],
+            "segments": counts["segments"],  # kept for existing consumers
+            "counts": counts,
+            # We import only the Food/Beverage segment; GS1 publishes 44 in all
+            # (Healthcare, Apparel, Electronics, …), so the loaded taxonomy is a
+            # deliberate slice, not the whole standard.
+            "scope": "Food/Beverage (1 of 44 GS1 segments)",
+            "size_mb": size_mb,
             "version": metadata.get("gpc_version"),
             "xml_date": metadata.get("xml_date"),
             "import_timestamp": metadata.get("import_timestamp"),
@@ -204,6 +219,10 @@ async def health():
         off.check_connectivity(),
     )
 
+    # How the FDC key is provisioned — a real key, the throttled shared DEMO_KEY,
+    # or none — travels with the upstream status so an operator can see at a
+    # glance why live lookups might be failing or rate-limited.
+    usda_status["key"] = usda_fdc.key_status()
     result["usda_fdc"] = usda_status
     if usda_status["status"] == "error":
         result["status"] = "degraded"
