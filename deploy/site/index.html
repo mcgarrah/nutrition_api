@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nutrition API</title>
+<style>
+  :root {
+    --surface-0: #f2f2f0;
+    --surface-1: #fcfcfb;
+    --surface-2: #e9e9e5;
+    --border:    #dedddA;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #78776f;
+    --off:  #2a78d6;
+    --usda: #1baf7a;
+    --gpc:  #b57e00;
+    --ink:  #3a3a37;
+    --good: #008300;
+    --bad:  #e34948;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-0: #111110;
+      --surface-1: #1a1a19;
+      --surface-2: #232320;
+      --border:    #35342f;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #8f8e84;
+      --off:  #3987e5;
+      --usda: #199e70;
+      --gpc:  #d9a53a;
+      --ink:  #cfcec3;
+      --good: #4caf50;
+      --bad:  #e66767;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 3rem 1rem 4rem;
+    background: var(--surface-0); color: var(--text-primary);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 .35rem; letter-spacing: -.015em; }
+  .lede { color: var(--text-secondary); font-size: 1rem; margin: 0 0 .35rem; max-width: 60ch; }
+  .health { font-size: .8125rem; color: var(--text-secondary); margin: 0 0 2rem; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: .35rem; background: var(--text-muted); vertical-align: baseline; }
+  .dot.ok { background: var(--good); } .dot.bad { background: var(--bad); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .75rem; }
+  a.tile {
+    display: block; text-decoration: none; color: inherit;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 1.1rem 1.15rem;
+    border-left: 3px solid var(--accent, var(--ink)); transition: border-color .12s, transform .12s;
+  }
+  a.tile:hover { transform: translateY(-1px); border-color: var(--accent, var(--text-muted)); }
+  a.tile .t { font-weight: 650; font-size: 1.02rem; display: flex; align-items: baseline; gap: .5rem; }
+  a.tile .t .path {
+    margin-left: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .75rem; color: var(--text-muted); font-weight: 400;
+  }
+  a.tile .d { color: var(--text-secondary); font-size: .875rem; margin-top: .3rem; }
+
+  .tile.off  { --accent: var(--off); }
+  .tile.usda { --accent: var(--usda); }
+  .tile.gpc  { --accent: var(--gpc); }
+
+  .section { margin-top: 1.75rem; font-size: .75rem; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--text-muted); font-weight: 700; margin-bottom: .6rem; }
+
+  footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--border);
+    font-size: .8125rem; color: var(--text-muted); line-height: 1.6; }
+  footer a { color: var(--off); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Nutrition API</h1>
+  <p class="lede">
+    A unified food-intelligence service: one lookup that merges USDA FoodData Central,
+    Open Food Facts, and the GS1 Global Product Classification.
+  </p>
+  <p class="health" id="health"><span class="dot"></span>checking status…</p>
+
+  <div class="section">Try it</div>
+  <div class="grid">
+    <a class="tile off" href="/ui/">
+      <div class="t">Lookup tester <span class="path">/ui/</span></div>
+      <div class="d">Scan or type a barcode; see the merged product card, per-source provenance, and latency.</div>
+    </a>
+    <a class="tile gpc" href="/gpc">
+      <div class="t">GPC browser <span class="path">/gpc</span></div>
+      <div class="d">Explore the GS1 taxonomy — Segment → Family → Class → Brick → Attributes. Search reaches into attributes.</div>
+    </a>
+  </div>
+
+  <div class="section">API</div>
+  <div class="grid">
+    <a class="tile" href="/docs">
+      <div class="t">Swagger UI <span class="path">/docs</span></div>
+      <div class="d">Interactive API reference — call any endpoint from the browser.</div>
+    </a>
+    <a class="tile" href="/redoc">
+      <div class="t">ReDoc <span class="path">/redoc</span></div>
+      <div class="d">Clean, reference-style documentation of the same OpenAPI schema.</div>
+    </a>
+    <a class="tile usda" href="/api/v1/lookup/049000006346">
+      <div class="t">Example lookup <span class="path">/api/v1/lookup/{gtin}</span></div>
+      <div class="d">The core endpoint — a merged CanonicalProduct. This link looks up a Coca-Cola can.</div>
+    </a>
+    <a class="tile" href="/api/v1/health">
+      <div class="t">Health <span class="path">/api/v1/health</span></div>
+      <div class="d">Per-source status and the date of each local data copy.</div>
+    </a>
+  </div>
+
+  <footer>
+    Data from
+    <a href="https://fdc.nal.usda.gov/">USDA FoodData Central</a> (public domain),
+    <a href="https://world.openfoodfacts.org/">Open Food Facts</a>
+    (<a href="https://opendatacommons.org/licenses/odbl/1.0/">ODbL 1.0</a>, images CC BY-SA 3.0), and
+    <a href="https://www.gs1.org/standards/gpc">GS1 GPC</a>.
+    Full attribution: <a href="/api/v1/attribution">/api/v1/attribution</a>.
+    Source: <a href="https://github.com/mcgarrah/nutrition_api">github.com/mcgarrah/nutrition_api</a>.
+  </footer>
+</div>
+
+<script>
+  // The landing page is static (served by Caddy), so it fetches health through
+  // the proxy to show live status rather than hard-coding it.
+  fetch("/api/v1/health").then(r => r.json()).then(h => {
+    const el = document.getElementById("health");
+    const ok = h.status === "ok";
+    const parts = [];
+    if (h.usda_fdc_local) parts.push(`USDA copy ${h.usda_fdc_local.dataset_date || h.usda_fdc_local.dataset || "—"}`);
+    if (h.open_food_facts_local) parts.push(`OFF copy ${h.open_food_facts_local.dataset || "—"}`);
+    el.innerHTML = `<span class="dot ${ok ? "ok" : "bad"}"></span>`
+      + `Status: ${h.status}` + (parts.length ? ` · ${parts.join(" · ")}` : "");
+  }).catch(() => {
+    document.getElementById("health").innerHTML =
+      `<span class="dot bad"></span>Status unavailable`;
+  });
+</script>
+</body>
+</html>

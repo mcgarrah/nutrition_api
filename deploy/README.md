@@ -53,3 +53,57 @@ The unit runs with `NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=full`, and
 the app self-updates the GS1 GPC taxonomy there on startup — dropping that line
 makes the taxonomy update fail silently, so keep it if you move the data
 directory.
+
+## Caddy (public front — TLS + landing page)
+
+`Caddyfile` puts a [Caddy](https://caddyserver.com/) reverse proxy in front of
+the uvicorn service. Caddy terminates TLS with an automatically-provisioned
+certificate, serves a static landing hub at the root (`site/index.html`), and
+proxies the application and API paths to the backend on `127.0.0.1:8080`:
+
+| Path | Served by |
+| :--- | :--- |
+| `/` | the static landing hub (Caddy, from `site/`) |
+| `/ui/` | lookup tester (backend) |
+| `/gpc` | GPC browser (backend) |
+| `/docs`, `/redoc`, `/openapi.json` | API docs (backend) |
+| `/api/*` | JSON API (backend) |
+
+The landing page is served by Caddy itself, so the front page stays up even
+while the backend is restarting.
+
+### Set your domain
+
+Edit the `nutrition.example.org` block in `Caddyfile` to your real hostname —
+Caddy obtains and renews the certificate for it automatically (the host must
+resolve to this machine and ports 80/443 must be reachable). If the checkout is
+not at `/opt/nutrition_api`, set `NUTRITION_SITE_ROOT` or edit the `root`
+directive.
+
+### Verify, then run
+
+```bash
+caddy validate --config deploy/Caddyfile
+caddy fmt --overwrite deploy/Caddyfile       # optional: canonical formatting
+
+# Local smoke test — no domain, no TLS — serves on http://localhost:8081/
+caddy run --config deploy/Caddyfile
+```
+
+The `:8081` block at the bottom of the `Caddyfile` is that local test listener;
+it shares one config snippet with the production block, so what you test is what
+you deploy.
+
+### As a service
+
+Run Caddy from its own systemd unit (the distro's `caddy` package installs
+`caddy.service` and reads `/etc/caddy/Caddyfile`):
+
+```bash
+sudo cp deploy/Caddyfile /etc/caddy/Caddyfile   # with your domain set
+sudo cp -r deploy/site /opt/nutrition_api/deploy/site
+sudo systemctl reload caddy
+```
+
+Caddy and the `nutrition-api` service are independent — restart or update the
+backend without touching Caddy, and the landing page never goes down with it.
