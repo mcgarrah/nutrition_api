@@ -26,7 +26,7 @@ client = TestClient(app)
 @pytest.fixture
 def stub_lookup(monkeypatch):
     def install(product):
-        async def fake(gtin):
+        async def fake(gtin, *a, **k):
             return product
 
         monkeypatch.setattr(orchestrator, "lookup", fake)
@@ -119,10 +119,10 @@ def test_malformed_gtins_rejected_before_any_upstream_call(gtin, monkeypatch):
 
 def test_upstream_outage_degrades_to_partial_200_not_500(monkeypatch, off_product, gpc_db):
     """USDA down + OFF up must still answer, flagged via data_sources."""
-    async def off_ok(barcode):
+    async def off_ok(barcode, *a, **k):
         return off_product
 
-    async def usda_down(upc):
+    async def usda_down(upc, *a, **k):
         raise ConnectionError("FDC unreachable")
 
     monkeypatch.setattr(off, "get_product", off_ok)
@@ -151,10 +151,10 @@ def test_both_upstreams_down_yields_404_not_500(monkeypatch, gpc_db):
 def test_slow_upstream_is_cut_off_at_the_timeout(monkeypatch, off_product, gpc_db):
     monkeypatch.setattr(resilience, "UPSTREAM_TIMEOUT_S", 0.05)
 
-    async def off_ok(barcode):
+    async def off_ok(barcode, *a, **k):
         return off_product
 
-    async def usda_slow(upc):
+    async def usda_slow(upc, *a, **k):
         await asyncio.sleep(5)
 
     monkeypatch.setattr(off, "get_product", off_ok)
@@ -167,12 +167,12 @@ def test_slow_upstream_is_cut_off_at_the_timeout(monkeypatch, off_product, gpc_d
 
 
 def test_open_circuit_is_skipped_without_delaying_the_request(monkeypatch, off_product, gpc_db):
-    async def off_ok(barcode):
+    async def off_ok(barcode, *a, **k):
         return off_product
 
     calls = {"n": 0}
 
-    async def usda_should_be_skipped(upc):
+    async def usda_should_be_skipped(upc, *a, **k):
         calls["n"] += 1
         return None
 
@@ -209,7 +209,7 @@ def test_usda_search_returns_results(monkeypatch):
 
 
 def test_usda_food_by_id(monkeypatch):
-    async def ok(fdc_id):
+    async def ok(fdc_id, *a, **k):
         return {"fdc_id": fdc_id, "description": "COLA"}
 
     # is_available() must be stubbed too: the route settles the configuration
@@ -233,7 +233,7 @@ def test_usda_food_503_when_unconfigured(monkeypatch):
 def test_usda_food_404_when_the_food_does_not_exist(monkeypatch):
     """A question with no answer is a 404. It used to be reported as 503 —
     blaming the service for the absence of a food nobody had."""
-    async def missing(fdc_id):
+    async def missing(fdc_id, *a, **k):
         return None
 
     monkeypatch.setattr(usda_fdc, "is_available", lambda: True)
@@ -245,7 +245,7 @@ def test_usda_food_404_when_the_food_does_not_exist(monkeypatch):
 
 
 def test_usda_food_502_on_upstream_error(monkeypatch):
-    async def boom(fdc_id):
+    async def boom(fdc_id, *a, **k):
         raise ConnectionError("down")
 
     monkeypatch.setattr(usda_fdc, "is_available", lambda: True)
@@ -254,7 +254,7 @@ def test_usda_food_502_on_upstream_error(monkeypatch):
 
 
 def test_usda_upc_lookup_returns_food(monkeypatch):
-    async def ok(upc):
+    async def ok(upc, *a, **k):
         return {"fdc_id": 1, "description": "DORITOS"}
 
     monkeypatch.setattr(usda_fdc, "search_by_upc", ok)
@@ -262,7 +262,7 @@ def test_usda_upc_lookup_returns_food(monkeypatch):
 
 
 def test_usda_upc_lookup_502_on_upstream_error(monkeypatch):
-    async def boom(upc):
+    async def boom(upc, *a, **k):
         raise ConnectionError("down")
 
     monkeypatch.setattr(usda_fdc, "search_by_upc", boom)
@@ -272,7 +272,7 @@ def test_usda_upc_lookup_502_on_upstream_error(monkeypatch):
 # ── /api/v1/off/* ─────────────────────────────────────────────────────
 
 def test_off_product_returns_payload(monkeypatch, off_product):
-    async def ok(barcode):
+    async def ok(barcode, *a, **k):
         return off_product
 
     monkeypatch.setattr(off, "get_product", ok)

@@ -65,6 +65,12 @@
   }
   button:disabled { opacity: .55; cursor: progress; }
 
+  .fresh {
+    display: flex; align-items: center; gap: .45rem; margin-bottom: 1rem;
+    font-size: .8125rem; color: var(--text-secondary); cursor: pointer;
+  }
+  .fresh input { accent-color: var(--src-off); cursor: pointer; }
+
   .samples { display: flex; flex-wrap: wrap; gap: .375rem; margin-bottom: 1.75rem; }
   .chip {
     padding: .3rem .6rem; font-size: .8125rem; cursor: pointer;
@@ -112,7 +118,13 @@
   .badge {
     font-size: .75rem; font-weight: 600; padding: .2rem .55rem; border-radius: 999px;
     border: 1px solid currentColor;
+    display: inline-flex; align-items: baseline; gap: .35rem;
   }
+  .badge .origin {
+    font-weight: 500; font-size: .6875rem; letter-spacing: .01em;
+    opacity: .85; font-variant-numeric: tabular-nums;
+  }
+  .badge .origin.live { font-style: italic; }
   .tags { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .5rem; }
   .tag {
     font-size: .75rem; padding: .15rem .5rem; border-radius: 4px;
@@ -158,6 +170,10 @@
            value="028400642255" inputmode="numeric" autocomplete="off">
     <button type="submit" id="go">Look up</button>
   </form>
+  <label class="fresh" for="fresh">
+    <input type="checkbox" id="fresh">
+    Skip cache — query the live upstream APIs (slower; ignores the local copies)
+  </label>
 
   <div class="samples" id="samples"></div>
 
@@ -274,10 +290,20 @@ function render(p, rtt) {
     ? `<div class="crumb">${p.category_hierarchy.map(c => `<span>${esc(c)}</span>`).join("")}</div>`
     : `<div class="crumb none">no category matched</div>`;
 
+  const prov = p.provenance || {};
   const badges = SOURCES.map(s => {
     const on = (p.data_sources || []).includes(s.key);
+    // Where this source's data came from: the local bulk copy (with the date of
+    // the dataset it was built from) or the live upstream API.
+    const pr = prov[s.key];
+    let origin = "";
+    if (on && pr) {
+      origin = pr.origin === "local"
+        ? `<small class="origin local">local · ${esc(pr.dataset_date || "?")}</small>`
+        : `<small class="origin live">live</small>`;
+    }
     return `<span class="badge" style="color:${on ? s.color : "var(--text-muted)"};${on ? "" : "opacity:.6"}">
-      ${on ? "✓" : "○"} ${s.label}</span>`;
+      ${on ? "✓" : "○"} ${s.label}${origin}</span>`;
   }).join("");
 
   const tags = [...(p.allergens || []), ...(p.labels || [])]
@@ -347,8 +373,9 @@ async function lookup() {
   $("go").disabled = true;
   $("out").innerHTML = `<div class="card"><p class="sub" style="margin:0">Looking up ${esc(gtin)}…</p></div>`;
   const t0 = performance.now();
+  const fresh = $("fresh").checked ? "?fresh=true" : "";
   try {
-    const res = await fetch(`/api/v1/lookup/${encodeURIComponent(gtin)}`);
+    const res = await fetch(`/api/v1/lookup/${encodeURIComponent(gtin)}${fresh}`);
     const rtt = performance.now() - t0;
     const body = await res.json();
     res.ok ? render(body, rtt) : renderError(res.status, body, rtt);

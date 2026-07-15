@@ -19,11 +19,11 @@ from app.core.orchestrator import _fetch_gpc_categories, _nv, _usda_nutrient
 
 
 def patch_sources(monkeypatch, off_data=None, usda_data=None, gpc=None):
-    async def fake_off(barcode):
-        return off_data, 10.0
+    async def fake_off(barcode, *a, **k):
+        return off_data, 10.0, None
 
-    async def fake_usda(barcode):
-        return usda_data, 20.0
+    async def fake_usda(barcode, *a, **k):
+        return usda_data, 20.0, None
 
     async def fake_gpc(categories):
         return gpc or [], 1.0
@@ -283,12 +283,12 @@ async def test_empty_results_are_never_cached(monkeypatch):
     """A transient outage must not be memoized as 'this product doesn't exist'."""
     calls = {"n": 0}
 
-    async def counting_off(barcode):
+    async def counting_off(barcode, *a, **k):
         calls["n"] += 1
-        return None, 1.0
+        return None, 1.0, None
 
     monkeypatch.setattr(orchestrator, "_fetch_off", counting_off)
-    monkeypatch.setattr(orchestrator, "_fetch_usda", lambda b: _none())
+    monkeypatch.setattr(orchestrator, "_fetch_usda", lambda b, *a, **k: _none())
     monkeypatch.setattr(orchestrator, "_fetch_gpc_categories", lambda c: _empty())
 
     await orchestrator.lookup("1")
@@ -297,7 +297,7 @@ async def test_empty_results_are_never_cached(monkeypatch):
 
 
 async def _none():
-    return None, 1.0
+    return None, 1.0, None
 
 
 async def _empty():
@@ -329,12 +329,12 @@ async def test_off_timeout_is_absorbed(monkeypatch):
 
     monkeypatch.setattr(resilience, "UPSTREAM_TIMEOUT_S", 0.05)
 
-    async def slow(barcode):
+    async def slow(barcode, *a, **k):
         import asyncio as _a
         await _a.sleep(5)
 
     monkeypatch.setattr(off_mod, "get_product", slow)
-    data, latency_ms = await orchestrator._fetch_off("1")
+    data, latency_ms, _ = await orchestrator._fetch_off("1")
 
     assert data is None
     assert latency_ms < 500          # returned at the timeout, not after 5s
@@ -346,7 +346,7 @@ async def test_usda_circuit_open_skips_the_call(monkeypatch):
 
     calls = {"n": 0}
 
-    async def should_not_run(upc):
+    async def should_not_run(upc, *a, **k):
         calls["n"] += 1
         return None
 
@@ -354,7 +354,7 @@ async def test_usda_circuit_open_skips_the_call(monkeypatch):
     for _ in range(resilience.usda_breaker.failure_threshold):
         resilience.usda_breaker.record_failure()
 
-    data, _ = await orchestrator._fetch_usda("1")
+    data, _, _ = await orchestrator._fetch_usda("1")
 
     assert data is None
     assert calls["n"] == 0

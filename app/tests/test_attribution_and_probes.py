@@ -84,11 +84,11 @@ def test_unknown_sources_are_ignored():
 # ── attribution travels with the data ─────────────────────────────────
 
 def patch_sources(monkeypatch, off_data=None, usda_data=None, gpc=None):
-    async def fake_off(barcode):
-        return off_data, 1.0
+    async def fake_off(barcode, *a, **k):
+        return off_data, 1.0, None
 
-    async def fake_usda(upc):
-        return usda_data, 1.0
+    async def fake_usda(upc, *a, **k):
+        return usda_data, 1.0, None
 
     async def fake_gpc(categories):
         return gpc or [], 1.0
@@ -200,7 +200,7 @@ async def test_repeated_health_polls_make_one_upstream_call(monkeypatch):
     through us. Measured before the fix: 20 polls -> 20 live OFF requests."""
     calls = []
 
-    async def counting(barcode):
+    async def counting(barcode, *a, **k):
         calls.append(barcode)
         return {"product_name": "Nutella"}
 
@@ -236,7 +236,7 @@ async def test_the_probe_is_charged_to_the_outbound_budget(monkeypatch):
 
 async def test_an_exhausted_budget_serves_the_last_known_verdict(monkeypatch):
     """Better a stale answer than either lying or spending a token we lack."""
-    async def ok(barcode):
+    async def ok(barcode, *a, **k):
         return {"product_name": "Nutella"}
 
     monkeypatch.setattr(off, "get_product", ok)
@@ -265,7 +265,7 @@ async def test_a_failed_probe_is_cached_too(monkeypatch):
     """An upstream that is down must not be re-probed on every poll either."""
     calls = []
 
-    async def failing(barcode):
+    async def failing(barcode, *a, **k):
         calls.append(barcode)
         raise ConnectionError("OFF unreachable")
 

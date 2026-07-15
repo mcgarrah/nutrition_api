@@ -53,11 +53,11 @@ async def test_upstreams_are_queried_in_parallel_not_in_series(monkeypatch, gpc_
     upstream, not the sum of them."""
     delay = 0.15
 
-    async def slow_off(barcode):
+    async def slow_off(barcode, *a, **k):
         await asyncio.sleep(delay)
         return {"product_name": "Cola", "nutrients_per_100g": {}, "categories": []}
 
-    async def slow_usda(upc):
+    async def slow_usda(upc, *a, **k):
         await asyncio.sleep(delay)
         return {"description": "COLA", "nutrients": []}
 
@@ -77,10 +77,10 @@ async def test_a_slow_upstream_does_not_delay_a_fast_one(monkeypatch, gpc_db):
     """OFF must not be held hostage by a USDA call that will time out."""
     monkeypatch.setattr(resilience, "UPSTREAM_TIMEOUT_S", 0.1)
 
-    async def fast_off(barcode):
+    async def fast_off(barcode, *a, **k):
         return {"product_name": "Cola", "nutrients_per_100g": {}, "categories": []}
 
-    async def hanging_usda(upc):
+    async def hanging_usda(upc, *a, **k):
         await asyncio.sleep(10)
 
     monkeypatch.setattr(off, "get_product", fast_off)
@@ -98,11 +98,11 @@ async def test_concurrent_lookups_of_the_same_gtin_all_succeed(
     monkeypatch, gpc_db, ample_upstream_budget,
 ):
     """Ten simultaneous scans of the same barcode must not corrupt the cache."""
-    async def off_ok(barcode):
+    async def off_ok(barcode, *a, **k):
         await asyncio.sleep(0.01)
         return {"product_name": "Cola", "nutrients_per_100g": {}, "categories": []}
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     monkeypatch.setattr(off, "get_product", off_ok)
@@ -119,14 +119,14 @@ async def test_concurrent_lookups_of_the_same_gtin_all_succeed(
 async def test_concurrent_lookups_of_different_gtins_do_not_cross_contaminate(
     monkeypatch, gpc_db, ample_upstream_budget,
 ):
-    async def off_by_barcode(barcode):
+    async def off_by_barcode(barcode, *a, **k):
         return {
             "product_name": f"Product-{barcode}",
             "nutrients_per_100g": {},
             "categories": [],
         }
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     monkeypatch.setattr(off, "get_product", off_by_barcode)
@@ -157,7 +157,7 @@ def clocked_cache(monkeypatch):
 
 
 def counting_sources(monkeypatch, calls):
-    async def off_counting(barcode):
+    async def off_counting(barcode, *a, **k):
         calls.append(barcode)
         return {
             "product_name": f"Product-{barcode}",
@@ -165,7 +165,7 @@ def counting_sources(monkeypatch, calls):
             "categories": [],
         }
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     monkeypatch.setattr(off, "get_product", off_counting)
@@ -239,14 +239,14 @@ async def test_expired_entry_is_refetched_not_served_stale(
     install(ttl=10)
     name = {"value": "Original"}
 
-    async def off_changing(barcode):
+    async def off_changing(barcode, *a, **k):
         return {
             "product_name": name["value"],
             "nutrients_per_100g": {},
             "categories": [],
         }
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     monkeypatch.setattr(off, "get_product", off_changing)
@@ -318,10 +318,10 @@ async def test_recovered_upstream_is_used_again(monkeypatch, gpc_db):
 
     state = {"healthy": False}
 
-    async def off_ok(barcode):
+    async def off_ok(barcode, *a, **k):
         return {"product_name": "Cola", "nutrients_per_100g": {}, "categories": []}
 
-    async def flaky_usda(upc):
+    async def flaky_usda(upc, *a, **k):
         if not state["healthy"]:
             raise ConnectionError("FDC down")
         return {
@@ -350,11 +350,11 @@ async def test_recovered_upstream_is_used_again(monkeypatch, gpc_db):
 # ══ Latency telemetry ═════════════════════════════════════════════════
 
 async def test_reported_latency_tracks_actual_upstream_time(monkeypatch, gpc_db):
-    async def slow_off(barcode):
+    async def slow_off(barcode, *a, **k):
         await asyncio.sleep(0.05)
         return {"product_name": "Cola", "nutrients_per_100g": {}, "categories": []}
 
-    async def instant_usda(upc):
+    async def instant_usda(upc, *a, **k):
         return None
 
     monkeypatch.setattr(off, "get_product", slow_off)
@@ -376,10 +376,10 @@ async def test_one_upstream_tripping_does_not_trip_the_other(monkeypatch, gpc_db
     says nothing about the thread pool underneath them — which is precisely how
     the shared-executor starvation bug hid. See test_thread_isolation.
     """
-    async def off_ok(barcode):
+    async def off_ok(barcode, *a, **k):
         return {"product_name": "Cola", "nutrients_per_100g": {}, "categories": []}
 
-    async def usda_down(upc):
+    async def usda_down(upc, *a, **k):
         raise ConnectionError("FDC down")
 
     monkeypatch.setattr(off, "get_product", off_ok)

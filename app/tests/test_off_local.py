@@ -239,25 +239,25 @@ def test_health_names_the_dataset_before_any_lookup(local_db):
 @pytest.mark.asyncio
 async def test_a_local_hit_never_calls_the_api(local_db, monkeypatch):
     """The reason the copy exists: no network read, no rate-limit token."""
-    async def explode(barcode):
+    async def explode(barcode, *a, **k):
         raise AssertionError("the OFF API must not be called for a local hit")
 
     monkeypatch.setattr(orchestrator.off, "get_product", explode)
 
-    data, _ = await orchestrator._fetch_off("04963406021372")
+    data, _, _ = await orchestrator._fetch_off("04963406021372")
 
     assert data["product_name"] == "Coca-Cola Classic"
 
 
 @pytest.mark.asyncio
 async def test_a_local_miss_falls_through_to_the_api(local_db, monkeypatch):
-    async def upstream(barcode):
+    async def upstream(barcode, *a, **k):
         return {"product_name": "BRAND NEW PRODUCT", "code": barcode,
                 "nutrients_per_100g": {}}
 
     monkeypatch.setattr(orchestrator.off, "get_product", upstream)
 
-    data, _ = await orchestrator._fetch_off("00000000000000")
+    data, _, _ = await orchestrator._fetch_off("00000000000000")
 
     assert data["product_name"] == "BRAND NEW PRODUCT"
 
@@ -269,12 +269,35 @@ async def test_a_broken_local_copy_still_lets_the_api_answer(tmp_path, monkeypat
     monkeypatch.setattr(off_local, "DB_PATH", broken)
     monkeypatch.setattr(off_local, "_db", None)
 
-    async def upstream(barcode):
+    async def upstream(barcode, *a, **k):
         return {"product_name": "FROM THE API", "code": barcode,
                 "nutrients_per_100g": {}}
 
     monkeypatch.setattr(orchestrator.off, "get_product", upstream)
 
-    data, _ = await orchestrator._fetch_off("04963406021372")
+    data, _, _ = await orchestrator._fetch_off("04963406021372")
 
     assert data["product_name"] == "FROM THE API"
+
+
+# ── Provenance and the fresh (skip-cache) flag ────────────────────────
+
+def test_provenance_reports_local_with_the_dataset_date(local_db):
+    prov = off_local.provenance()
+
+    assert prov["origin"] == "local"
+    assert prov["dataset"] == "off-2026-07-14"
+    assert prov["dataset_date"] == "2026-07-14"
+
+
+@pytest.mark.asyncio
+async def test_fresh_bypasses_local_off_and_is_tagged_live(local_db, monkeypatch):
+    async def upstream(barcode, use_store=True):
+        return {"product_name": "LIVE", "code": barcode, "nutrients_per_100g": {}}
+
+    monkeypatch.setattr(orchestrator.off, "get_product", upstream)
+
+    data, _, prov = await orchestrator._fetch_off("04963406021372", fresh=True)
+
+    assert data["product_name"] == "LIVE"
+    assert prov == {"origin": "live"}

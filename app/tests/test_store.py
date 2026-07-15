@@ -211,7 +211,7 @@ async def test_the_store_survives_the_in_memory_cache_being_lost(monkeypatch):
     sdk = _FakeOffSdk()
     monkeypatch.setattr(off, "_get_off_api", lambda: sdk)
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     async def no_gpc(categories):

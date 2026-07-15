@@ -31,7 +31,7 @@ def canned_lookup(monkeypatch):
         upstream_latency_ms={"USDA_FDC": 110.5},
     )
 
-    async def fake_lookup(gtin):
+    async def fake_lookup(gtin, *a, **k):
         return product
 
     monkeypatch.setattr(orchestrator, "lookup", fake_lookup)
@@ -49,7 +49,7 @@ def test_lookup_returns_canonical_product(canned_lookup):
 
 
 def test_lookup_404_when_no_source_has_data(monkeypatch):
-    async def fake_lookup(gtin):
+    async def fake_lookup(gtin, *a, **k):
         return CanonicalProduct(gtin=gtin)
 
     monkeypatch.setattr(orchestrator, "lookup", fake_lookup)
@@ -85,3 +85,20 @@ def test_lookup_rejects_malformed_gtin(bad_gtin):
 def test_lookup_accepts_valid_gtin_lengths(good_gtin, canned_lookup):
     resp = client.get(f"/api/v1/lookup/{good_gtin}")
     assert resp.status_code == 200
+
+
+def test_fresh_query_param_is_forwarded_to_the_orchestrator(monkeypatch):
+    """?fresh=true must reach orchestrator.lookup as fresh=True."""
+    seen = {}
+
+    async def fake_lookup(gtin, fresh=False):
+        seen["fresh"] = fresh
+        return CanonicalProduct(gtin=gtin, data_sources=["USDA_FDC"])
+
+    monkeypatch.setattr(orchestrator, "lookup", fake_lookup)
+
+    client.get("/api/v1/lookup/028400642255?fresh=true")
+    assert seen["fresh"] is True
+
+    client.get("/api/v1/lookup/028400642255")
+    assert seen["fresh"] is False

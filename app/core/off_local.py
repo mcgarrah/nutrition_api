@@ -27,6 +27,7 @@ Licensed under MIT License
 import logging
 import lzma
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -35,6 +36,8 @@ import aiosqlite
 
 from .nutrients import NUTRIENTS
 from .usda_fdc import normalize_gtin
+
+_DATASET_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +188,18 @@ def _read_metadata() -> dict[str, str]:
         logger.warning("Could not read metadata from %s: %s", DB_PATH, e)
         return {}
     return _metadata
+
+
+def provenance() -> dict:
+    """Origin tag for a local hit: the dataset and its date, for the response."""
+    metadata = _read_metadata()
+    dataset = metadata.get("dataset")
+    match = _DATASET_DATE.search(dataset or "")
+    return {
+        "origin": "local",
+        "dataset": dataset,
+        "dataset_date": match.group(0) if match else None,
+    }
 
 
 def stats() -> dict:

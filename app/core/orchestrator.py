@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 from cachetools import TTLCache
 from usda_fdc.exceptions import FdcRateLimitError
 
-from .models import CanonicalProduct, NutrientValue
+from .models import CanonicalProduct, NutrientValue, SourceProvenance
 from . import fdc_local
 from . import off_local
 from . import usda_fdc
@@ -48,18 +48,26 @@ _lookup_cache: TTLCache = TTLCache(maxsize=CACHE_MAX_SIZE, ttl=CACHE_TTL_S)
 # cold lookup needs the budget for both.
 USDA_LOOKUP_ROUND_TRIPS = 2
 
+# Provenance tag for a source served from the live upstream API rather than a
+# local copy.
+_LIVE = {"origin": "live"}
 
-async def _fetch_off(barcode: str) -> tuple[dict | None, float]:
-    """Fetch from Open Food Facts, returning (data, latency_ms).
+
+async def _fetch_off(barcode: str, fresh: bool = False):
+    """Fetch from Open Food Facts, returning (data, latency_ms, provenance).
 
     The local copy of the daily export answers first — in microseconds, without
     spending one of OFF's 15-per-minute-per-IP tokens. A miss falls through to
     the live API, which stays authoritative for products newer than the export
     or too sparse to have been imported.
+
+    `fresh=True` skips the local copy (and the disk store beneath the wrapper)
+    and goes straight to the live API — for a caller who has asked for the newest
+    data the upstream has, not the copy we hold.
     """
     start = time.monotonic()
 
-    if off_local.is_available():
+    if not fresh and off_local.is_available():
         try:
             local = await off_local.get_by_gtin(barcode)
         except Exception as e:
@@ -67,11 +75,12 @@ async def _fetch_off(barcode: str) -> tuple[dict | None, float]:
             logger.warning("Local OFF lookup failed for %s: %s", barcode, e)
             local = None
         if local is not None:
-            return local, (time.monotonic() - start) * 1000
+            return local, (time.monotonic() - start) * 1000, off_local.provenance()
         logger.debug("Local OFF has no %s; asking the API", barcode)
 
     try:
-        data = await off_breaker.call(lambda: off.get_product(barcode))
+        data = await off_breaker.call(
+            lambda: off.get_product(barcode, use_store=not fresh))
     except ratelimit.RateLimitedError as e:
         # The budget is spent, so the call was never made. Degrade to a partial
         # result rather than overrunning Open Food Facts' allowance — their
@@ -89,11 +98,11 @@ async def _fetch_off(barcode: str) -> tuple[dict | None, float]:
         logger.warning("OFF fetch failed for %s: %s", barcode, e)
         data = None
     elapsed = (time.monotonic() - start) * 1000
-    return data, elapsed
+    return data, elapsed, (_LIVE if data else None)
 
 
-async def _fetch_usda(barcode: str) -> tuple[dict | None, float]:
-    """Fetch from USDA FDC by UPC, returning (data, latency_ms).
+async def _fetch_usda(barcode: str, fresh: bool = False):
+    """Fetch from USDA FDC by UPC, returning (data, latency_ms, provenance).
 
     The local copy of the bulk dataset answers first. It holds every branded
     product FDC knew about at the last release, which is the overwhelming
@@ -103,10 +112,12 @@ async def _fetch_usda(barcode: str) -> tuple[dict | None, float]:
     A miss is not a failure — it means the product is newer than the dataset, or
     was never in it — so the request falls through to the live API, which is
     still the authority for anything the local copy has not got.
+
+    `fresh=True` skips the local copy and the disk store to query the live API.
     """
     start = time.monotonic()
 
-    if fdc_local.is_available():
+    if not fresh and fdc_local.is_available():
         try:
             local = await fdc_local.get_by_gtin(barcode)
         except Exception as e:
@@ -114,7 +125,7 @@ async def _fetch_usda(barcode: str) -> tuple[dict | None, float]:
             logger.warning("Local FDC lookup failed for %s: %s", barcode, e)
             local = None
         if local is not None:
-            return local, (time.monotonic() - start) * 1000
+            return local, (time.monotonic() - start) * 1000, fdc_local.provenance()
         logger.debug("Local FDC has no %s; asking the API", barcode)
 
     try:
@@ -123,7 +134,7 @@ async def _fetch_usda(barcode: str) -> tuple[dict | None, float]:
         # timeout. Giving the pair a single call's allowance timed the second
         # one out and silently dropped USDA from the response.
         data = await usda_breaker.call(
-            lambda: usda_fdc.search_by_upc(barcode),
+            lambda: usda_fdc.search_by_upc(barcode, use_store=not fresh),
             timeout=resilience.UPSTREAM_TIMEOUT_S * USDA_LOOKUP_ROUND_TRIPS,
         )
     except (ratelimit.RateLimitedError, FdcRateLimitError) as e:
@@ -142,7 +153,7 @@ async def _fetch_usda(barcode: str) -> tuple[dict | None, float]:
         logger.warning("USDA fetch failed for %s: %s", barcode, e)
         data = None
     elapsed = (time.monotonic() - start) * 1000
-    return data, elapsed
+    return data, elapsed, (_LIVE if data else None)
 
 
 async def _fetch_gpc_categories(off_categories: list[str]) -> tuple[list[str], float]:
@@ -308,27 +319,32 @@ def _apply_nutrients(product: CanonicalProduct, values: dict) -> None:
             setattr(product, spec.field, nutrient)
 
 
-async def lookup(gtin: str) -> CanonicalProduct:
+async def lookup(gtin: str, fresh: bool = False) -> CanonicalProduct:
     """Look up a product by GTIN/UPC and merge data from all sources.
 
     Fires OFF and USDA queries in parallel, then layers the results.
     Results with data are cached in-memory for CACHE_TTL_S seconds;
     misses are not cached so transient upstream failures can recover.
+
+    `fresh=True` bypasses every cache layer — the in-memory cache, the local
+    bulk copies, and the disk store — and queries the live upstream APIs. The
+    result still populates the caches, so a forced refresh also updates them.
     """
     key = _cache_key(gtin)
-    hit = _lookup_cache.get(key)
-    if hit is not None:
-        # Deep copy so callers can't mutate the cached entry
-        product = hit.model_copy(deep=True)
-        # Echo the barcode as the caller wrote it, not as it was first cached
-        product.gtin = gtin
-        product.cached = True
-        return product
+    if not fresh:
+        hit = _lookup_cache.get(key)
+        if hit is not None:
+            # Deep copy so callers can't mutate the cached entry
+            product = hit.model_copy(deep=True)
+            # Echo the barcode as the caller wrote it, not as it was first cached
+            product.gtin = gtin
+            product.cached = True
+            return product
 
     # Parallel fetch from OFF and USDA
-    (off_data, off_ms), (usda_data, usda_ms) = await asyncio.gather(
-        _fetch_off(gtin),
-        _fetch_usda(gtin),
+    (off_data, off_ms, off_prov), (usda_data, usda_ms, usda_prov) = await asyncio.gather(
+        _fetch_off(gtin, fresh),
+        _fetch_usda(gtin, fresh),
     )
 
     product = CanonicalProduct(gtin=gtin)
@@ -338,6 +354,8 @@ async def lookup(gtin: str) -> CanonicalProduct:
     # --- Layer 1: Open Food Facts (name, image, ingredients, provisional nutrition) ---
     if off_data:
         product.data_sources.append("OpenFoodFacts")
+        if off_prov:
+            product.provenance["OpenFoodFacts"] = SourceProvenance(**off_prov)
         product.product_name = _text(off_data.get("product_name")) or product.product_name
         product.brand = _text(off_data.get("brands")) or product.brand
         product.image_url = _http_url(off_data.get("image_url"))
@@ -354,6 +372,8 @@ async def lookup(gtin: str) -> CanonicalProduct:
     # --- Layer 2: USDA FDC (authoritative nutrition overrides OFF) ---
     if usda_data:
         product.data_sources.append("USDA_FDC")
+        if usda_prov:
+            product.provenance["USDA_FDC"] = SourceProvenance(**usda_prov)
         # USDA name overrides OFF if available
         usda_desc = _text(usda_data.get("description"))
         if usda_desc:

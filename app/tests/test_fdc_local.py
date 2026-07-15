@@ -242,13 +242,13 @@ async def test_a_local_hit_never_calls_the_api(local_db, monkeypatch):
     """The reason the local copy exists: no key, no token, no round trip."""
     called = []
 
-    async def explode(barcode):
+    async def explode(barcode, *a, **k):
         called.append(barcode)
         raise AssertionError("the API must not be called for a local hit")
 
     monkeypatch.setattr(orchestrator.usda_fdc, "search_by_upc", explode)
 
-    data, _ = await orchestrator._fetch_usda("00072940755050")
+    data, _, _ = await orchestrator._fetch_usda("00072940755050")
 
     assert data["fdc_id"] == 344604
     assert called == []
@@ -257,12 +257,12 @@ async def test_a_local_hit_never_calls_the_api(local_db, monkeypatch):
 @pytest.mark.asyncio
 async def test_a_local_miss_falls_through_to_the_api(local_db, monkeypatch):
     """New products are newer than the dataset. They still have to work."""
-    async def upstream(barcode):
+    async def upstream(barcode, *a, **k):
         return {"fdc_id": 999, "description": "BRAND NEW SNACK", "nutrients": []}
 
     monkeypatch.setattr(orchestrator.usda_fdc, "search_by_upc", upstream)
 
-    data, _ = await orchestrator._fetch_usda("00000000000000")
+    data, _, _ = await orchestrator._fetch_usda("00000000000000")
 
     assert data["fdc_id"] == 999
 
@@ -274,12 +274,12 @@ async def test_a_broken_local_copy_still_lets_the_api_answer(tmp_path, monkeypat
     monkeypatch.setattr(fdc_local, "DB_PATH", broken)
     monkeypatch.setattr(fdc_local, "_db", None)
 
-    async def upstream(barcode):
+    async def upstream(barcode, *a, **k):
         return {"fdc_id": 42, "description": "FROM THE API", "nutrients": []}
 
     monkeypatch.setattr(orchestrator.usda_fdc, "search_by_upc", upstream)
 
-    data, _ = await orchestrator._fetch_usda("00072940755050")
+    data, _, _ = await orchestrator._fetch_usda("00072940755050")
 
     assert data["fdc_id"] == 42
 
@@ -302,3 +302,51 @@ def test_health_reports_an_unreadable_database_as_an_error(tmp_path, monkeypatch
     monkeypatch.setattr(fdc_local, "_metadata", {})
 
     assert fdc_local.stats()["status"] == "error"
+
+
+# ── Provenance and the fresh (skip-cache) flag ────────────────────────
+
+def test_provenance_reports_local_with_the_dataset_date(local_db):
+    prov = fdc_local.provenance()
+
+    assert prov["origin"] == "local"
+    assert prov["dataset"] == "FoodData_Central_branded_food_csv_2026-04-30"
+    assert prov["dataset_date"] == "2026-04-30"
+
+
+@pytest.mark.asyncio
+async def test_a_local_hit_is_tagged_local_in_the_response(local_db, gpc_db):
+    product = await orchestrator.lookup("00072940755050")
+
+    assert product.provenance["USDA_FDC"].origin == "local"
+    assert product.provenance["USDA_FDC"].dataset_date == "2026-04-30"
+
+
+@pytest.mark.asyncio
+async def test_fresh_bypasses_the_local_copy_and_is_tagged_live(local_db, monkeypatch):
+    """fresh=True must skip the local copy and go to the API — tagged 'live'."""
+    async def upstream(barcode, *a, **k):
+        return {"fdc_id": 999, "description": "LIVE RESULT", "nutrients": []}
+
+    monkeypatch.setattr(orchestrator.usda_fdc, "search_by_upc", upstream)
+
+    data, _, prov = await orchestrator._fetch_usda("00072940755050", fresh=True)
+
+    assert data["fdc_id"] == 999           # not the local record
+    assert prov == {"origin": "live"}
+
+
+@pytest.mark.asyncio
+async def test_fresh_forwards_use_store_false_to_the_wrapper(local_db, monkeypatch):
+    """A fresh fetch must bypass the disk store too, not just the local copy."""
+    seen = {}
+
+    async def upstream(barcode, use_store=True):
+        seen["use_store"] = use_store
+        return {"fdc_id": 1, "description": "X", "nutrients": []}
+
+    monkeypatch.setattr(orchestrator.usda_fdc, "search_by_upc", upstream)
+
+    await orchestrator._fetch_usda("00072940755050", fresh=True)
+
+    assert seen["use_store"] is False

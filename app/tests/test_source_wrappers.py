@@ -58,7 +58,7 @@ def test_format_product_shapes_off_response():
 # ── Route error mapping ───────────────────────────────────────────────
 
 def test_off_product_not_found_maps_to_404(monkeypatch):
-    async def not_found(barcode):
+    async def not_found(barcode, *a, **k):
         return None
 
     monkeypatch.setattr(off, "get_product", not_found)
@@ -66,7 +66,7 @@ def test_off_product_not_found_maps_to_404(monkeypatch):
 
 
 def test_off_product_upstream_error_maps_to_502(monkeypatch):
-    async def boom(barcode):
+    async def boom(barcode, *a, **k):
         raise ConnectionError("upstream down")
 
     monkeypatch.setattr(off, "get_product", boom)
@@ -90,7 +90,7 @@ def test_usda_search_upstream_error_maps_to_502(monkeypatch):
 
 
 def test_usda_upc_lookup_not_found_maps_to_404(monkeypatch):
-    async def not_found(upc):
+    async def not_found(upc, *a, **k):
         return None
 
     monkeypatch.setattr(usda_fdc, "search_by_upc", not_found)
@@ -100,11 +100,11 @@ def test_usda_upc_lookup_not_found_maps_to_404(monkeypatch):
 # ── Orchestrator fetch resilience ─────────────────────────────────────
 
 async def test_fetch_off_absorbs_upstream_exception(monkeypatch):
-    async def boom(barcode):
+    async def boom(barcode, *a, **k):
         raise ConnectionError("upstream down")
 
     monkeypatch.setattr(off, "get_product", boom)
-    data, latency_ms = await orchestrator._fetch_off("123")
+    data, latency_ms, _ = await orchestrator._fetch_off("123")
     assert data is None
     assert latency_ms >= 0
     # The breaker saw the failure
@@ -114,7 +114,7 @@ async def test_fetch_off_absorbs_upstream_exception(monkeypatch):
 async def test_fetch_off_skips_when_circuit_open(monkeypatch):
     calls = {"n": 0}
 
-    async def counting(barcode):
+    async def counting(barcode, *a, **k):
         calls["n"] += 1
         return None
 
@@ -122,7 +122,7 @@ async def test_fetch_off_skips_when_circuit_open(monkeypatch):
     for _ in range(resilience.off_breaker.failure_threshold):
         resilience.off_breaker.record_failure()
 
-    data, _ = await orchestrator._fetch_off("123")
+    data, _, _ = await orchestrator._fetch_off("123")
     assert data is None
     assert calls["n"] == 0  # never reached the upstream
 
@@ -130,10 +130,10 @@ async def test_fetch_off_skips_when_circuit_open(monkeypatch):
 async def test_fetch_usda_times_out_slow_upstream(monkeypatch):
     monkeypatch.setattr(resilience, "UPSTREAM_TIMEOUT_S", 0.05)
 
-    async def slow(upc):
+    async def slow(upc, *a, **k):
         await asyncio.sleep(1.0)
 
     monkeypatch.setattr(usda_fdc, "search_by_upc", slow)
-    data, latency_ms = await orchestrator._fetch_usda("123")
+    data, latency_ms, _ = await orchestrator._fetch_usda("123")
     assert data is None
     assert latency_ms < 500  # returned at the timeout, not after the full sleep
