@@ -235,3 +235,6 @@ data/off.sqlite3
 data/off.sqlite3.xz
 data/*.expanding
 data/*.building
+
+# Caddy internal CA root — generated per host, never committed
+deploy/site/caddy-local-ca.crt
