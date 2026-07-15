@@ -50,6 +50,8 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -377,10 +379,15 @@ def build(zip_path: Path, out_path: Path, dataset: str) -> dict:
           f"({branded - served:,} superseded revisions folded in, "
           f"{filled:,} nutrient gaps filled from earlier ones)")
 
+    # The zip's own mtime is the release's publish time (download() stamps it
+    # from Last-Modified), pinning the build to an exact upstream release.
+    source_modified = datetime.fromtimestamp(
+        zip_path.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
     db.execute("CREATE TABLE fdc_metadata (key TEXT PRIMARY KEY, value TEXT)")
     db.executemany("INSERT INTO fdc_metadata VALUES (?,?)", [
         ("dataset", dataset),
         ("source_url", FDC_DATASETS + dataset + ".zip"),
+        ("source_modified", source_modified),
         ("import_timestamp",
          time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())),
         ("schema_version", SCHEMA_VERSION),
@@ -548,11 +555,20 @@ def download(dataset: str, dest: Path) -> Path:
     logger.info("Downloading %s", url)
     with tempfile.NamedTemporaryFile(dir=dest.parent, delete=False) as tmp:
         with urllib.request.urlopen(url, timeout=60) as response:
+            last_modified = response.headers.get("Last-Modified")
             while chunk := response.read(1 << 20):
                 tmp.write(chunk)
         partial = Path(tmp.name)
     os.replace(partial, dest)
     os.chmod(dest, 0o644)
+    # Stamp the file with the release's publish time, so `ls -l` reflects when
+    # FDC built it rather than when we fetched it — as the OFF importer does.
+    if last_modified:
+        try:
+            when = parsedate_to_datetime(last_modified).timestamp()
+            os.utime(dest, (when, when))
+        except (TypeError, ValueError):
+            pass
     logger.info("Downloaded %.0f MB", dest.stat().st_size / 1e6)
     return dest
 

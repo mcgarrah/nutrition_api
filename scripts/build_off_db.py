@@ -44,6 +44,7 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
@@ -191,10 +192,16 @@ def build(gz_path: Path, out_path: Path, dataset: str) -> dict:
     _step(f"{total:,} rows read, {served:,} usable products kept "
           f"({total - kept:,} skipped, {kept - served:,} deduped)")
 
+    # The source file's own mtime is the export's publish time (download() stamps
+    # it from Last-Modified), so recording it pins the build to an exact upstream
+    # export — not just the day — for comparing runs.
+    source_modified = datetime.fromtimestamp(
+        gz_path.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
     db.execute("CREATE TABLE off_metadata (key TEXT PRIMARY KEY, value TEXT)")
     db.executemany("INSERT INTO off_metadata VALUES (?,?)", [
         ("dataset", dataset),
         ("source_url", CSV_URL),
+        ("source_modified", source_modified),
         ("import_timestamp",
          time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())),
         ("schema_version", SCHEMA_VERSION),
@@ -233,25 +240,55 @@ def compress(db_path: Path, archive_path: Path, preset: int = 9) -> dict:
     }
 
 
-def latest_dataset(timeout: float = 60.0) -> str | None:
-    """The date of the export OFF is currently serving.
+def content_last_modified(timeout: float = 60.0) -> datetime | None:
+    """When OFF last rebuilt the export, from its Last-Modified header.
 
     OFF has no dated filename — the export is one rolling URL rebuilt daily — so
-    the Last-Modified header is the only version marker there is.
+    this header is the only version marker there is. It is the *content's* own
+    timestamp, identical for everyone who fetches the same export, which is what
+    makes it a stable name and a meaningful version rather than a download time.
     """
     request = urllib.request.Request(CSV_URL, method="HEAD")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            last_modified = response.headers.get("Last-Modified")
+            header = response.headers.get("Last-Modified")
     except OSError as e:
         logger.warning("Could not reach the OFF export: %s", e)
         return None
-    if not last_modified:
+    if not header:
         return None
     try:
-        return "off-" + parsedate_to_datetime(last_modified).strftime("%Y-%m-%d")
+        return parsedate_to_datetime(header).astimezone(timezone.utc)
     except (TypeError, ValueError):
         return None
+
+
+def latest_dataset(timeout: float = 60.0) -> str | None:
+    """The date of the export OFF is currently serving, as `off-YYYY-MM-DD`."""
+    modified = content_last_modified(timeout)
+    return "off-" + modified.strftime("%Y-%m-%d") if modified else None
+
+
+def dated_download_name(modified: datetime | None) -> str:
+    """The filename a download gets, stamped with the export's own timestamp.
+
+    One file per export, named for the content rather than the moment we pulled
+    it: re-running on the same day reuses the file, and each new daily export
+    lands beside the last instead of overwriting it, so days can be compared.
+    """
+    when = modified or datetime.now(timezone.utc)
+    return f"off-products-{when.strftime('%Y-%m-%dT%H%M%SZ')}.csv.gz"
+
+
+def _install_download(partial: Path, dest: Path, modified: datetime | None) -> Path:
+    """Move a finished download into place and stamp it with the content time."""
+    os.replace(partial, dest)
+    os.chmod(dest, 0o644)
+    if modified is not None:
+        # The file's own mtime carries the export's publish time, so `ls -l`
+        # shows when OFF built it, not when we fetched it.
+        os.utime(dest, (modified.timestamp(), modified.timestamp()))
+    return dest
 
 
 def installed_dataset(db_path: Path) -> str | None:
@@ -305,20 +342,32 @@ def download_release(dataset: str, dest: Path) -> bool:
     return True
 
 
-def download(dest: Path) -> Path:
-    """Fetch the gzipped export, unless we already have it."""
+def download(work_dir: Path) -> Path:
+    """Fetch the gzipped export into a file named for the export's own date.
+
+    Kept, not overwritten: every daily export accumulates under its own
+    timestamped name so several days can be held side by side and diffed. Today's
+    file is reused if it is already here.
+    """
+    modified = content_last_modified()
+    dest = work_dir / dated_download_name(modified)
     if dest.exists():
         logger.info("Using cached %s (%.0f MB)", dest.name, dest.stat().st_size / 1e6)
         return dest
-    logger.info("Downloading %s", CSV_URL)
-    with tempfile.NamedTemporaryFile(dir=dest.parent, delete=False) as tmp:
+
+    logger.info("Downloading %s -> %s", CSV_URL, dest.name)
+    with tempfile.NamedTemporaryFile(dir=work_dir, delete=False) as tmp:
         with urllib.request.urlopen(CSV_URL, timeout=120) as response:
             while chunk := response.read(1 << 20):
                 tmp.write(chunk)
         partial = Path(tmp.name)
-    os.replace(partial, dest)
-    os.chmod(dest, 0o644)
-    logger.info("Downloaded %.0f MB", dest.stat().st_size / 1e6)
+    _install_download(partial, dest, modified)
+
+    kept = sorted(work_dir.glob("off-products-*.csv.gz"))
+    total_gb = sum(p.stat().st_size for p in kept) / 1e9
+    logger.info("Downloaded %.0f MB (export dated %s). %d export(s) kept, %.1f GB total.",
+                dest.stat().st_size / 1e6,
+                modified.isoformat() if modified else "unknown", len(kept), total_gb)
     return dest
 
 
@@ -395,7 +444,7 @@ def main() -> int:
                 return 0
             logger.warning("The published archive would not expand; rebuilding.")
 
-        gz_path = args.gz or download(args.work_dir / "products.csv.gz")
+        gz_path = args.gz or download(args.work_dir)
 
         stats = build(gz_path, args.out, dataset)
         logger.info(

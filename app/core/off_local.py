@@ -200,6 +200,7 @@ def stats() -> dict:
         "status": "ok",
         "dataset": metadata.get("dataset"),
         "products": int(metadata["products"]) if "products" in metadata else None,
+        "source_modified": metadata.get("source_modified"),
         "imported_at": metadata.get("import_timestamp"),
         "size_mb": round(DB_PATH.stat().st_size / 1e6, 1),
     }
