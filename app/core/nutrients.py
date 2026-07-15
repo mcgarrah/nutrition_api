@@ -122,6 +122,90 @@ def is_physically_possible(field: str, amount: float) -> bool:
     return ceiling is None or amount <= ceiling
 
 
+# Fat and protein always carry their calories — 9 and 4 kcal per gram — with no
+# calorie-free exception. Only carbohydrate has one (sugar alcohols, which a
+# label may count as carbs but not energy), so we deliberately leave carbs out.
+# A food's stated energy therefore cannot fall far below what its fat and protein
+# alone must contribute; when it does, the two figures physically contradict each
+# other and one of them is wrong:
+#
+#     Nutella       0 kcal /  30.9 g fat   (fat alone is ~278 kcal)
+#     Mayonnaise    5 kcal /  16.0 g fat
+#     Milk chocolate 58 kcal / 36.0 g fat
+#
+# Each of those values is individually possible — the physical-maximum guard
+# passes every one — so the error is visible only across them. This is the same
+# guard as is_physically_possible, lifted from a single value to a relationship.
+#
+# It is aimed at the crowdsourced OFF corpus, whose 2.2M single-source products
+# have nothing to correct them, but it holds for any source and catches genuine
+# FDC errors too (chocolate filed at 58 kcal). Measured on the local copies it
+# drops energy from ~0.6% of OFF-only products and ~0.1% of FDC — and most of
+# even the FDC hits are real upstream mistakes, not good data. It cannot fire on
+# a legitimate near-zero food (a diet drink, black coffee): with almost no fat or
+# protein its floor is near zero, so its energy is never judged.
+#
+# The threshold is deliberately loose — a quarter of the floor — so only gross
+# contradictions flag and label rounding or drained-oil quirks are left alone.
+_ENERGY_FLOOR_MIN_KCAL = 15.0
+_ENERGY_FLOOR_FRACTION = 0.25
+
+
+# A component nutrient cannot exceed the whole it is part of. Saturated and trans
+# fat are each a fraction of total fat; sugars are a fraction of carbohydrate; and
+# added sugars are a fraction of total sugars. A child above its parent is a
+# definitional impossibility — and, like the energy floor, invisible to the
+# per-value guard because each number is individually fine.
+#
+# These hold in every labelling convention. Fibre deliberately does not appear:
+# US labels count it inside carbohydrate, EU labels report it separately, so
+# "fibre exceeds carbohydrate" is normal for the European-sourced OFF data, not
+# an error — comparing them would discard real values. Sugars-in-carbohydrate is
+# safe either way, since sugars are available carbohydrate under both conventions.
+#
+# When a child exceeds its parent the child is dropped: the total (fat,
+# carbohydrate, sugars) is the headline figure a label leads with and the more
+# reliable one, while the breakdown line beneath it is more often mistyped.
+# Measured on the local copies this drops a subset value from ~3.3% of OFF-only
+# products — almost all of them added sugars over total sugars — and ~0.4% of FDC.
+#
+# Outermost pair first, so a parent dropped for its own violation is already gone
+# when its children are checked against it.
+_NUTRIENT_SUBSETS = (
+    ("sugars", "carbohydrates"),
+    ("added_sugars", "sugars"),
+    ("saturated_fat", "fat"),
+    ("trans_fat", "fat"),
+)
+_SUBSET_TOLERANCE = 1.02   # 2% slack for rounding on either side
+
+
+def _enforce_subsets(values: dict[str, float]) -> None:
+    """Drop a component nutrient that exceeds the whole it belongs to."""
+    for child, parent in _NUTRIENT_SUBSETS:
+        c = values.get(child)
+        p = values.get(parent)
+        if c is not None and p is not None and c > p * _SUBSET_TOLERANCE + 0.1:
+            del values[child]
+
+
+def _reconcile_energy(values: dict[str, float]) -> None:
+    """Drop a stated energy that physically contradicts fat and protein.
+
+    Mutates `values`, removing `calories_kcal` when it sits far below the minimum
+    the fat and protein must contribute. The macros set the floor and are kept;
+    the energy is the value provably beneath it, and a zeroed or per-serving
+    energy is the usual culprit. A nutrient we drop is reported as absent, which
+    is honester than a number we can prove is impossible.
+    """
+    kcal = values.get("calories_kcal")
+    if kcal is None:
+        return
+    floor = 4.0 * values.get("protein", 0.0) + 9.0 * values.get("fat", 0.0)
+    if floor >= _ENERGY_FLOOR_MIN_KCAL and kcal < floor * _ENERGY_FLOOR_FRACTION:
+        del values["calories_kcal"]
+
+
 def _unit_matches(entry: dict, fdc_id: int) -> bool:
     """Is this entry denominated in the unit we expect for its id?
 
@@ -209,6 +293,8 @@ def from_usda(nutrients: list[dict]) -> dict[str, float]:
             except (TypeError, ValueError):
                 pass
 
+    _enforce_subsets(values)
+    _reconcile_energy(values)
     return values
 
 
@@ -236,6 +322,8 @@ def from_off(nutrients_per_100g: dict) -> dict[str, float]:
         if not is_physically_possible(spec.field, amount):
             continue
         values[spec.field] = amount
+    _enforce_subsets(values)
+    _reconcile_energy(values)
     return values
 
 
