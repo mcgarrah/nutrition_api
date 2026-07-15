@@ -341,3 +341,81 @@ def test_impossible_crowdsourced_values_are_dropped_as_well():
     """
     assert "protein" not in from_off({"protein": 500.0})
     assert from_off({"protein": 7.0})["protein"] == 7.0
+
+
+# ══ Energy that contradicts fat and protein ═══════════════════════════
+#
+# Fat and protein always carry their calories — 9 and 4 kcal/g — with no
+# calorie-free exception (only carbohydrate has one, via sugar alcohols). So a
+# food's stated energy cannot fall far below what its fat and protein alone must
+# contribute. When it does, the two figures physically contradict each other,
+# and the error is invisible to the per-value guard because each number is
+# individually possible:
+#
+#     Nutella  0 kcal / 30.9 g fat   — the fat alone is ~278 kcal
+#
+# This is the physical-maximum guard lifted from a single value to a
+# relationship. It matters most for the 2.2M single-source OFF products that have
+# nothing to correct them. The macros set the floor and are kept; the energy —
+# the value provably beneath it — is dropped.
+
+def test_zero_energy_with_real_fat_is_dropped():
+    """Nutella filed at 0 kcal with 30.9 g of fat. The fat cannot be free."""
+    values = from_off({"calories_kcal": 0.0, "fat": 30.9, "protein": 6.3})
+
+    assert "calories_kcal" not in values
+    assert values["fat"] == 30.9          # the macros are kept
+
+
+def test_impossibly_low_energy_for_a_fatty_food_is_dropped():
+    """Mayonnaise at 5 kcal with 16 g fat — fat alone is ~144 kcal."""
+    values = from_off({"calories_kcal": 5.0, "fat": 16.0, "protein": 1.0})
+
+    assert "calories_kcal" not in values
+
+
+def test_a_real_energy_is_left_alone():
+    """Whole milk: 61 kcal, 3.3 g fat, 3.2 g protein. Floor ~43, well under 61."""
+    values = from_off({"calories_kcal": 61.0, "fat": 3.3, "protein": 3.2})
+
+    assert values["calories_kcal"] == 61.0
+
+
+def test_a_near_zero_food_is_never_judged():
+    """A diet drink genuinely is ~0 kcal. With almost no fat or protein its floor
+    is near zero, so its low energy must not be second-guessed."""
+    values = from_off({"calories_kcal": 1.0, "fat": 0.0, "protein": 0.0,
+                       "sugars": 0.0})
+
+    assert values["calories_kcal"] == 1.0
+
+
+def test_the_carbohydrate_loophole_is_respected():
+    """Sugar-free products declare ~0 kcal against real carbs (polyols carry
+    carbohydrate but little energy). Carbs are deliberately outside the floor, so
+    these are never flagged."""
+    values = from_off({"calories_kcal": 0.0, "carbohydrates": 90.0,
+                       "fat": 0.0, "protein": 0.0})
+
+    assert values["calories_kcal"] == 0.0
+
+
+def test_a_mild_shortfall_from_rounding_is_tolerated():
+    """The threshold is a quarter of the floor, so ordinary rounding and
+    drained-oil quirks survive: 89 kcal against a 175 kcal floor is kept."""
+    values = from_off({"calories_kcal": 89.0, "fat": 17.86, "protein": 3.57})
+
+    assert values["calories_kcal"] == 89.0
+
+
+def test_the_same_guard_applies_to_usda():
+    """It is a physical law, not an OFF quirk — milk chocolate at 58 kcal with
+    36 g fat is a real FDC error, and gets the same treatment."""
+    values = from_usda([
+        usda(1008, "Energy", 58.0, "KCAL"),
+        usda(1004, "Total lipid (fat)", 36.0, "G"),
+        usda(1003, "Protein", 6.0, "G"),
+    ])
+
+    assert "calories_kcal" not in values
+    assert values["fat"] == 36.0
