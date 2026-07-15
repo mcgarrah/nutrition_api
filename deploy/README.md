@@ -102,25 +102,77 @@ The package installs `caddy.service`, which reads `/etc/caddy/Caddyfile`.
 ### Configure
 
 Point `/etc/caddy/Caddyfile` at the shared snippet and pick how it listens.
+Every variant `import`s the same `caddy/site.caddy`, so only the site line
+changes.
 
-**By IP over plain HTTP** (a LAN box, no domain) — what this deployment uses:
+**HTTPS by IP with Caddy's internal CA** (a LAN box, no domain) — what this
+deployment uses:
 
 ```
-{
-	auto_https off
-}
 import /opt/nutrition_api/deploy/caddy/site.caddy
-:80 {
+https://192.168.1.50 {
 	import nutrition_api
 }
 ```
 
-**By domain with automatic HTTPS** (public host that resolves to this machine,
-ports 80/443 reachable): drop `auto_https off` and replace `:80` with your
-hostname — Caddy obtains and renews the certificate itself.
+Naming the site `https://<IP>` makes Caddy issue a certificate for that address
+from its own internal CA — it cannot get a *publicly*-trusted cert for a bare IP
+— and redirect `http://` to `https://` automatically. Browsers warn until that
+CA is trusted (next section).
+
+**By domain with automatic, publicly-trusted HTTPS** (public host that resolves
+to this machine, ports 80/443 reachable): use your hostname as the site name —
+Caddy provisions and renews the cert via ACME, and there is no CA to trust.
+
+```
+import /opt/nutrition_api/deploy/caddy/site.caddy
+nutrition.example.org {
+	import nutrition_api
+}
+```
+
+**Plain HTTP, no TLS** (throwaway/local): add a `{ auto_https off }` global
+block and use `:80` as the site name.
 
 If the checkout is not at `/opt/nutrition_api`, set `NUTRITION_SITE_ROOT` (or
 edit the `root` in `caddy/site.caddy`) and fix the `import` path.
+
+### Trusting the internal CA (self-signed by IP)
+
+With the internal-CA variant, Caddy generates a long-lived root once per host.
+Installing that root on your client machines turns the browser warning into a
+green lock. The root is downloadable from the proxy itself:
+
+```bash
+# Fetch it (‑k because the connection isn't trusted yet)
+curl -k https://<IP>/caddy-local-ca.crt -o caddy-local-ca.crt
+# …or straight from the host
+sudo cat /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+```
+
+Then trust it:
+
+- **Linux:** `sudo cp caddy-local-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates`
+- **macOS:** double-click → Keychain Access → set to *Always Trust*
+- **Windows:** import into *Trusted Root Certification Authorities*
+- **Chrome/Firefox** (if they use their own store): import under Settings →
+  Security → Manage certificates → Authorities.
+
+The CA root is generated per host, so it is **not** committed to the repo
+(`deploy/site/caddy-local-ca.crt` is git-ignored). Publishing your own root to
+your own machines is fine; it authorises certs only for what this Caddy issues.
+
+### Reusing a multi-backend Caddy config
+
+If you already run a Caddy LXC in front of other resources, the only piece that
+transfers here is the `https://<IP>` site name for the internal-CA cert. The
+rest of a Proxmox/Ceph-style config does **not** apply: this backend is a single
+plain-HTTP uvicorn on `127.0.0.1:8080`, so there is no load balancing
+(`lb_policy`, multiple `to` upstreams), no `tls_insecure_skip_verify` (that is
+for HTTPS upstreams with self-signed certs), and no WebSocket or `Location`
+header rewriting. If you *do* put several backends behind it later,
+`reverse_proxy`'s active health checks (`health_uri /api/v1/health`,
+`health_interval`, `health_status 200`) are the pattern to copy.
 
 ### Verify, then run
 

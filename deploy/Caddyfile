@@ -1,23 +1,33 @@
 # Caddyfile — reverse proxy and landing hub for the Nutrition API.
 #
-# Caddy fronts the uvicorn backend (the systemd service on 127.0.0.1:8080):
-# it terminates TLS with an automatic certificate, serves a static landing page
-# at the root, proxies the application and API paths to the backend, and answers
-# its own /caddy-health so the status page can see the proxy independently.
+# Caddy fronts the uvicorn backend (127.0.0.1:8080): it serves a static landing
+# page and status dashboard, proxies the application and API paths to the
+# backend, and answers its own /caddy-health so the status page can see the
+# proxy independently.
 #
-#   Landing hub (deploy/site/index.html)  /
-#   Status dashboard                      /status
-#   Lookup tester                         /ui/
-#   GPC browser                           /gpc
-#   Swagger / ReDoc / OpenAPI             /docs, /redoc, /openapi.json
-#   JSON API                              /api/*
+#   Landing hub    /            Status dashboard  /status
+#   Lookup tester  /ui/         GPC browser       /gpc
+#   API docs       /docs, /redoc, /openapi.json   JSON API   /api/*
 #
-# The routing lives in caddy/site.caddy and is imported below, so this example,
-# the local-test block, and the installed /etc/caddy/Caddyfile all share it.
+# The routing lives in caddy/site.caddy and is imported by each site block, so
+# the example, the local-test block, and the installed /etc/caddy/Caddyfile all
+# share it. Pick ONE site block for a real deployment.
 
 import caddy/site.caddy
 
-# ── Production: replace with your domain, then Caddy handles HTTPS ─────
+# ── Option A — HTTPS by IP with Caddy's internal (self-signed) CA ─────
+# For a LAN box with no domain. Caddy issues a cert for the IP from its own CA
+# (it cannot get a public cert for a bare IP) and redirects http→https. Trust
+# the CA root once on your clients for a green lock — see README. This is what
+# the reference LXC deployment uses.
+#
+# https://192.168.1.50 {
+# 	import nutrition_api
+# }
+
+# ── Option B — public domain with automatic, publicly-trusted HTTPS ───
+# The host must resolve to this machine and ports 80/443 be reachable; Caddy
+# provisions and renews the certificate via ACME. No CA to trust.
 nutrition.example.org {
 	import nutrition_api
 
@@ -33,7 +43,7 @@ nutrition.example.org {
 	}
 }
 
-# ── Local testing: no domain, no TLS ──────────────────────────────────
+# ── Option C — plain HTTP, no TLS (local smoke test) ──────────────────
 # caddy run --config deploy/Caddyfile   →   http://localhost:8081/
 :8081 {
 	import nutrition_api

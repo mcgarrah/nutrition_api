@@ -9,6 +9,7 @@ Licensed under MIT License
 """
 import asyncio
 import logging
+import os
 from typing import Any
 
 from dotenv import load_dotenv
@@ -67,6 +68,23 @@ async def _run_sync(func, *args, **kwargs) -> Any:
 def is_available() -> bool:
     """Check if the USDA FDC client is configured and available."""
     return _get_fdc_client() is not None
+
+
+def key_status() -> str:
+    """How the FDC API key is provisioned, for the health report.
+
+    - "configured": a real api.data.gov key — full 3,600 requests/hour.
+    - "demo": the shared DEMO_KEY, which works but is throttled hard (about
+      30 requests/hour, 50/day), so live lookups will fail under any real load.
+    - "missing": no key at all; live FDC lookups are unavailable, though the
+      local bulk copy still answers.
+    """
+    key = os.environ.get("FDC_API_KEY")
+    if not key:
+        return "missing"
+    if key.strip().upper() == "DEMO_KEY":
+        return "demo"
+    return "configured"
 
 
 async def search(query: str, page_size: int = 25) -> dict | None:
