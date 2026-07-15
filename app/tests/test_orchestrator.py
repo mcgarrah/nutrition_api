@@ -13,13 +13,13 @@ def _patch_sources(monkeypatch, off_data=None, usda_data=None, gpc_hierarchy=Non
     """Replace the three upstream fetchers with canned responses."""
     calls = {"off": 0, "usda": 0, "gpc": 0}
 
-    async def fake_off(barcode):
+    async def fake_off(barcode, *a, **k):
         calls["off"] += 1
-        return off_data, 10.0
+        return off_data, 10.0, None
 
-    async def fake_usda(barcode):
+    async def fake_usda(barcode, *a, **k):
         calls["usda"] += 1
-        return usda_data, 20.0
+        return usda_data, 20.0, None
 
     async def fake_gpc(categories):
         calls["gpc"] += 1

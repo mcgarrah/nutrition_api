@@ -20,7 +20,7 @@ def counting_upstreams(monkeypatch):
     """Serve a product and count how many times upstreams were consulted."""
     calls = []
 
-    async def off_counting(barcode):
+    async def off_counting(barcode, *a, **k):
         calls.append(barcode)
         return {
             "product_name": "Doritos",
@@ -31,7 +31,7 @@ def counting_upstreams(monkeypatch):
             "labels": [],
         }
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     async def no_gpc(categories):
@@ -155,7 +155,7 @@ def test_non_http_urls_are_rejected(url):
 
 
 async def test_a_dangerous_image_url_never_reaches_the_client(monkeypatch):
-    async def off_hostile(barcode):
+    async def off_hostile(barcode, *a, **k):
         return {
             "product_name": "Hostile",
             "image_url": "javascript:alert(document.cookie)",
@@ -163,7 +163,7 @@ async def test_a_dangerous_image_url_never_reaches_the_client(monkeypatch):
             "categories": [],
         }
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     async def no_gpc(categories):

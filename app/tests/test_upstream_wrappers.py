@@ -358,7 +358,7 @@ def test_format_product_tolerates_missing_fields():
 # ── check_connectivity (drives /health) ───────────────────────────────
 
 async def test_off_connectivity_ok(monkeypatch):
-    async def found(barcode):
+    async def found(barcode, *a, **k):
         return {"product_name": "Nutella"}
 
     monkeypatch.setattr(off, "get_product", found)
@@ -366,7 +366,7 @@ async def test_off_connectivity_ok(monkeypatch):
 
 
 async def test_off_connectivity_error_when_probe_product_missing(monkeypatch):
-    async def missing(barcode):
+    async def missing(barcode, *a, **k):
         return None
 
     monkeypatch.setattr(off, "get_product", missing)
@@ -375,7 +375,7 @@ async def test_off_connectivity_error_when_probe_product_missing(monkeypatch):
 
 
 async def test_off_connectivity_error_is_reported_not_raised(monkeypatch):
-    async def boom(barcode):
+    async def boom(barcode, *a, **k):
         raise ConnectionError("OFF unreachable")
 
     monkeypatch.setattr(off, "get_product", boom)
@@ -393,7 +393,7 @@ async def test_off_health_probe_times_out_rather_than_hanging(monkeypatch):
     perfectly able to keep serving degraded responses."""
     monkeypatch.setattr(resilience, "UPSTREAM_TIMEOUT_S", 0.1)
 
-    async def stalls(barcode):
+    async def stalls(barcode, *a, **k):
         await asyncio.sleep(30)
 
     monkeypatch.setattr(off, "get_product", stalls)

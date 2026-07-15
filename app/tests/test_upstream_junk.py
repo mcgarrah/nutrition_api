@@ -30,10 +30,10 @@ client = TestClient(app)
 
 
 def patch_upstreams(monkeypatch, off_data=None, usda_data=None):
-    async def fake_off(barcode):
+    async def fake_off(barcode, *a, **k):
         return off_data
 
-    async def fake_usda(upc):
+    async def fake_usda(upc, *a, **k):
         return usda_data
 
     async def no_gpc(categories):

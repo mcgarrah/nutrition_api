@@ -49,7 +49,7 @@ def fake_fdc(monkeypatch):
         client = _FakeClient(foods)
         monkeypatch.setattr(usda_fdc, "_get_fdc_client", lambda: client)
 
-        async def fake_get_food(fdc_id):
+        async def fake_get_food(fdc_id, *a, **k):
             return {"fdc_id": fdc_id, "description": f"food-{fdc_id}"}
 
         monkeypatch.setattr(usda_fdc, "get_food", fake_get_food)

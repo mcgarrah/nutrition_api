@@ -194,14 +194,14 @@ async def test_non_numeric_nutrient_is_dropped_not_fatal(junk, monkeypatch, gpc_
     """OFF nutriments are crowdsourced and arrive as whatever was typed off the
     label. float(">100") raises, and an unhandled ValueError here would turn a
     partial result into a 500 — which this service promises never to return."""
-    async def off_junk(barcode):
+    async def off_junk(barcode, *a, **k):
         return {
             "product_name": "Weird",
             "categories": [],
             "nutrients_per_100g": {"protein": junk},
         }
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     monkeypatch.setattr(off, "get_product", off_junk)
@@ -215,7 +215,7 @@ async def test_non_numeric_nutrient_is_dropped_not_fatal(junk, monkeypatch, gpc_
 
 async def test_good_nutrients_survive_a_bad_neighbour(monkeypatch, gpc_db):
     """One unusable value must not discard the whole nutrition payload."""
-    async def off_mixed(barcode):
+    async def off_mixed(barcode, *a, **k):
         return {
             "product_name": "Weird",
             "categories": [],
@@ -226,7 +226,7 @@ async def test_good_nutrients_survive_a_bad_neighbour(monkeypatch, gpc_db):
             },
         }
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     monkeypatch.setattr(off, "get_product", off_mixed)
@@ -242,14 +242,14 @@ async def test_good_nutrients_survive_a_bad_neighbour(monkeypatch, gpc_db):
 async def test_non_numeric_calories_are_dropped(monkeypatch, gpc_db):
     """calories_kcal is assigned straight onto the model, so a junk value here
     escapes validation until FastAPI serializes — i.e. a 500."""
-    async def off_junk(barcode):
+    async def off_junk(barcode, *a, **k):
         return {
             "product_name": "Weird",
             "categories": [],
             "nutrients_per_100g": {"calories_kcal": "about 500"},
         }
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     monkeypatch.setattr(off, "get_product", off_junk)
@@ -263,10 +263,10 @@ async def test_non_numeric_calories_are_dropped(monkeypatch, gpc_db):
 
 async def test_malformed_usda_nutrient_entry_is_ignored(monkeypatch, gpc_db):
     """A nutrient entry that isn't even a dict must not raise."""
-    async def off_none(barcode):
+    async def off_none(barcode, *a, **k):
         return None
 
-    async def usda_malformed(upc):
+    async def usda_malformed(upc, *a, **k):
         return {
             "description": "COLA",
             "nutrients": [
@@ -285,10 +285,10 @@ async def test_malformed_usda_nutrient_entry_is_ignored(monkeypatch, gpc_db):
 
 
 async def test_upstream_returning_null_name_does_not_500(monkeypatch, gpc_db):
-    async def off_nulls(barcode):
+    async def off_nulls(barcode, *a, **k):
         return {"product_name": None, "categories": None, "nutrients_per_100g": {}}
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     monkeypatch.setattr(off, "get_product", off_nulls)
@@ -303,14 +303,14 @@ async def test_non_finite_nutrient_never_reaches_the_response(value, monkeypatch
     """NaN/Infinity are valid floats but invalid JSON: Python emits the bare
     tokens NaN/Infinity, which strict parsers (Go, Jackson, JSON.parse) reject
     — breaking the whole response, not just the field."""
-    async def off_junk(barcode):
+    async def off_junk(barcode, *a, **k):
         return {
             "product_name": "Weird",
             "categories": [],
             "nutrients_per_100g": {"protein": value, "calories_kcal": value},
         }
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     monkeypatch.setattr(off, "get_product", off_junk)

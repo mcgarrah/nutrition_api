@@ -18,6 +18,24 @@ class NutrientValue(BaseModel):
     unit: str = "g"
 
 
+class SourceProvenance(BaseModel):
+    """Where a source's data actually came from on this request.
+
+    A source can be served from the local bulk copy (fast, and only as fresh as
+    the last import) or from the live upstream API. This records which, and — for
+    a local copy — the date of the dataset it was built from, so a caller can see
+    how old the answer is.
+    """
+
+    origin: str = Field(description="'local' (bulk copy on disk) or 'live' (upstream API)")
+    dataset: str | None = Field(
+        default=None, description="The local dataset the answer came from, if local"
+    )
+    dataset_date: str | None = Field(
+        default=None, description="Publication date (YYYY-MM-DD) of that dataset"
+    )
+
+
 class CanonicalProduct(BaseModel):
     """Unified product representation merging data from all sources."""
 
@@ -77,6 +95,14 @@ class CanonicalProduct(BaseModel):
         description=(
             "True when this response was served from the in-memory cache "
             "without contacting any upstream."
+        ),
+    )
+    provenance: dict[str, SourceProvenance] = Field(
+        default_factory=dict,
+        description=(
+            "Per source, whether the data came from the local bulk copy or the "
+            "live upstream API — and, for a local copy, the date of the dataset "
+            "it was built from."
         ),
     )
     attribution: dict[str, dict[str, str]] = Field(

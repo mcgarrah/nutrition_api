@@ -47,6 +47,7 @@ CANONICAL_FIELDS = {
     "data_sources",
     "upstream_latency_ms",
     "cached",
+    "provenance",
     "attribution",
 }
 

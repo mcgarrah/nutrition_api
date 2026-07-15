@@ -162,7 +162,7 @@ async def test_off_is_skipped_once_its_budget_is_spent(monkeypatch, unlimited, g
     unlimited(off_rate=2)
     sdk = _FakeOffSdk()
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     monkeypatch.setattr(off, "_get_off_api", lambda: sdk)
@@ -178,10 +178,10 @@ async def test_a_spent_budget_degrades_rather_than_failing(monkeypatch, unlimite
     """USDA still answers; the response is partial, not an error."""
     unlimited(off_rate=0.0001)
 
-    async def off_never_called(barcode):
+    async def off_never_called(barcode, *a, **k):
         raise AssertionError("OFF was called despite an exhausted budget")
 
-    async def usda_ok(upc):
+    async def usda_ok(upc, *a, **k):
         return {
             "description": "COLA",
             "nutrients": [
@@ -208,7 +208,7 @@ async def test_a_spent_budget_does_not_trip_the_circuit_breaker(
     unlimited(off_rate=0.0001)
     sdk = _FakeOffSdk()
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     monkeypatch.setattr(off, "_get_off_api", lambda: sdk)
@@ -226,7 +226,7 @@ async def test_the_budget_refills(monkeypatch, unlimited, gpc_db):
     clock = unlimited(off_rate=60)      # one per second
     sdk = _FakeOffSdk()
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     monkeypatch.setattr(off, "_get_off_api", lambda: sdk)
@@ -250,11 +250,11 @@ async def test_a_cache_hit_costs_no_upstream_budget(monkeypatch, unlimited, gpc_
     unlimited(off_rate=2)
     calls = []
 
-    async def off_counting(barcode):
+    async def off_counting(barcode, *a, **k):
         calls.append(barcode)
         return {"product_name": "Cola", "nutrients_per_100g": {}, "categories": []}
 
-    async def usda_none(upc):
+    async def usda_none(upc, *a, **k):
         return None
 
     monkeypatch.setattr(off, "get_product", off_counting)

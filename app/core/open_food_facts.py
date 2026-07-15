@@ -98,11 +98,15 @@ def _format_product(data: dict) -> dict:
     }
 
 
-async def get_product(barcode: str) -> dict | None:
+async def get_product(barcode: str, use_store: bool = True) -> dict | None:
     """Look up a product by barcode (UPC/EAN/GTIN).
 
     Returns a formatted dict with product info and nutrients, or None
     if not found. Upstream API errors propagate to the caller.
+
+    `use_store=False` bypasses the disk store and forces a live fetch — for a
+    caller that has explicitly asked for fresh data. The rate limit still
+    applies, so a forced fetch can never overrun Open Food Facts' allowance.
     """
     api = _get_off_api()
     if not api:
@@ -112,9 +116,10 @@ async def get_product(barcode: str) -> dict | None:
     # is checked *before* the budget is spent — Open Food Facts allows fifteen
     # requests a minute, and re-fetching a barcode we already hold is exactly
     # the waste that allowance cannot afford.
-    stored = store.get(store.OFF_PRODUCT, barcode)
-    if stored is not None:
-        return _format_product(stored)
+    if use_store:
+        stored = store.get(store.OFF_PRODUCT, barcode)
+        if stored is not None:
+            return _format_product(stored)
 
     # 15 product reads/minute per IP, enforced with an IP ban. Spent at the
     # client, so every caller is covered — the canonical lookup, the direct

@@ -97,18 +97,20 @@ async def search(query: str, page_size: int = 25) -> dict | None:
     }
 
 
-async def get_food(fdc_id: int | str) -> dict | None:
+async def get_food(fdc_id: int | str, use_store: bool = True) -> dict | None:
     """Get detailed food data by FDC ID.
 
     Returns a dict with description, nutrients, brand info, etc., or None.
+    `use_store=False` bypasses the disk store to force a live fetch.
     """
     client = _get_fdc_client()
     if not client:
         return None
 
-    stored = store.get(store.USDA_FOOD, fdc_id)
-    if stored is not None:
-        return stored
+    if use_store:
+        stored = store.get(store.USDA_FOOD, fdc_id)
+        if stored is not None:
+            return stored
 
     ratelimit.spend(ratelimit.usda_limiter, "USDA_FDC")
 
@@ -161,7 +163,7 @@ def normalize_gtin(gtin: str) -> str:
     return digits.zfill(14)
 
 
-async def search_by_upc(upc: str) -> dict | None:
+async def search_by_upc(upc: str, use_store: bool = True) -> dict | None:
     """Search USDA FDC for a branded food by UPC/GTIN barcode.
 
     FDC exposes no barcode-lookup endpoint, so this queries the full-text
@@ -175,6 +177,7 @@ async def search_by_upc(upc: str) -> dict | None:
 
     Returns the matching food's full details, or None if nothing matches /
     no client is configured. Upstream API errors propagate to the caller.
+    `use_store=False` bypasses the disk store to force a live fetch.
     """
     client = _get_fdc_client()
     if not client:
@@ -187,9 +190,10 @@ async def search_by_upc(upc: str) -> dict | None:
     # A barcode's FDC id does not change. Remembering it lets us skip the
     # *search* — the call that spends budget and that FDC answers fuzzily —
     # and go straight to the food.
-    known_id = store.get(store.USDA_UPC, target)
-    if known_id is not None:
-        return await get_food(known_id)
+    if use_store:
+        known_id = store.get(store.USDA_UPC, target)
+        if known_id is not None:
+            return await get_food(known_id)
 
     ratelimit.spend(ratelimit.usda_limiter, "USDA_FDC")
 
@@ -200,7 +204,7 @@ async def search_by_upc(upc: str) -> dict | None:
     for food in result.foods:
         if normalize_gtin(food.gtin_upc or "") == target:
             store.put(store.USDA_UPC, target, food.fdc_id)
-            return await get_food(food.fdc_id)
+            return await get_food(food.fdc_id, use_store=use_store)
 
     logger.info("USDA FDC has no branded food matching GTIN %s", upc)
     return None
