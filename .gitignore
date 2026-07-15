@@ -230,5 +230,8 @@ data/fdc.sqlite3
 # The archive is published as a GitHub release asset, not committed:
 # every refresh would otherwise add ~27 MB to every clone, forever.
 data/fdc.sqlite3.xz
+# Same for the Open Food Facts local copy (published as a release asset):
+data/off.sqlite3
+data/off.sqlite3.xz
 data/*.expanding
 data/*.building

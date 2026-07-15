@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from .core import attribution
 from .core import fdc_local
+from .core import off_local
 from .core import ratelimit
 from .core import store
 from .database import close_db
@@ -67,10 +68,12 @@ async def lifespan(app: FastAPI):
     # Expand the compressed FDC copy, if we have one. A miss here is not
     # fatal: barcode lookups fall back to the live FDC API.
     fdc_local.ensure_database()
+    off_local.ensure_database()
 
     yield
     await close_db()
     await fdc_local.close()
+    await off_local.close()
 
 
 app = FastAPI(
@@ -207,6 +210,7 @@ async def health():
     # state is worth reporting: a store that has quietly stopped writing means
     # every restart goes back to spending Open Food Facts' allowance.
     result["usda_fdc_local"] = fdc_local.stats()
+    result["open_food_facts_local"] = off_local.stats()
 
     result["response_store"] = store.stats()
 

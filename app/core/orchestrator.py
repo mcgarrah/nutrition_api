@@ -24,6 +24,7 @@ from usda_fdc.exceptions import FdcRateLimitError
 
 from .models import CanonicalProduct, NutrientValue
 from . import fdc_local
+from . import off_local
 from . import usda_fdc
 from . import open_food_facts as off
 from . import attribution
@@ -49,8 +50,25 @@ USDA_LOOKUP_ROUND_TRIPS = 2
 
 
 async def _fetch_off(barcode: str) -> tuple[dict | None, float]:
-    """Fetch from Open Food Facts, returning (data, latency_ms)."""
+    """Fetch from Open Food Facts, returning (data, latency_ms).
+
+    The local copy of the daily export answers first — in microseconds, without
+    spending one of OFF's 15-per-minute-per-IP tokens. A miss falls through to
+    the live API, which stays authoritative for products newer than the export
+    or too sparse to have been imported.
+    """
     start = time.monotonic()
+
+    if off_local.is_available():
+        try:
+            local = await off_local.get_by_gtin(barcode)
+        except Exception as e:
+            # A broken local copy must never take the upstream down with it.
+            logger.warning("Local OFF lookup failed for %s: %s", barcode, e)
+            local = None
+        if local is not None:
+            return local, (time.monotonic() - start) * 1000
+        logger.debug("Local OFF has no %s; asking the API", barcode)
 
     try:
         data = await off_breaker.call(lambda: off.get_product(barcode))
