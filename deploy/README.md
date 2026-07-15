@@ -64,46 +64,77 @@ proxies the application and API paths to the backend on `127.0.0.1:8080`:
 | Path | Served by |
 | :--- | :--- |
 | `/` | the static landing hub (Caddy, from `site/`) |
+| `/status` | the status dashboard (Caddy, from `site/`) |
+| `/caddy-health` | Caddy itself (proxy liveness) |
 | `/ui/` | lookup tester (backend) |
 | `/gpc` | GPC browser (backend) |
 | `/docs`, `/redoc`, `/openapi.json` | API docs (backend) |
 | `/api/*` | JSON API (backend) |
 
-The landing page is served by Caddy itself, so the front page stays up even
-while the backend is restarting.
+The landing page and the status dashboard are served by Caddy itself, so they
+stay up — and the dashboard reports the outage — even while the backend is
+restarting. The routing lives in `caddy/site.caddy` and is imported by every
+site block (the example `Caddyfile`, its `:8081` test block, and the installed
+`/etc/caddy/Caddyfile`), so they cannot drift apart.
 
-### Set your domain
+### Status dashboard
 
-Edit the `nutrition.example.org` block in `Caddyfile` to your real hostname —
-Caddy obtains and renews the certificate for it automatically (the host must
-resolve to this machine and ports 80/443 must be reachable). If the checkout is
-not at `/opt/nutrition_api`, set `NUTRITION_SITE_ROOT` or edit the `root`
-directive.
+`/status` is a live health page grouping every moving part: the Caddy proxy
+(checked directly via `/caddy-health`), the API backend, the on-disk cached
+copies (USDA FDC, Open Food Facts, GPC, the response store) with their dataset
+dates, and the external upstream APIs. It reads `/api/v1/health` through the
+proxy and refreshes every 20 s. Because Caddy serves the page itself, a backend
+outage shows as a red tile rather than an unreachable page.
+
+### Install (Debian/Ubuntu, via apt)
+
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
+```
+
+The package installs `caddy.service`, which reads `/etc/caddy/Caddyfile`.
+
+### Configure
+
+Point `/etc/caddy/Caddyfile` at the shared snippet and pick how it listens.
+
+**By IP over plain HTTP** (a LAN box, no domain) — what this deployment uses:
+
+```
+{
+	auto_https off
+}
+import /opt/nutrition_api/deploy/caddy/site.caddy
+:80 {
+	import nutrition_api
+}
+```
+
+**By domain with automatic HTTPS** (public host that resolves to this machine,
+ports 80/443 reachable): drop `auto_https off` and replace `:80` with your
+hostname — Caddy obtains and renews the certificate itself.
+
+If the checkout is not at `/opt/nutrition_api`, set `NUTRITION_SITE_ROOT` (or
+edit the `root` in `caddy/site.caddy`) and fix the `import` path.
 
 ### Verify, then run
 
 ```bash
-caddy validate --config deploy/Caddyfile
-caddy fmt --overwrite deploy/Caddyfile       # optional: canonical formatting
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy          # or restart
 
-# Local smoke test — no domain, no TLS — serves on http://localhost:8081/
+# Local smoke test straight from the repo — serves on http://localhost:8081/
 caddy run --config deploy/Caddyfile
 ```
 
-The `:8081` block at the bottom of the `Caddyfile` is that local test listener;
-it shares one config snippet with the production block, so what you test is what
-you deploy.
-
-### As a service
-
-Run Caddy from its own systemd unit (the distro's `caddy` package installs
-`caddy.service` and reads `/etc/caddy/Caddyfile`):
-
-```bash
-sudo cp deploy/Caddyfile /etc/caddy/Caddyfile   # with your domain set
-sudo cp -r deploy/site /opt/nutrition_api/deploy/site
-sudo systemctl reload caddy
-```
+The `:8081` block in the repo `Caddyfile` shares the same snippet as the
+installed config, so what you smoke-test is what you deploy.
 
 Caddy and the `nutrition-api` service are independent — restart or update the
-backend without touching Caddy, and the landing page never goes down with it.
+backend without touching Caddy, and the landing page and status dashboard never
+go down with it.
