@@ -121,3 +121,52 @@ def test_search_empty_query_returns_empty_response():
     assert all(body[k] == [] for k in ("segments", "families", "classes", "bricks"))
     assert body["counts"] == {}
     assert body["truncated"] is False
+
+
+# ── Attribute search ──────────────────────────────────────────────────
+#
+# GPC keeps the specifics in attributes, not brick names: the fixture's
+# "Caffeinated"/"Decaffeinated" are values of the "Caffeine Presence" attribute
+# on the Cola Drinks brick — the same shape as "OLIVE OIL" under "Type of Edible
+# Oil" on the real Oils brick. A search of brick descriptions alone can never
+# find them, so search reaches into attributes and reports the owning bricks.
+
+def test_search_finds_an_attribute_value_and_its_brick():
+    body = client.get("/api/v1/gpc/search/", params={"q": "Decaffeinated"}).json()
+
+    assert body["segments"] == [] and body["bricks"] == []   # no brick is named that
+    attrs = body["attributes"]
+    assert len(attrs) == 1
+    match = attrs[0]
+    assert match["kind"] == "value"
+    assert match["att_value_text"] == "Decaffeinated"
+    assert match["att_type_text"] == "Caffeine Presence"
+    # and it points back to the brick that carries the attribute
+    assert [b["brick_code"] for b in match["bricks"]] == ["10000201"]
+
+
+def test_search_finds_an_attribute_type_by_name():
+    body = client.get("/api/v1/gpc/search/", params={"q": "Caffeine"}).json()
+
+    kinds = {(a["kind"], a["att_type_text"]) for a in body["attributes"]}
+    assert ("type", "Caffeine Presence") in kinds
+
+
+def test_attribute_category_returns_only_attributes():
+    body = client.get(
+        "/api/v1/gpc/search/", params={"q": "Caffeinated", "category": "attributes"},
+    ).json()
+
+    assert body["segments"] == [] and body["families"] == []
+    assert body["classes"] == [] and body["bricks"] == []
+    assert body["attributes"]
+    assert "attributes" in body["counts"]
+
+
+def test_attribute_matches_are_counted():
+    # "Caffeinated" is a substring of "Decaffeinated", so it matches both values.
+    body = client.get("/api/v1/gpc/search/", params={"q": "Caffeinated"}).json()
+    assert body["counts"]["attributes"] == 2
+
+    only_one = client.get("/api/v1/gpc/search/", params={"q": "Decaffeinated"}).json()
+    assert only_one["counts"]["attributes"] == 1

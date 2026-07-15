@@ -187,7 +187,10 @@ def test_search_matches_on_code_as_well_as_text():
 def test_search_no_match_returns_empty_lists():
     body = client.get("/api/v1/gpc/search/", params={"q": "zzzznothing"}).json()
     assert all(body[k] == [] for k in ("segments", "families", "classes", "bricks"))
-    assert body["counts"] == {"segments": 0, "families": 0, "classes": 0, "bricks": 0}
+    assert body["counts"] == {
+        "segments": 0, "families": 0, "classes": 0,
+        "bricks": 0, "attributes": 0,
+    }
     assert body["truncated"] is False
 
 
@@ -203,7 +206,7 @@ def test_search_category_enum_is_published_in_the_schema():
     params = spec["paths"]["/api/v1/gpc/search/"]["get"]["parameters"]
     category = next(p for p in params if p["name"] == "category")
     assert set(category["schema"]["enum"]) == {
-        "all", "segments", "families", "classes", "bricks",
+        "all", "segments", "families", "classes", "bricks", "attributes",
     }
 
 

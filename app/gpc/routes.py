@@ -28,6 +28,7 @@ from .models import (
     ClassItem, ClassDetail, ParentFamilyRef,
     BrickItem, BrickDetail, ParentClassRef,
     AttributeTypeItem, AttributeValueItem,
+    AttributeMatch,
     PaginatedResponse, SearchResponse,
 )
 
@@ -356,18 +357,79 @@ async def _search_entity(db, table, code_column, model, like, limit):
     return items, total
 
 
+async def _search_attributes(db, like, limit):
+    """Find attribute types and values matching the query, with their bricks.
+
+    This is what makes the specific findable. GPC keeps detail in attributes,
+    not brick names: "olive oil" is the value "OLIVE OIL" of an attribute on the
+    generic "Oils Edible" brick. A search of brick descriptions alone returns
+    nothing for it. Each match therefore carries the bricks that hold the
+    attribute, so the caller can walk back into the hierarchy.
+    """
+    # Attribute VALUES that match, paired with their type (a value can belong to
+    # more than one type, so join through attribute_type_values).
+    value_rows = await db.execute_fetchall(
+        """SELECT av.att_value_code, av.att_value_text,
+                  at.att_type_code, at.att_type_text
+           FROM attribute_values av
+           JOIN attribute_type_values atv ON av.att_value_code = atv.att_value_code
+           JOIN attribute_types at ON atv.att_type_code = at.att_type_code
+           WHERE av.att_value_text LIKE ?
+           ORDER BY av.att_value_text, at.att_type_code LIMIT ?""",
+        [like, limit],
+    )
+    # Attribute TYPES whose own name matches (e.g. searching "flavour").
+    type_rows = await db.execute_fetchall(
+        """SELECT at.att_type_code, at.att_type_text
+           FROM attribute_types at
+           WHERE at.att_type_text LIKE ?
+           ORDER BY at.att_type_text LIMIT ?""",
+        [like, limit],
+    )
+
+    async def bricks_for(att_type_code):
+        rows = await db.execute_fetchall(
+            """SELECT b.brick_code, b.description
+               FROM brick_attribute_types bat
+               JOIN bricks b ON bat.brick_code = b.brick_code
+               WHERE bat.att_type_code = ?
+               ORDER BY b.brick_code""",
+            [att_type_code],
+        )
+        return [BrickItem(brick_code=r[0], description=r[1]) for r in rows]
+
+    matches = []
+    for r in value_rows:
+        matches.append(AttributeMatch(
+            kind="value", att_value_code=r[0], att_value_text=r[1],
+            att_type_code=r[2], att_type_text=r[3],
+            bricks=await bricks_for(r[2]),
+        ))
+    for r in type_rows:
+        matches.append(AttributeMatch(
+            kind="type", att_type_code=r[0], att_type_text=r[1],
+            bricks=await bricks_for(r[0]),
+        ))
+    return matches, len(value_rows) + len(type_rows)
+
+
 @router.get("/search/", response_model=SearchResponse, summary="Search across all GPC entities")
 async def search_gpc(
     q: str = Query("", description="Search query"),
-    category: Literal["all", "segments", "families", "classes", "bricks"] = Query(
-        "all", description="Category filter",
-    ),
+    category: Literal[
+        "all", "segments", "families", "classes", "bricks", "attributes"
+    ] = Query("all", description="Category filter"),
     limit: int = Query(
         DEFAULT_SEARCH_LIMIT, ge=1, le=MAX_SEARCH_LIMIT,
         description="Maximum results per entity type",
     ),
 ):
     """Search codes and descriptions across the GPC hierarchy.
+
+    Searches segment/family/class/brick codes and descriptions, and — crucially —
+    attribute types and values, which is where GPC keeps the specifics. A search
+    for "olive" finds no brick by that name, but finds the "OLIVE OIL" attribute
+    value and the "Oils Edible" brick it belongs to.
 
     Results are capped per entity type. Unbounded, a single-character query
     matches most of the taxonomy — `?q=e` returns over 900 rows — so every
@@ -388,6 +450,13 @@ async def search_gpc(
         setattr(result, name, items)
         result.counts[name] = total
         if total > len(items):
+            result.truncated = True
+
+    if category in ("all", "attributes"):
+        attributes, total = await _search_attributes(db, like, limit)
+        result.attributes = attributes
+        result.counts["attributes"] = total
+        if total > len(attributes):
             result.truncated = True
 
     return result
