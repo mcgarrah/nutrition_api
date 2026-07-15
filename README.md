@@ -185,15 +185,15 @@ Example: `GET /api/v1/lookup/04963406021372` returns product name, brand, per-10
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/gpc/segments/` | List segments (paginated, searchable) |
-| GET | `/api/gpc/segments/{code}` | Segment detail with families |
-| GET | `/api/gpc/families/` | List families (filterable by segment) |
-| GET | `/api/gpc/families/{code}` | Family detail with classes |
-| GET | `/api/gpc/classes/` | List classes (filterable by family) |
-| GET | `/api/gpc/classes/{code}` | Class detail with bricks |
-| GET | `/api/gpc/bricks/` | List bricks (filterable by class) |
-| GET | `/api/gpc/bricks/{code}` | Brick detail with attributes |
-| GET | `/api/gpc/search/?q=...` | Cross-entity search (capped; `limit` up to 200, `counts` reports the real totals) |
+| GET | `/api/v1/gpc/segments/` | List segments (paginated, searchable) |
+| GET | `/api/v1/gpc/segments/{code}` | Segment detail with families |
+| GET | `/api/v1/gpc/families/` | List families (filterable by segment) |
+| GET | `/api/v1/gpc/families/{code}` | Family detail with classes |
+| GET | `/api/v1/gpc/classes/` | List classes (filterable by family) |
+| GET | `/api/v1/gpc/classes/{code}` | Class detail with bricks |
+| GET | `/api/v1/gpc/bricks/` | List bricks (filterable by class) |
+| GET | `/api/v1/gpc/bricks/{code}` | Brick detail with attributes |
+| GET | `/api/v1/gpc/search/?q=...` | Cross-entity search (capped; `limit` up to 200, `counts` reports the real totals) |
 
 ### Operations
 

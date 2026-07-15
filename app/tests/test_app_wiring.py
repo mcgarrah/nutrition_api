@@ -168,8 +168,8 @@ def test_openapi_documents_every_public_route():
         "/api/v1/version",
         "/api/v1/usda/search",
         "/api/v1/off/product/{barcode}",
-        "/api/gpc/segments/",
-        "/api/gpc/search/",
+        "/api/v1/gpc/segments/",
+        "/api/v1/gpc/search/",
     ]:
         assert expected in paths, f"{expected} missing from OpenAPI"
 
