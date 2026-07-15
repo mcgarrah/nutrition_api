@@ -1,0 +1,55 @@
+# Caddyfile — reverse proxy and landing hub for the Nutrition API.
+#
+# Caddy fronts the uvicorn backend (the systemd service on 127.0.0.1:8080):
+# it terminates TLS with an automatic certificate, serves a static landing page
+# at the root, and proxies the application and API paths to the backend.
+#
+#   Landing hub (this dir's index.html)   /
+#   Lookup tester                         /ui/
+#   GPC browser                           /gpc
+#   Swagger / ReDoc / OpenAPI             /docs, /redoc, /openapi.json
+#   JSON API                              /api/*
+#
+# Set your domain below (Caddy obtains the cert automatically). For local
+# testing without a domain, use the :8081 block at the bottom.
+
+# ── Shared config, imported by each site block ────────────────────────
+(nutrition_api) {
+	encode zstd gzip
+
+	# The application and API are served by the uvicorn backend. A named
+	# matcher keeps the backend address in one place.
+	@backend path /api/* /ui /ui/* /gpc /docs /docs/* /redoc /openapi.json
+	handle @backend {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# Everything else is the static landing hub Caddy serves directly, so the
+	# front page stays up even if the backend is restarting.
+	handle {
+		root * {$NUTRITION_SITE_ROOT:/opt/nutrition_api/deploy/site}
+		file_server
+	}
+}
+
+# ── Production: replace with your domain, then Caddy handles HTTPS ─────
+nutrition.example.org {
+	import nutrition_api
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/nutrition-api.log
+	}
+}
+
+# ── Local testing: no domain, no TLS ──────────────────────────────────
+# caddy run --config deploy/Caddyfile   →   http://localhost:8081/
+:8081 {
+	import nutrition_api
+}
