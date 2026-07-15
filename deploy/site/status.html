@@ -182,7 +182,7 @@ async function load() {
   const proxy = tile("Caddy proxy", caddy ? "ok" : "error",
     [["role", "TLS + routing"], ["endpoint", "/caddy-health"]]);
 
-  let backend, cached = [], external = [];
+  let backend, cached = [], external = [], usdaState = null;
   if (!health) {
     backend = tile("API backend", "error", [["detail", "unreachable"]]);
   } else {
@@ -218,7 +218,7 @@ async function load() {
     const live = health.usda_fdc || {};
     // A DEMO_KEY works but is throttled to a trickle, so flag it as needing
     // attention even when the probe itself is green.
-    const usdaState = (live.key === "demo" && live.status === "ok") ? "demo"
+    usdaState = (live.key === "demo" && live.status === "ok") ? "demo"
       : (live.key === "missing" && live.status !== "error") ? "unconfigured" : live.status;
     const keyLabel = { configured: "real key — full rate",
       demo: "DEMO_KEY — throttled", missing: "not set" }[live.key] || live.key;
@@ -242,7 +242,10 @@ async function load() {
   const states = [caddy ? "s-ok" : "s-bad"];
   if (health) {
     states.push(health.status === "ok" ? "s-ok" : "s-warn");
-    ["usda_fdc", "open_food_facts"].forEach(k => health[k] && states.push(cls(health[k].status)));
+    // usdaState carries the DEMO_KEY / missing-key downgrade, so the banner
+    // agrees with the tile instead of staying green on a throttled key.
+    if (usdaState) states.push(cls(usdaState));
+    if (health.open_food_facts) states.push(cls(health.open_food_facts.status));
     ["usda_fdc_local", "open_food_facts_local", "gpc"].forEach(k => health[k] && states.push(cls(health[k].status)));
   } else {
     states.push("s-bad");

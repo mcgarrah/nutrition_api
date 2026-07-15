@@ -138,11 +138,14 @@ Timestamps are UTC ISO-8601 with an explicit offset, so they sort correctly as t
 
 ```bash
 pip install -r requirements-dev.txt
-pytest          # unit tests in app/tests/ — no network required
+pytest              # unit tests in app/tests/ — no network required
 flake8 app/ scripts/
+node --test jstests/ # the static pages' inline JavaScript (no npm needed)
 ```
 
-CI runs both plus a Docker build on every push and pull request (`.github/workflows/ci.yml`). `.do/app.yaml` deploys the container to DigitalOcean App Platform on push to `main`.
+The `jstests/` suite parse-checks every static page's inline script — the guard that was missing when a duplicate `const` shipped a broken status dashboard — and unit- and integration-tests the status page's logic in a sandbox, using only Node's built-in test runner.
+
+CI runs all of these plus a Docker build on every push and pull request (`.github/workflows/ci.yml`). `.do/app.yaml` deploys the container to DigitalOcean App Platform on push to `main`.
 
 ## GPC Data Import
 
