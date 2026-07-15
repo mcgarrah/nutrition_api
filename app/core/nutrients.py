@@ -151,6 +151,44 @@ _ENERGY_FLOOR_MIN_KCAL = 15.0
 _ENERGY_FLOOR_FRACTION = 0.25
 
 
+# A component nutrient cannot exceed the whole it is part of. Saturated and trans
+# fat are each a fraction of total fat; sugars are a fraction of carbohydrate; and
+# added sugars are a fraction of total sugars. A child above its parent is a
+# definitional impossibility — and, like the energy floor, invisible to the
+# per-value guard because each number is individually fine.
+#
+# These hold in every labelling convention. Fibre deliberately does not appear:
+# US labels count it inside carbohydrate, EU labels report it separately, so
+# "fibre exceeds carbohydrate" is normal for the European-sourced OFF data, not
+# an error — comparing them would discard real values. Sugars-in-carbohydrate is
+# safe either way, since sugars are available carbohydrate under both conventions.
+#
+# When a child exceeds its parent the child is dropped: the total (fat,
+# carbohydrate, sugars) is the headline figure a label leads with and the more
+# reliable one, while the breakdown line beneath it is more often mistyped.
+# Measured on the local copies this drops a subset value from ~3.3% of OFF-only
+# products — almost all of them added sugars over total sugars — and ~0.4% of FDC.
+#
+# Outermost pair first, so a parent dropped for its own violation is already gone
+# when its children are checked against it.
+_NUTRIENT_SUBSETS = (
+    ("sugars", "carbohydrates"),
+    ("added_sugars", "sugars"),
+    ("saturated_fat", "fat"),
+    ("trans_fat", "fat"),
+)
+_SUBSET_TOLERANCE = 1.02   # 2% slack for rounding on either side
+
+
+def _enforce_subsets(values: dict[str, float]) -> None:
+    """Drop a component nutrient that exceeds the whole it belongs to."""
+    for child, parent in _NUTRIENT_SUBSETS:
+        c = values.get(child)
+        p = values.get(parent)
+        if c is not None and p is not None and c > p * _SUBSET_TOLERANCE + 0.1:
+            del values[child]
+
+
 def _reconcile_energy(values: dict[str, float]) -> None:
     """Drop a stated energy that physically contradicts fat and protein.
 
@@ -255,6 +293,7 @@ def from_usda(nutrients: list[dict]) -> dict[str, float]:
             except (TypeError, ValueError):
                 pass
 
+    _enforce_subsets(values)
     _reconcile_energy(values)
     return values
 
@@ -283,6 +322,7 @@ def from_off(nutrients_per_100g: dict) -> dict[str, float]:
         if not is_physically_possible(spec.field, amount):
             continue
         values[spec.field] = amount
+    _enforce_subsets(values)
     _reconcile_energy(values)
     return values
 
