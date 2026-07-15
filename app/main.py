@@ -169,6 +169,12 @@ async def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/gpc", include_in_schema=False)
+async def gpc_browser():
+    """Serve the GPC taxonomy browser UI."""
+    return FileResponse(STATIC_DIR / "gpc.html")
+
+
 @app.get("/api/v1/health", tags=["Operations"], summary="Health check")
 async def health():
     from .database import get_db

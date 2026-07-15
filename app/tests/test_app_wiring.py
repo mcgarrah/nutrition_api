@@ -153,6 +153,13 @@ def test_ui_is_also_mounted_under_its_own_path():
     assert client.get("/ui/").status_code == 200
 
 
+def test_gpc_browser_is_served():
+    resp = client.get("/gpc")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert "GPC Browser" in resp.text
+
+
 def test_ui_is_excluded_from_the_openapi_schema():
     paths = client.get("/openapi.json").json()["paths"]
     assert "/" not in paths
