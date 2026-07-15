@@ -54,7 +54,8 @@ class SqliteStore:
 
 class ResponseStore:
     """The file-based upstream response cache, presented as one 'table' per
-    namespace (off/product, usda/food, usda/upc)."""
+    logical namespace: off/product, and usda (usda/upc merged with usda/food
+    — see _usda_merged_records)."""
 
     kind = "filestore"
 
@@ -217,12 +218,23 @@ def _sqlite_coverage(s, table):
 
 
 # ── Response-store (file) adapter ────────────────────────────────────
+#
+# usda/upc and usda/food are two files on disk for one relationship: a barcode
+# resolving to a food record. usda/upc is the entry point (key = GTIN, payload
+# = the fdc_id it resolved to); usda/food is the linked record (key = fdc_id,
+# payload = the food itself). Showing them as two disconnected tables split a
+# single fact across two rows a reader had to cross-reference by hand, so they
+# are joined here into one logical "usda" table: one row per GTIN with its food
+# payload attached. off/product needs no such treatment — one OFF record is
+# already everything OFF said about that barcode.
 
 def _store_namespaces():
-    return [store.OFF_PRODUCT, store.USDA_FOOD, store.USDA_UPC]
+    """The logical tables the response store presents."""
+    return [store.OFF_PRODUCT, "usda"]
 
 
-def _store_records(namespace):
+def _raw_store_records(namespace):
+    """The records actually on disk under one namespace directory."""
     root = store.STORE_DIR / namespace
     if not root.exists():
         return []
@@ -233,6 +245,55 @@ def _store_records(namespace):
         except (OSError, ValueError):
             continue
     return records
+
+
+def _usda_merged_records():
+    """usda/upc joined to usda/food by fdc_id, one row per product.
+
+    A upc mapping with no food payload attached would be the least useful half
+    of the pair to show alone. Food records fetched without ever being looked
+    up by barcode are real too (GET /api/v1/usda/food/{id} populates usda/food
+    on its own) and are still surfaced, keyed by fdc_id since there is no GTIN
+    for them.
+    """
+    upc_records = _raw_store_records(store.USDA_UPC)
+    food_by_id = {str(r.get("key")): r for r in _raw_store_records(store.USDA_FOOD)}
+
+    merged = []
+    linked_ids = set()
+    for upc in upc_records:
+        fdc_id = upc.get("payload")
+        food = food_by_id.get(str(fdc_id))
+        if food is not None:
+            linked_ids.add(str(fdc_id))
+        merged.append({
+            "key": upc.get("key"),
+            "fetched_at": upc.get("fetched_at"),
+            "schema_version": upc.get("schema_version"),
+            "payload": {
+                "fdc_id": fdc_id,
+                "food": food.get("payload") if food else None,
+                "food_fetched_at": food.get("fetched_at") if food else None,
+            },
+        })
+
+    for fdc_id, food in food_by_id.items():
+        if fdc_id in linked_ids:
+            continue
+        merged.append({
+            "key": f"fdc:{fdc_id}",
+            "fetched_at": food.get("fetched_at"),
+            "schema_version": food.get("schema_version"),
+            "payload": {"fdc_id": food.get("key"), "food": food.get("payload"),
+                        "food_fetched_at": food.get("fetched_at")},
+        })
+    return merged
+
+
+def _store_records(namespace):
+    if namespace == "usda":
+        return _usda_merged_records()
+    return _raw_store_records(namespace)
 
 
 def _filestore_schema(s: ResponseStore):

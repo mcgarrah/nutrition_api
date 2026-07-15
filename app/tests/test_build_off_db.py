@@ -66,15 +66,22 @@ def test_a_finished_download_carries_the_content_time_and_is_world_readable(tmp_
 # ── The build records the source timestamp ────────────────────────────
 
 def _tiny_export(path, modified):
-    """A minimal OFF CSV.gz with just the columns the build reads."""
+    """A minimal OFF CSV.gz with just the columns the build reads.
+
+    Column names match the real bulk export exactly, including the one that
+    tripped us up: OFF's CSV calls the allergens column "allergens", not
+    "allergens_tags" (that is the *live API's* field name, for a different
+    export). Header/row shape drift here is how that bug would resurface.
+    """
     header = ["code", "product_name", "last_modified_t",
-              "energy-kcal_100g", "proteins_100g", "sodium_100g", "categories_tags"]
+              "energy-kcal_100g", "proteins_100g", "sodium_100g",
+              "categories_tags", "allergens"]
     rows = [
         # Nutella: real barcode, name, energy, protein, sodium (raw grams).
         ["3017620422003", "Nutella", "1700000000",
-         "539", "6.3", "0.0428", "en:spreads,en:sweet-spreads"],
+         "539", "6.3", "0.0428", "en:spreads,en:sweet-spreads", "en:nuts,en:milk"],
         # No barcode -> skipped.
-        ["", "Nameless", "1700000000", "10", "", "", ""],
+        ["", "Nameless", "1700000000", "10", "", "", "", ""],
     ]
     lines = ["\t".join(header)] + ["\t".join(r) for r in rows]
     with gzip.open(path, "wt", encoding="utf-8", newline="") as f:
@@ -108,3 +115,62 @@ def test_build_stores_nutrients_raw_for_conversion_at_lookup(tmp_path):
         "SELECT calories_kcal, protein, sodium FROM products "
         "WHERE gtin14 = '03017620422003'").fetchone()
     assert row == (539.0, 6.3, 0.0428)
+
+
+def test_build_maps_the_allergens_column_not_a_nonexistent_tags_column(tmp_path):
+    """Regression: TEXT_COLUMNS mapped "allergens" -> "allergens_tags", a column
+    the bulk CSV export does not have (that is the live API's field name for
+    the same data). cell() returns "" for a missing column rather than
+    erroring, so every row silently stored an empty allergens list -- 100% of
+    2.24M products, and nothing failed loudly enough to notice.
+    """
+    gz = tmp_path / "export.csv.gz"
+    _tiny_export(gz, MODIFIED)
+    out = tmp_path / "off.sqlite3"
+
+    bod.build(gz, out, "off-2026-07-14")
+
+    allergens = sqlite3.connect(out).execute(
+        "SELECT allergens FROM products WHERE gtin14 = '03017620422003'"
+    ).fetchone()[0]
+    assert allergens == "en:nuts,en:milk"
+
+
+# ── Missing-column guard ────────────────────────────────────────────
+#
+# The allergens bug above was a configured column name that did not exist in
+# the export header, silently absorbed by cell() returning "". This is the
+# general guard against that class of bug: it does not stop the build (OFF
+# does rename/drop columns between exports, and a build script should not
+# turn that into an outage), but it must say so, loudly, in the build log.
+
+def test_a_missing_text_column_is_logged_not_silent(caplog):
+    header_index = {"code": 0, "product_name": 1}   # "allergens" absent
+    with caplog.at_level("WARNING"):
+        bod._warn_about_missing_columns(header_index, ["code", "allergens"], "text column")
+
+    assert any("allergens" in r.message for r in caplog.records)
+    assert not any("code" in r.message for r in caplog.records)  # code IS present
+
+
+def test_no_warning_when_every_expected_column_is_present(caplog):
+    header_index = {"code": 0, "allergens": 1}
+    with caplog.at_level("WARNING"):
+        bod._warn_about_missing_columns(header_index, ["code", "allergens"], "text column")
+
+    assert caplog.records == []
+
+
+def test_build_warns_about_a_genuinely_missing_column(tmp_path, caplog):
+    """End to end: a build against a header lacking "allergens" logs it."""
+    gz = tmp_path / "export.csv.gz"
+    header = ["code", "product_name", "last_modified_t", "energy-kcal_100g"]
+    with gzip.open(gz, "wt", encoding="utf-8", newline="") as f:
+        f.write("\t".join(header) + "\n")
+        f.write("\t".join(["3017620422003", "Nutella", "1700000000", "539"]) + "\n")
+    os.utime(gz, (MODIFIED.timestamp(), MODIFIED.timestamp()))
+
+    with caplog.at_level("WARNING"):
+        bod.build(gz, tmp_path / "off.sqlite3", "off-2026-07-14")
+
+    assert any("allergens" in r.message for r in caplog.records)
