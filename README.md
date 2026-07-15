@@ -70,7 +70,7 @@ python scripts/build_off_db.py                 # build from scratch
 
 The build streams the CSV straight out of the gzip (the 9 GB of decompressed text is never written), takes ~7 minutes, and produces a ~1 GB database plus a ~142 MB `.xz`. As with FDC, neither is committed — the archive is a release asset (`off-YYYY-MM-DD`), expanded on first startup. Nutrient values are stored *raw* (OFF's grams) so `from_off` converts them once, at lookup, exactly as on the live path.
 
-Unlike FDC's twice-yearly release, **OFF rebuilds daily**, so the export has no dated filename; the dataset is identified by its `Last-Modified` date and `--auto-update` compares that.
+Unlike FDC's twice-yearly release, **OFF rebuilds daily**, so the export has no dated filename; the dataset is identified by its `Last-Modified` date and `--auto-update` compares that. Downloads are named for that timestamp (`off-products-2026-07-14T112659Z.csv.gz`), stamped with the export's own mtime, and **kept rather than overwritten** — so several days can be held side by side and compared. The exact source timestamp is recorded in the database (`source_modified`) and reported by `/health`.
 
 The GPC data is stored in SQLite with a corrected schema that uses junction tables to preserve the many-to-many relationships between bricks and attribute types (the same attribute type can appear on many bricks in the GS1 specification).
 
