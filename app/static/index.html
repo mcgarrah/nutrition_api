@@ -150,7 +150,7 @@
   </header>
   <p class="sub">
     GTIN lookup tester — merges USDA FDC, Open Food Facts, and GS1 GPC.
-    Full API docs at <a href="/docs">/docs</a>.
+    API docs: <a href="/docs">/docs</a> (Swagger) · <a href="/redoc">/redoc</a> (ReDoc).
   </p>
 
   <form id="form">
@@ -183,13 +183,20 @@ const SOURCES = [
   { key: "GS1_GPC",       label: "GS1 GPC",         color: "var(--src-gpc)" },
 ];
 
+// A diverse spread of real barcodes, each verified to resolve against the
+// local USDA/OFF copies — every macro profile from pure fat to zero-calorie.
 const SAMPLES = [
-  ["028400642255", "Doritos — all 3 sources"],
-  ["044000032029", "Oreos — all 3 sources"],
-  ["3017620422003", "Nutella — EU, no USDA"],
-  ["5449000000996", "Coca-Cola"],
-  ["012000001086", "Water — no calories"],
-  ["abc", "Invalid GTIN → 422"],
+  ["049000006346", "🥤 Coca-Cola"],
+  ["044000041106", "🍪 Oreo"],
+  ["049000028706", "💧 Dasani water — 0 kcal"],
+  ["037600309806", "🥜 Skippy peanut butter"],
+  ["028400021524", "🔺 Doritos"],
+  ["034000213917", "🍫 Hershey's chocolate"],
+  ["030000010402", "🌾 Quaker oats"],
+  ["011161032588", "🫒 Olive oil — pure fat"],
+  ["007789045129", "🌰 Almonds"],
+  ["3017620422003", "🍫 Nutella — EU, no USDA"],
+  ["abc", "⛔ Invalid GTIN → 422"],
 ];
 
 const NUTRIENTS = [
