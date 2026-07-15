@@ -122,8 +122,19 @@
 </div>
 
 <script>
+// Kept to widely-supported syntax (no ?. or ??): an older browser that can't
+// parse the script would run none of it and sit forever on "Checking…".
 const $ = id => document.getElementById(id);
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+// Fetch with a hard timeout, so a request that never answers surfaces as a
+// failure instead of hanging the page.
+function fetchT(url, ms) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { signal: ctrl.signal, cache: "no-store" })
+    .finally(() => clearTimeout(timer));
+}
 
 // Map a source status string to one of our four visual states.
 function cls(status) {
@@ -152,15 +163,20 @@ function group(title, tiles) {
 
 function fmtDate(s) { return s ? String(s).slice(0, 10) : "—"; }
 function fmtNum(n)  { return typeof n === "number" ? n.toLocaleString() : "—"; }
+function datasetDate(s) {
+  const m = s ? String(s).match(/\d{4}-\d{2}-\d{2}/) : null;
+  return m ? m[0] : null;
+}
 
 async function load() {
   $("checked").textContent = "checking…";
 
-  // Two independent probes: Caddy answers /caddy-health itself; the backend
-  // answers /api/v1/health. Either can fail without hiding the other.
+  // Two independent probes, each with a hard timeout: Caddy answers
+  // /caddy-health itself; the backend answers /api/v1/health. Either can fail —
+  // or hang — without hiding the other or freezing the page.
   const [caddy, health] = await Promise.all([
-    fetch("/caddy-health").then(r => r.ok).catch(() => false),
-    fetch("/api/v1/health").then(r => r.json()).catch(() => null),
+    fetchT("/caddy-health", 6000).then(r => r.ok).catch(() => false),
+    fetchT("/api/v1/health", 8000).then(r => r.json()).catch(() => null),
   ]);
 
   const proxy = tile("Caddy proxy", caddy ? "ok" : "error",
@@ -177,7 +193,7 @@ async function load() {
           g = health.gpc, rs = health.response_store;
     cached = [
       u && tile("USDA FDC — local copy", u.status,
-        [["dataset", fmtDate(u.dataset && u.dataset.match(/\d{4}-\d{2}-\d{2}/)?.[0])],
+        [["dataset", fmtDate(datasetDate(u.dataset))],
          ["barcodes", fmtNum(u.barcodes)], ["imported", fmtDate(u.imported_at)],
          u.size_mb && ["size", u.size_mb + " MB"]]),
       o && tile("Open Food Facts — local copy", o.status,
@@ -197,20 +213,20 @@ async function load() {
       ]),
       rs && tile("Response store", rs.enabled ? "ok" : "disabled",
         [["records", fmtNum(Object.values(rs.records || {}).reduce((a, b) => a + b, 0))],
-         ["ttl", (rs.ttl_days ?? "—") + " days"]]),
+         ["ttl", (rs.ttl_days == null ? "—" : rs.ttl_days) + " days"]]),
     ];
-    const u = health.usda_fdc || {};
+    const live = health.usda_fdc || {};
     // A DEMO_KEY works but is throttled to a trickle, so flag it as needing
     // attention even when the probe itself is green.
-    const usdaState = (u.key === "demo" && u.status === "ok") ? "demo"
-      : (u.key === "missing" && u.status !== "error") ? "unconfigured" : u.status;
+    const usdaState = (live.key === "demo" && live.status === "ok") ? "demo"
+      : (live.key === "missing" && live.status !== "error") ? "unconfigured" : live.status;
     const keyLabel = { configured: "real key — full rate",
-      demo: "DEMO_KEY — throttled", missing: "not set" }[u.key] || u.key;
+      demo: "DEMO_KEY — throttled", missing: "not set" }[live.key] || live.key;
     external = [
       health.usda_fdc && tile("USDA FDC — live API", usdaState, [
         ["token", keyLabel],
-        u.total_foods != null && ["reachable", "yes"],
-        u.detail && ["detail", u.detail.slice(0, 60)],
+        live.total_foods != null && ["reachable", "yes"],
+        live.detail && ["detail", live.detail.slice(0, 60)],
       ]),
       health.open_food_facts && tile("Open Food Facts — live API", health.open_food_facts.status,
         [health.open_food_facts.detail && ["detail", health.open_food_facts.detail.slice(0, 60)]]),
@@ -243,9 +259,26 @@ async function load() {
   $("checked").textContent = "Checked " + new Date().toLocaleTimeString();
 }
 
-$("refresh").addEventListener("click", load);
-load();
-setInterval(load, 20000);
+// Any unexpected error must show, not leave the banner stuck on "Checking…".
+function safeLoad() {
+  Promise.resolve().then(load).catch(err => {
+    $("banner").className = "banner s-bad";
+    $("overall").textContent = "Could not load status";
+    $("checked").textContent = String(err && err.message ? err.message : err);
+  });
+}
+
+// A last-resort net for a parse/runtime error anywhere on the page.
+window.addEventListener("error", () => {
+  if ($("overall").textContent === "Checking…") {
+    $("overall").textContent = "Status page error — see the browser console";
+    $("banner").className = "banner s-bad";
+  }
+});
+
+$("refresh").addEventListener("click", safeLoad);
+safeLoad();
+setInterval(safeLoad, 20000);
 </script>
 </body>
 </html>

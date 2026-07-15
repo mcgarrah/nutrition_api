@@ -20,9 +20,12 @@
 
 	# Everything else is served from the static site directory. try_files gives
 	# clean URLs (/status -> status.html) and lets the landing hub answer /.
+	# no-cache makes the browser revalidate each load, so a fix to a page (or a
+	# broken deploy) is picked up on the next visit rather than served stale.
 	handle {
 		root * {$NUTRITION_SITE_ROOT:/opt/nutrition_api/deploy/site}
 		try_files {path} {path}.html
+		header Cache-Control "no-cache"
 		file_server
 	}
 }
