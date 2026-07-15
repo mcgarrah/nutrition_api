@@ -1,0 +1,28 @@
+# Shared routing for the Nutrition API, imported by every site block —
+# the example Caddyfile, its :8081 local-test block, and the installed
+# /etc/caddy/Caddyfile — so the config that runs cannot drift from the one you
+# smoke-test.
+(nutrition_api) {
+	encode zstd gzip
+
+	# Caddy's own liveness, answered by the proxy directly (never forwarded to
+	# the backend). This is what lets the status page distinguish "proxy up,
+	# backend down" from "everything down".
+	handle /caddy-health {
+		respond "caddy: ok" 200
+	}
+
+	# The application and API, served by the uvicorn backend.
+	@backend path /api/* /ui /ui/* /gpc /docs /docs/* /redoc /openapi.json
+	handle @backend {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# Everything else is served from the static site directory. try_files gives
+	# clean URLs (/status -> status.html) and lets the landing hub answer /.
+	handle {
+		root * {$NUTRITION_SITE_ROOT:/opt/nutrition_api/deploy/site}
+		try_files {path} {path}.html
+		file_server
+	}
+}
