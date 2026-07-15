@@ -305,7 +305,7 @@ def inbound(monkeypatch):
 def test_excess_requests_get_429(inbound, gpc_db):
     inbound(rate=3)
 
-    codes = [client.get("/api/gpc/segments/").status_code for _ in range(6)]
+    codes = [client.get("/api/v1/gpc/segments/").status_code for _ in range(6)]
 
     assert codes[:3] == [200, 200, 200]
     assert codes[3:] == [429, 429, 429]
@@ -314,8 +314,8 @@ def test_excess_requests_get_429(inbound, gpc_db):
 def test_429_carries_a_retry_after_header(inbound, gpc_db):
     inbound(rate=1)
 
-    client.get("/api/gpc/segments/")
-    resp = client.get("/api/gpc/segments/")
+    client.get("/api/v1/gpc/segments/")
+    resp = client.get("/api/v1/gpc/segments/")
 
     assert resp.status_code == 429
     assert int(resp.headers["Retry-After"]) >= 1
@@ -344,16 +344,16 @@ def test_the_limit_is_per_client(inbound, gpc_db):
 
     for _ in range(2):
         assert client.get(
-            "/api/gpc/segments/", headers={"X-Forwarded-For": "1.1.1.1"},
+            "/api/v1/gpc/segments/", headers={"X-Forwarded-For": "1.1.1.1"},
         ).status_code == 200
 
     assert client.get(
-        "/api/gpc/segments/", headers={"X-Forwarded-For": "1.1.1.1"},
+        "/api/v1/gpc/segments/", headers={"X-Forwarded-For": "1.1.1.1"},
     ).status_code == 429
 
     # A different caller is unaffected
     assert client.get(
-        "/api/gpc/segments/", headers={"X-Forwarded-For": "2.2.2.2"},
+        "/api/v1/gpc/segments/", headers={"X-Forwarded-For": "2.2.2.2"},
     ).status_code == 200
 
 
@@ -363,12 +363,12 @@ def test_the_first_forwarded_hop_identifies_the_client(inbound, gpc_db):
     inbound(rate=1)
 
     headers = {"X-Forwarded-For": "9.9.9.9, 10.0.0.1, 172.16.0.1"}
-    assert client.get("/api/gpc/segments/", headers=headers).status_code == 200
-    assert client.get("/api/gpc/segments/", headers=headers).status_code == 429
+    assert client.get("/api/v1/gpc/segments/", headers=headers).status_code == 200
+    assert client.get("/api/v1/gpc/segments/", headers=headers).status_code == 429
 
     # Same proxy chain, different origin client -> its own budget
     other = {"X-Forwarded-For": "8.8.8.8, 10.0.0.1, 172.16.0.1"}
-    assert client.get("/api/gpc/segments/", headers=other).status_code == 200
+    assert client.get("/api/v1/gpc/segments/", headers=other).status_code == 200
 
 
 def test_the_inbound_limit_is_also_divided_across_workers():

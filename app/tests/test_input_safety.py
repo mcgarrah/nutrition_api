@@ -37,7 +37,7 @@ INJECTIONS = [
 
 @pytest.mark.parametrize("payload", INJECTIONS)
 def test_search_endpoint_is_not_injectable(payload, gpc_db):
-    resp = client.get("/api/gpc/search/", params={"q": payload})
+    resp = client.get("/api/v1/gpc/search/", params={"q": payload})
 
     assert resp.status_code == 200
     # The payload is treated as a literal search term, matching nothing
@@ -56,7 +56,7 @@ def test_search_endpoint_is_not_injectable(payload, gpc_db):
 
 @pytest.mark.parametrize("payload", INJECTIONS)
 def test_list_search_filter_is_not_injectable(payload, gpc_db):
-    resp = client.get("/api/gpc/bricks/", params={"search": payload})
+    resp = client.get("/api/v1/gpc/bricks/", params={"search": payload})
 
     assert resp.status_code == 200
     assert resp.json()["count"] == 0
@@ -69,7 +69,7 @@ def test_list_search_filter_is_not_injectable(payload, gpc_db):
 @pytest.mark.parametrize("payload", INJECTIONS)
 def test_code_filters_are_not_injectable(payload, gpc_db):
     """These land in an equality clause rather than a LIKE."""
-    resp = client.get("/api/gpc/classes/", params={"family_code": payload})
+    resp = client.get("/api/v1/gpc/classes/", params={"family_code": payload})
 
     assert resp.status_code == 200
     assert resp.json()["count"] == 0
@@ -80,7 +80,7 @@ def test_code_filters_are_not_injectable(payload, gpc_db):
 
 
 def test_path_parameter_is_not_injectable(gpc_db):
-    resp = client.get("/api/gpc/segments/' OR '1'='1")
+    resp = client.get("/api/v1/gpc/segments/' OR '1'='1")
 
     assert resp.status_code == 404      # no such segment, not "every segment"
 
@@ -95,18 +95,18 @@ def test_path_parameter_is_not_injectable(gpc_db):
 # touch another table — but the behaviour should be deliberate, not a surprise.
 
 def test_percent_in_search_acts_as_a_wildcard():
-    body = client.get("/api/gpc/bricks/", params={"search": "%"}).json()
+    body = client.get("/api/v1/gpc/bricks/", params={"search": "%"}).json()
     assert body["count"] == 3           # matches every brick
 
 
 def test_underscore_in_search_acts_as_a_single_char_wildcard():
-    body = client.get("/api/gpc/bricks/", params={"search": "Col_ Drinks"}).json()
+    body = client.get("/api/v1/gpc/bricks/", params={"search": "Col_ Drinks"}).json()
     assert [b["brick_code"] for b in body["results"]] == ["10000201"]
 
 
 def test_wildcard_search_cannot_reach_other_tables():
     """A wildcard widens the current query only — it never leaks rows across."""
-    body = client.get("/api/gpc/segments/", params={"search": "%"}).json()
+    body = client.get("/api/v1/gpc/segments/", params={"search": "%"}).json()
     assert body["count"] == 2           # the two segments, not bricks or classes
 
 
@@ -120,24 +120,24 @@ def test_wildcard_search_cannot_reach_other_tables():
     "​",           # zero-width space
 ])
 def test_unicode_search_terms_are_handled(term):
-    resp = client.get("/api/gpc/search/", params={"q": term})
+    resp = client.get("/api/v1/gpc/search/", params={"q": term})
     assert resp.status_code == 200
 
 
 def test_very_long_search_term_does_not_error():
-    resp = client.get("/api/gpc/search/", params={"q": "a" * 5000})
+    resp = client.get("/api/v1/gpc/search/", params={"q": "a" * 5000})
     assert resp.status_code == 200
     assert resp.json()["bricks"] == []
 
 
 def test_null_byte_in_search_is_rejected_or_handled():
     """A NUL must never reach SQLite as a truncating C string."""
-    resp = client.get("/api/gpc/search/", params={"q": "cola\x00; DROP TABLE bricks"})
+    resp = client.get("/api/v1/gpc/search/", params={"q": "cola\x00; DROP TABLE bricks"})
     assert resp.status_code in (200, 400, 422)
 
 
 def test_whitespace_only_search_is_harmless():
-    assert client.get("/api/gpc/search/", params={"q": "   "}).status_code == 200
+    assert client.get("/api/v1/gpc/search/", params={"q": "   "}).status_code == 200
 
 
 # ── GTIN normalization against hostile input ──────────────────────────

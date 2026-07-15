@@ -164,7 +164,7 @@ def test_search_against_the_real_taxonomy_is_bounded(real_db, monkeypatch):
     client = TestClient(app)
 
     try:
-        body = client.get("/api/gpc/search/", params={"q": "e"}).json()
+        body = client.get("/api/v1/gpc/search/", params={"q": "e"}).json()
 
         # Hundreds of real matches, but the response is capped
         assert body["counts"]["bricks"] > 200
@@ -172,7 +172,7 @@ def test_search_against_the_real_taxonomy_is_bounded(real_db, monkeypatch):
         assert body["truncated"] is True
 
         # A wildcard cannot opt out of the cap either
-        wild = client.get("/api/gpc/search/", params={"q": "%"}).json()
+        wild = client.get("/api/v1/gpc/search/", params={"q": "%"}).json()
         assert len(wild["bricks"]) <= 50
         assert wild["truncated"] is True
     finally:

@@ -19,36 +19,36 @@ pytestmark = pytest.mark.usefixtures("gpc_db")
 # ── Families ──────────────────────────────────────────────────────────
 
 def test_list_families_unfiltered():
-    body = client.get("/api/gpc/families/").json()
+    body = client.get("/api/v1/gpc/families/").json()
     assert body["count"] == 2
     assert [f["family_code"] for f in body["results"]] == ["50100000", "50200000"]
 
 
 def test_list_families_search_matches_description():
-    body = client.get("/api/gpc/families/", params={"search": "Bever"}).json()
+    body = client.get("/api/v1/gpc/families/", params={"search": "Bever"}).json()
     assert [f["family_code"] for f in body["results"]] == ["50200000"]
 
 
 def test_list_families_search_matches_code():
-    body = client.get("/api/gpc/families/", params={"search": "50200000"}).json()
+    body = client.get("/api/v1/gpc/families/", params={"search": "50200000"}).json()
     assert body["count"] == 1
 
 
 def test_list_families_search_and_segment_filter_combine():
     """Both clauses must AND together, not replace each other."""
     hit = client.get(
-        "/api/gpc/families/", params={"search": "Bever", "segment_code": "50000000"},
+        "/api/v1/gpc/families/", params={"search": "Bever", "segment_code": "50000000"},
     ).json()
     assert hit["count"] == 1
 
     miss = client.get(
-        "/api/gpc/families/", params={"search": "Bever", "segment_code": "51000000"},
+        "/api/v1/gpc/families/", params={"search": "Bever", "segment_code": "51000000"},
     ).json()
     assert miss["count"] == 0
 
 
 def test_family_detail_has_breadcrumb_and_children():
-    body = client.get("/api/gpc/families/50200000").json()
+    body = client.get("/api/v1/gpc/families/50200000").json()
 
     assert body["description"] == "Beverages"
     assert body["full_path"] == "Food/Beverage > Beverages"
@@ -59,28 +59,28 @@ def test_family_detail_has_breadcrumb_and_children():
 
 
 def test_family_detail_404():
-    assert client.get("/api/gpc/families/99999999").status_code == 404
+    assert client.get("/api/v1/gpc/families/99999999").status_code == 404
 
 
 # ── Classes ───────────────────────────────────────────────────────────
 
 def test_list_classes_unfiltered():
-    body = client.get("/api/gpc/classes/").json()
+    body = client.get("/api/v1/gpc/classes/").json()
     assert body["count"] == 2
 
 
 def test_list_classes_filtered_by_family():
-    body = client.get("/api/gpc/classes/", params={"family_code": "50200000"}).json()
+    body = client.get("/api/v1/gpc/classes/", params={"family_code": "50200000"}).json()
     assert [c["class_code"] for c in body["results"]] == ["50202300"]
 
 
 def test_list_classes_search():
-    body = client.get("/api/gpc/classes/", params={"search": "Carbonated"}).json()
+    body = client.get("/api/v1/gpc/classes/", params={"search": "Carbonated"}).json()
     assert body["count"] == 1
 
 
 def test_class_detail_404():
-    assert client.get("/api/gpc/classes/99999999").status_code == 404
+    assert client.get("/api/v1/gpc/classes/99999999").status_code == 404
 
 
 def test_class_with_no_bricks_returns_empty_list(gpc_db):
@@ -90,7 +90,7 @@ def test_class_with_no_bricks_returns_empty_list(gpc_db):
     conn.commit()
     conn.close()
 
-    body = client.get("/api/gpc/classes/50209999").json()
+    body = client.get("/api/v1/gpc/classes/50209999").json()
     assert body["bricks"] == []
     assert body["full_path"] == "Food/Beverage > Beverages > Empty Class"
 
@@ -98,18 +98,18 @@ def test_class_with_no_bricks_returns_empty_list(gpc_db):
 # ── Bricks ────────────────────────────────────────────────────────────
 
 def test_list_bricks_filtered_by_class():
-    body = client.get("/api/gpc/bricks/", params={"class_code": "50202300"}).json()
+    body = client.get("/api/v1/gpc/bricks/", params={"class_code": "50202300"}).json()
     assert [b["brick_code"] for b in body["results"]] == ["10000201", "10000202"]
 
 
 def test_list_bricks_search_and_class_filter_combine():
     body = client.get(
-        "/api/gpc/bricks/", params={"search": "Cola", "class_code": "50202300"},
+        "/api/v1/gpc/bricks/", params={"search": "Cola", "class_code": "50202300"},
     ).json()
     assert body["count"] == 1
 
     body = client.get(
-        "/api/gpc/bricks/", params={"search": "Cola", "class_code": "50101800"},
+        "/api/v1/gpc/bricks/", params={"search": "Cola", "class_code": "50101800"},
     ).json()
     assert body["count"] == 0
 
@@ -117,37 +117,37 @@ def test_list_bricks_search_and_class_filter_combine():
 # ── Pagination contract (shared by every list endpoint) ───────────────
 
 def test_first_page_has_no_previous_link():
-    body = client.get("/api/gpc/bricks/", params={"page_size": 1}).json()
+    body = client.get("/api/v1/gpc/bricks/", params={"page_size": 1}).json()
     assert body["previous"] is None
     assert "page=2" in body["next"]
 
 
 def test_last_page_has_no_next_link():
-    body = client.get("/api/gpc/bricks/", params={"page_size": 1, "page": 3}).json()
+    body = client.get("/api/v1/gpc/bricks/", params={"page_size": 1, "page": 3}).json()
     assert body["next"] is None
     assert "page=2" in body["previous"]
 
 
 def test_middle_page_has_both_links():
-    body = client.get("/api/gpc/bricks/", params={"page_size": 1, "page": 2}).json()
+    body = client.get("/api/v1/gpc/bricks/", params={"page_size": 1, "page": 2}).json()
     assert body["next"] is not None
     assert body["previous"] is not None
 
 
 def test_page_beyond_the_end_is_empty_not_an_error():
-    body = client.get("/api/gpc/bricks/", params={"page": 99}).json()
+    body = client.get("/api/v1/gpc/bricks/", params={"page": 99}).json()
     assert body["results"] == []
     assert body["count"] == 3       # total is still reported
     assert body["next"] is None
 
 
 def test_pagination_links_preserve_page_size():
-    body = client.get("/api/gpc/bricks/", params={"page_size": 2}).json()
+    body = client.get("/api/v1/gpc/bricks/", params={"page_size": 2}).json()
     assert "page_size=2" in body["next"]
 
 
 def test_count_is_the_total_not_the_page_length():
-    body = client.get("/api/gpc/bricks/", params={"page_size": 1}).json()
+    body = client.get("/api/v1/gpc/bricks/", params={"page_size": 1}).json()
     assert body["count"] == 3
     assert len(body["results"]) == 1
 
@@ -159,7 +159,7 @@ def test_count_is_the_total_not_the_page_length():
     {"page_size": 101},   # ...and <= 100
 ])
 def test_invalid_pagination_params_are_rejected(params):
-    assert client.get("/api/gpc/bricks/", params=params).status_code == 422
+    assert client.get("/api/v1/gpc/bricks/", params=params).status_code == 422
 
 
 # ── Search endpoint ───────────────────────────────────────────────────
@@ -172,7 +172,7 @@ def test_invalid_pagination_params_are_rejected(params):
 ])
 def test_search_category_returns_only_that_entity(category, expected_key):
     body = client.get(
-        "/api/gpc/search/", params={"q": "0", "category": category},
+        "/api/v1/gpc/search/", params={"q": "0", "category": category},
     ).json()
     others = [k for k in ("segments", "families", "classes", "bricks") if k != expected_key]
     assert body[expected_key] != []
@@ -180,12 +180,12 @@ def test_search_category_returns_only_that_entity(category, expected_key):
 
 
 def test_search_matches_on_code_as_well_as_text():
-    body = client.get("/api/gpc/search/", params={"q": "10000201"}).json()
+    body = client.get("/api/v1/gpc/search/", params={"q": "10000201"}).json()
     assert [b["brick_code"] for b in body["bricks"]] == ["10000201"]
 
 
 def test_search_no_match_returns_empty_lists():
-    body = client.get("/api/gpc/search/", params={"q": "zzzznothing"}).json()
+    body = client.get("/api/v1/gpc/search/", params={"q": "zzzznothing"}).json()
     assert all(body[k] == [] for k in ("segments", "families", "classes", "bricks"))
     assert body["counts"] == {"segments": 0, "families": 0, "classes": 0, "bricks": 0}
     assert body["truncated"] is False
@@ -194,13 +194,13 @@ def test_search_no_match_returns_empty_lists():
 def test_search_rejects_an_unknown_category():
     """The OpenAPI schema advertises an enum; the server must enforce it
     rather than silently returning empty results for a typo."""
-    resp = client.get("/api/gpc/search/", params={"q": "cola", "category": "bogus"})
+    resp = client.get("/api/v1/gpc/search/", params={"q": "cola", "category": "bogus"})
     assert resp.status_code == 422
 
 
 def test_search_category_enum_is_published_in_the_schema():
     spec = client.get("/openapi.json").json()
-    params = spec["paths"]["/api/gpc/search/"]["get"]["parameters"]
+    params = spec["paths"]["/api/v1/gpc/search/"]["get"]["parameters"]
     category = next(p for p in params if p["name"] == "category")
     assert set(category["schema"]["enum"]) == {
         "all", "segments", "families", "classes", "bricks",
@@ -215,7 +215,7 @@ def test_next_link_preserves_a_code_filter():
     returned rows from the whole taxonomy — a different set than the `count`
     beside it described."""
     body = client.get(
-        "/api/gpc/bricks/", params={"class_code": "50202300", "page_size": 1},
+        "/api/v1/gpc/bricks/", params={"class_code": "50202300", "page_size": 1},
     ).json()
 
     assert body["count"] == 2                   # Cola Drinks + Lemonade
@@ -230,7 +230,7 @@ def test_next_link_preserves_a_code_filter():
 def test_next_link_preserves_a_search_filter():
     # "e" matches Lemonade and Apples, but not Cola Drinks — two results
     body = client.get(
-        "/api/gpc/bricks/", params={"search": "e", "page_size": 1},
+        "/api/v1/gpc/bricks/", params={"search": "e", "page_size": 1},
     ).json()
 
     assert body["count"] == 2
@@ -243,7 +243,7 @@ def test_next_link_preserves_a_search_filter():
 
 def test_pagination_links_preserve_combined_filters():
     body = client.get(
-        "/api/gpc/families/",
+        "/api/v1/gpc/families/",
         params={"search": "e", "segment_code": "50000000", "page_size": 1},
     ).json()
 
@@ -257,7 +257,7 @@ def test_pagination_links_preserve_combined_filters():
 def test_following_next_then_previous_returns_the_first_page():
     """The round trip a paging client actually performs."""
     first = client.get(
-        "/api/gpc/bricks/", params={"class_code": "50202300", "page_size": 1},
+        "/api/v1/gpc/bricks/", params={"class_code": "50202300", "page_size": 1},
     ).json()
     second = client.get(first["next"]).json()
     back = client.get(second["previous"]).json()
@@ -268,7 +268,7 @@ def test_following_next_then_previous_returns_the_first_page():
 
 def test_paging_links_do_not_duplicate_parameters():
     """include_query_params must override page/page_size, not append to them."""
-    body = client.get("/api/gpc/bricks/", params={"page": 1, "page_size": 1}).json()
+    body = client.get("/api/v1/gpc/bricks/", params={"page": 1, "page_size": 1}).json()
 
     assert body["next"].count("page=") == 1
     assert body["next"].count("page_size=") == 1
@@ -280,7 +280,7 @@ def test_paging_links_do_not_duplicate_parameters():
 def test_search_caps_results_at_the_limit(gpc_db):
     """Unbounded, '?q=e' returned 921 rows in a 67 KB response against the real
     taxonomy — every caller paying for an answer nobody asked for."""
-    body = client.get("/api/gpc/search/", params={"q": "0", "limit": 1}).json()
+    body = client.get("/api/v1/gpc/search/", params={"q": "0", "limit": 1}).json()
 
     assert len(body["bricks"]) == 1
     assert len(body["segments"]) == 1
@@ -289,7 +289,7 @@ def test_search_caps_results_at_the_limit(gpc_db):
 def test_search_reports_the_real_match_count_when_truncated(gpc_db):
     """A truncated answer must be visible, not silent — otherwise a client
     believes the slice it got is the whole result set."""
-    body = client.get("/api/gpc/search/", params={"q": "0", "limit": 1}).json()
+    body = client.get("/api/v1/gpc/search/", params={"q": "0", "limit": 1}).json()
 
     assert body["truncated"] is True
     assert body["counts"]["bricks"] == 3      # 3 matched, 1 returned
@@ -297,7 +297,7 @@ def test_search_reports_the_real_match_count_when_truncated(gpc_db):
 
 
 def test_search_is_not_truncated_when_everything_fits(gpc_db):
-    body = client.get("/api/gpc/search/", params={"q": "Cola"}).json()
+    body = client.get("/api/v1/gpc/search/", params={"q": "Cola"}).json()
 
     assert body["truncated"] is False
     assert body["counts"]["bricks"] == len(body["bricks"]) == 1
@@ -305,7 +305,7 @@ def test_search_is_not_truncated_when_everything_fits(gpc_db):
 
 def test_search_counts_only_the_requested_category(gpc_db):
     body = client.get(
-        "/api/gpc/search/", params={"q": "0", "category": "bricks"},
+        "/api/v1/gpc/search/", params={"q": "0", "category": "bricks"},
     ).json()
 
     assert set(body["counts"]) == {"bricks"}
@@ -318,7 +318,7 @@ def test_search_default_limit_is_applied(gpc_db):
 
     assert 0 < DEFAULT_SEARCH_LIMIT <= MAX_SEARCH_LIMIT
 
-    body = client.get("/api/gpc/search/", params={"q": "0"}).json()
+    body = client.get("/api/v1/gpc/search/", params={"q": "0"}).json()
     for entity in ("segments", "families", "classes", "bricks"):
         assert len(body[entity]) <= DEFAULT_SEARCH_LIMIT
 
@@ -326,13 +326,13 @@ def test_search_default_limit_is_applied(gpc_db):
 @pytest.mark.parametrize("limit", [0, -1, 201, 10000])
 def test_search_rejects_an_out_of_range_limit(limit, gpc_db):
     """A caller must not be able to opt out of the cap."""
-    resp = client.get("/api/gpc/search/", params={"q": "cola", "limit": limit})
+    resp = client.get("/api/v1/gpc/search/", params={"q": "cola", "limit": limit})
     assert resp.status_code == 422
 
 
 def test_search_limit_is_published_with_its_bounds(gpc_db):
     spec = client.get("/openapi.json").json()
-    params = spec["paths"]["/api/gpc/search/"]["get"]["parameters"]
+    params = spec["paths"]["/api/v1/gpc/search/"]["get"]["parameters"]
     limit = next(p for p in params if p["name"] == "limit")
 
     assert limit["schema"]["maximum"] == 200

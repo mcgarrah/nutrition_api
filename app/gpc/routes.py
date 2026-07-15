@@ -5,15 +5,15 @@ Provides the same endpoint contract as the shiny-shop Django REST Framework API,
 but queries a corrected schema with junction tables for many-to-many relationships.
 
 Endpoints:
-  /api/gpc/segments/              - list (paginated, searchable)
-  /api/gpc/segments/{code}        - detail with families
-  /api/gpc/families/              - list (paginated, searchable, filterable by segment)
-  /api/gpc/families/{code}        - detail with classes + parent breadcrumb
-  /api/gpc/classes/               - list (paginated, searchable, filterable by family)
-  /api/gpc/classes/{code}         - detail with bricks + parent breadcrumb
-  /api/gpc/bricks/                - list (paginated, searchable, filterable by class)
-  /api/gpc/bricks/{code}          - detail with attributes + parent breadcrumb
-  /api/gpc/search/?q=...          - cross-entity search
+  /api/v1/gpc/segments/              - list (paginated, searchable)
+  /api/v1/gpc/segments/{code}        - detail with families
+  /api/v1/gpc/families/              - list (paginated, searchable, filterable by segment)
+  /api/v1/gpc/families/{code}        - detail with classes + parent breadcrumb
+  /api/v1/gpc/classes/               - list (paginated, searchable, filterable by family)
+  /api/v1/gpc/classes/{code}         - detail with bricks + parent breadcrumb
+  /api/v1/gpc/bricks/                - list (paginated, searchable, filterable by class)
+  /api/v1/gpc/bricks/{code}          - detail with attributes + parent breadcrumb
+  /api/v1/gpc/search/?q=...          - cross-entity search
 
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
@@ -31,7 +31,7 @@ from .models import (
     PaginatedResponse, SearchResponse,
 )
 
-router = APIRouter(prefix="/api/gpc", tags=["GPC"])
+router = APIRouter(prefix="/api/v1/gpc", tags=["GPC"])
 
 DEFAULT_PAGE_SIZE = 20
 

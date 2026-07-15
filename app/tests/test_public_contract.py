@@ -121,7 +121,7 @@ def test_every_v1_route_is_under_the_version_prefix():
     """Nothing should escape /api/v1 except the GPC browser and the UI."""
     paths = client.get("/openapi.json").json()["paths"]
     for path in paths:
-        assert path.startswith(("/api/v1/", "/api/gpc/")), path
+        assert path.startswith(("/api/v1/", "/api/v1/gpc/")), path
 
 
 def test_lookup_documents_its_404_and_422():
