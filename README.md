@@ -51,6 +51,27 @@ The 322 MB database is too large for git and the archive would add ~28 MB to eve
 
 **A barcode is not unique in FDC.** It republishes a product as a new `fdc_id` whenever the label changes, so 2.0M records are really 442,095 barcodes — 4.5 revisions each on average, up to 38 — and 31% of colliding barcodes disagree on calories. The newest revision defines the product; where it is merely *silent* about a nutrient, an earlier revision fills the gap (which recovers 122,205 values).
 
+### Local Open Food Facts copy
+
+Open Food Facts is the *base layer* of every lookup (name, brand, image, ingredients, provisional nutrition) and the slow, rate-limited half of a response. It publishes the whole corpus once a day as a single gzipped CSV (~1.3 GB), and the API imports the usable subset:
+
+| | live API | local copy |
+|---|---|---|
+| product lookup | 200–500 ms | **~25 µs** |
+| rate limit | 15 reads/min per IP (ban on overrun) | none |
+
+The copy holds **~2.24M products** — the roughly half of OFF's 4.5M rows that have a barcode, a name, and at least one nutrient we publish. A miss falls through to the live API, still authoritative for products newer than the export or too sparse to import. Set `OFF_LOCAL_ENABLED=0` to force every lookup upstream.
+
+```bash
+python scripts/build_off_db.py --check         # installed vs. available
+python scripts/build_off_db.py --auto-update   # fetch the archive, or rebuild
+python scripts/build_off_db.py                 # build from scratch
+```
+
+The build streams the CSV straight out of the gzip (the 9 GB of decompressed text is never written), takes ~7 minutes, and produces a ~1 GB database plus a ~142 MB `.xz`. As with FDC, neither is committed — the archive is a release asset (`off-YYYY-MM-DD`), expanded on first startup. Nutrient values are stored *raw* (OFF's grams) so `from_off` converts them once, at lookup, exactly as on the live path.
+
+Unlike FDC's twice-yearly release, **OFF rebuilds daily**, so the export has no dated filename; the dataset is identified by its `Last-Modified` date and `--auto-update` compares that.
+
 The GPC data is stored in SQLite with a corrected schema that uses junction tables to preserve the many-to-many relationships between bricks and attribute types (the same attribute type can appear on many bricks in the GS1 specification).
 
 ## Quick Start

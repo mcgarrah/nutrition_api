@@ -19,6 +19,7 @@ from app.core import orchestrator
 from app.core import ratelimit
 from app.core import resilience
 from app.core import fdc_local
+from app.core import off_local
 from app.core import store
 from app.core import usda_fdc
 
@@ -56,6 +57,25 @@ def isolated_fdc_local(tmp_path, monkeypatch):
         # aiosqlite runs a non-daemon thread per connection; an orphan hangs exit.
         asyncio.run(conn.close())
     fdc_local._db = None
+
+
+@pytest.fixture(autouse=True)
+def isolated_off_local(tmp_path, monkeypatch):
+    """Keep the tests away from any real local OFF database.
+
+    Same hazard as the FDC copy: once data/off.sqlite3 exists, the orchestrator
+    would answer product lookups from it, and a test meaning to exercise the
+    upstream path would quietly stop doing so.
+    """
+    monkeypatch.setattr(off_local, "DB_PATH", tmp_path / "absent_off.sqlite3")
+    monkeypatch.setattr(off_local, "ARCHIVE_PATH", tmp_path / "absent_off.sqlite3.xz")
+    monkeypatch.setattr(off_local, "_db", None)
+    monkeypatch.setattr(off_local, "_metadata", {})
+    yield
+    conn = off_local._db
+    if conn is not None:
+        asyncio.run(conn.close())
+    off_local._db = None
 
 
 @pytest.fixture(autouse=True)
