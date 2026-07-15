@@ -91,6 +91,8 @@ uvicorn app.main:app --reload
 Then open:
 
 - `/` — browser-based lookup tester (product card, per-source contributions, upstream latency, cache round-trip)
+- `/gpc` — GPC taxonomy browser (search + drill Segment → Family → Class → Brick → Attributes)
+- `/data` — read-only Data Browser for the local stores (OFF, FDC, GPC, response cache): schema, rows, and per-column coverage
 - `/docs` — Swagger UI, or `/redoc` for reference-style docs
 
 ### Docker

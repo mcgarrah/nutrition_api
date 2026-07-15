@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nutrition API — Data Browser</title>
+<style>
+  :root {
+    --surface-0: #f2f2f0; --surface-1: #fcfcfb; --surface-2: #e9e9e5;
+    --border: #dedddA; --text-primary: #0b0b0b; --text-secondary: #52514e;
+    --text-muted: #78776f; --accent: #5b57c9; --accent-soft: #e6e5f7;
+    --pk: #b57e00; --fk: #2a78d6; --good: #1a8a3e; --bad: #c8322f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-0: #101010; --surface-1: #1a1a19; --surface-2: #242320;
+      --border: #35342f; --text-primary: #fff; --text-secondary: #c3c2b7;
+      --text-muted: #8f8e84; --accent: #9b97ec; --accent-soft: #241f3a;
+      --pk: #d9a53a; --fk: #6ba7ea; --good: #58c877; --bad: #ef6b68;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 1.75rem 1rem 4rem; background: var(--surface-0);
+    color: var(--text-primary); font: 14.5px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; margin-bottom: .3rem; }
+  h1 { font-size: 1.35rem; margin: 0; letter-spacing: -.01em; }
+  h1 .g { color: var(--accent); }
+  .nav { margin-left: auto; font-size: .8125rem; } .nav a { color: var(--text-secondary); }
+  .sub { color: var(--text-secondary); font-size: .8125rem; margin: 0 0 1.1rem; }
+  a { color: var(--fk); }
+
+  /* store pills */
+  .stores { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1.1rem; }
+  .store {
+    display: flex; flex-direction: column; gap: .1rem; text-align: left; cursor: pointer;
+    padding: .55rem .8rem; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--surface-1); color: inherit; min-width: 130px;
+  }
+  .store:hover { border-color: var(--accent); }
+  .store.on { border-color: var(--accent); background: var(--accent-soft); }
+  .store .lbl { font-weight: 650; }
+  .store .meta { font-size: .6875rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .store.off-line { opacity: .5; cursor: not-allowed; }
+
+  .layout { display: grid; grid-template-columns: 210px 1fr; gap: 1rem; align-items: start; }
+  @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
+
+  .side { background: var(--surface-1); border: 1px solid var(--border); border-radius: 11px; padding: .5rem; }
+  .side .item {
+    display: flex; align-items: center; gap: .4rem; width: 100%; text-align: left;
+    padding: .4rem .55rem; border: 0; background: none; color: inherit; font: inherit;
+    border-radius: 7px; cursor: pointer;
+  }
+  .side .item:hover { background: var(--surface-2); }
+  .side .item.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .side .item .n { margin-left: auto; font-size: .6875rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .side .sect { font-size: .625rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); font-weight: 700; padding: .5rem .55rem .3rem; }
+
+  .main { min-width: 0; }
+  .tabs { display: flex; gap: .3rem; margin-bottom: .7rem; }
+  .tab { padding: .3rem .7rem; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-secondary); cursor: pointer; font: inherit; font-size: .8125rem; }
+  .tab.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+  .toolbar { display: flex; gap: .5rem; margin-bottom: .6rem; flex-wrap: wrap; align-items: center; }
+  input[type=text] { flex: 1; min-width: 160px; padding: .45rem .6rem; font-size: .875rem;
+    background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .count { font-size: .8125rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .pager { display: flex; gap: .4rem; align-items: center; }
+  .pager button { padding: .3rem .6rem; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--surface-1); color: inherit; cursor: pointer; font: inherit; font-size: .8125rem; }
+  .pager button:disabled { opacity: .4; cursor: default; }
+
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+  table { border-collapse: collapse; width: 100%; font-size: .8125rem; }
+  th, td { padding: .45rem .65rem; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap;
+    max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+  thead th { position: sticky; top: 0; background: var(--surface-2); cursor: pointer;
+    font-size: .6875rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+  thead th .arrow { color: var(--accent); }
+  tr:last-child td { border-bottom: 0; }
+  tbody tr:hover { background: var(--surface-2); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td .null { color: var(--text-muted); font-style: italic; }
+
+  /* coverage */
+  .cov { display: grid; grid-template-columns: 150px 1fr 60px; gap: .5rem .8rem; align-items: center; }
+  .cov .cname { font-size: .8125rem; font-family: ui-monospace, Menlo, monospace; }
+  .cov .track { height: 12px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+  .cov .fill { height: 100%; border-radius: 4px; background: var(--accent); }
+  .cov .fill.dead { background: var(--bad); }
+  .cov .fill.full { background: var(--good); }
+  .cov .pct { text-align: right; font-size: .8125rem; font-variant-numeric: tabular-nums; }
+  .cov-note { font-size: .8125rem; color: var(--text-muted); margin: .1rem 0 .8rem; }
+
+  /* schema */
+  .schema { display: flex; flex-wrap: wrap; gap: .8rem; }
+  .stable { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); min-width: 240px; flex: 1; }
+  .stable h3 { margin: 0; padding: .5rem .7rem; font-size: .875rem; border-bottom: 1px solid var(--border);
+    display: flex; align-items: baseline; gap: .5rem; }
+  .stable h3 .n { margin-left: auto; font-size: .6875rem; color: var(--text-muted); font-weight: 400; }
+  .stable .col { display: flex; align-items: center; gap: .4rem; padding: .28rem .7rem; font-size: .8125rem;
+    border-bottom: 1px solid var(--border); font-family: ui-monospace, Menlo, monospace; }
+  .stable .col:last-child { border-bottom: 0; }
+  .stable .col .ty { margin-left: auto; color: var(--text-muted); font-size: .6875rem; }
+  .badge { font-size: .5625rem; font-weight: 700; padding: .05rem .3rem; border-radius: 3px; letter-spacing: .03em;
+    font-family: ui-sans-serif, system-ui, sans-serif; }
+  .badge.pk { color: var(--pk); border: 1px solid var(--pk); }
+  .badge.fk { color: var(--fk); border: 1px solid var(--fk); }
+  .fkline { font-size: .75rem; color: var(--fk); padding: .28rem .7rem; border-bottom: 1px solid var(--border);
+    font-family: ui-monospace, Menlo, monospace; }
+
+  .loading, .muted { color: var(--text-muted); font-size: .875rem; padding: .5rem 0; }
+  pre.rec { white-space: pre-wrap; word-break: break-word; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: .7rem; font-size: .75rem; margin: .3rem 0 0; max-height: 340px; overflow: auto; }
+  footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: .75rem; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="g">Data</span> Browser</h1>
+    <span class="nav"><a href="/">← Home</a> · <a href="/gpc">GPC taxonomy</a> · <a href="/status">Status</a></span>
+  </header>
+  <p class="sub">Read-only look inside the local data stores — schema, rows, and per-column coverage.</p>
+
+  <div class="stores" id="stores"></div>
+  <div class="layout">
+    <div class="side" id="side"></div>
+    <div class="main" id="main"><p class="loading">Loading…</p></div>
+  </div>
+
+  <footer>Read-only. Searches scan the text columns; a coverage summary scans the whole table once (cached).</footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const api = p => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)));
+const fmtNum = n => typeof n === "number" ? n.toLocaleString() : n;
+
+const state = { store: null, schema: [], table: null, view: "rows",
+  offset: 0, limit: 50, q: "", sort: "", dir: "asc" };
+
+async function init() {
+  const { stores } = await api("/api/v1/data/stores");
+  $("stores").innerHTML = stores.map(s => {
+    const rows = (s.tables || []).reduce((a, t) => a + t.rows, 0);
+    const meta = s.available
+      ? `${s.kind === "sqlite" ? (s.size_mb + " MB · ") : ""}${fmtNum(rows)} rows`
+      : "unavailable";
+    return `<button class="store ${s.available ? "" : "off-line"}" data-id="${s.id}" ${s.available ? "" : "disabled"}>
+      <span class="lbl">${esc(s.label)}</span><span class="meta">${meta}</span></button>`;
+  }).join("");
+  $("stores").querySelectorAll(".store[data-id]").forEach(b =>
+    b.addEventListener("click", () => selectStore(b.dataset.id)));
+  const first = stores.find(s => s.available);
+  if (first) selectStore(first.id); else $("main").innerHTML = `<p class="muted">No stores available.</p>`;
+}
+
+async function selectStore(id) {
+  state.store = id; state.table = null; state.view = "rows"; state.q = ""; state.offset = 0; state.sort = "";
+  $("stores").querySelectorAll(".store").forEach(b => b.classList.toggle("on", b.dataset.id === id));
+  const { tables } = await api(`/api/v1/data/${id}/schema`);
+  state.schema = tables;
+  // Sidebar: Schema link + a table list (biggest first so the interesting one leads).
+  const sorted = tables.slice().sort((a, b) => b.rows - a.rows);
+  $("side").innerHTML =
+    `<button class="item" data-view="schema"><span>Schema</span></button>` +
+    `<div class="sect">Tables</div>` +
+    sorted.map(t => `<button class="item" data-table="${esc(t.name)}">
+      <span>${esc(t.name)}</span><span class="n">${fmtNum(t.rows)}</span></button>`).join("");
+  $("side").querySelectorAll(".item").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.view === "schema") showSchema();
+    else showTable(b.dataset.table);
+  }));
+  // Default to the largest data table (skip the tiny *_metadata tables).
+  const main = sorted.find(t => !/_metadata$/.test(t.name)) || sorted[0];
+  if (main) showTable(main.name); else showSchema();
+}
+
+function markSide(sel) {
+  $("side").querySelectorAll(".item").forEach(b =>
+    b.classList.toggle("on", (sel.table && b.dataset.table === sel.table) ||
+      (sel.schema && b.dataset.view === "schema")));
+}
+
+function showSchema() {
+  markSide({ schema: true });
+  const cards = state.schema.map(t => {
+    const cols = t.columns.map(c => {
+      const fk = (t.foreign_keys || []).find(f => f.column === c.name);
+      const badges = (c.pk ? `<span class="badge pk">PK</span>` : "")
+        + (fk ? `<span class="badge fk">FK</span>` : "");
+      return `<div class="col">${esc(c.name)} ${badges}<span class="ty">${esc(c.type || "")}</span></div>`;
+    }).join("");
+    const fks = (t.foreign_keys || []).map(f =>
+      `<div class="fkline">${esc(f.column)} → ${esc(f.references_table)}.${esc(f.references_column)}</div>`).join("");
+    return `<div class="stable"><h3>${esc(t.name)}<span class="n">${fmtNum(t.rows)} rows</span></h3>${cols}${fks}</div>`;
+  }).join("");
+  $("main").innerHTML = `<div class="tabs"><span class="tab on">Schema</span></div><div class="schema">${cards}</div>`;
+}
+
+function tableTabs() {
+  return `<div class="tabs">
+    <button class="tab ${state.view === "rows" ? "on" : ""}" data-v="rows">Rows</button>
+    <button class="tab ${state.view === "coverage" ? "on" : ""}" data-v="coverage">Coverage</button>
+  </div>`;
+}
+
+function showTable(table) {
+  state.table = table; state.offset = 0; state.q = ""; state.sort = "";
+  markSide({ table });
+  render();
+}
+
+function render() {
+  if (state.view === "coverage") renderCoverage();
+  else renderRows();
+}
+
+async function renderRows() {
+  $("main").innerHTML = tableTabs() + `<p class="loading">Loading rows…</p>`;
+  wireTabs();
+  const p = new URLSearchParams({ table: state.table, limit: state.limit, offset: state.offset,
+    q: state.q, sort: state.sort, dir: state.dir });
+  const d = await api(`/api/v1/data/${state.store}/rows?${p}`);
+  const isStore = state.store === "store";
+  const head = d.columns.map(c =>
+    `<th data-col="${esc(c)}">${esc(c)}${state.sort === c ? `<span class="arrow"> ${state.dir === "asc" ? "▲" : "▼"}</span>` : ""}</th>`).join("");
+  const body = d.rows.map((row, i) => `<tr data-i="${i}">` + row.map(v =>
+    v == null ? `<td><span class="null">null</span></td>`
+      : `<td>${esc(v)}</td>`).join("") + `</tr>`).join("");
+  const from = d.total ? d.offset + 1 : 0;
+  const to = d.offset + d.rows.length;
+  const countTxt = state.q
+    ? `${fmtNum(d.matched)} match${d.matched === 1 ? "" : "es"} · showing ${from}–${to}`
+    : `${fmtNum(from)}–${fmtNum(to)} of ${fmtNum(d.total)}`;
+  $("main").innerHTML = tableTabs() +
+    `<div class="toolbar">
+       <input type="text" id="q" placeholder="Search the text columns…" value="${esc(state.q)}">
+       <span class="count">${countTxt}</span>
+       <span class="pager">
+         <button id="prev" ${d.offset === 0 ? "disabled" : ""}>‹ Prev</button>
+         <button id="next" ${to >= d.matched ? "disabled" : ""}>Next ›</button>
+       </span>
+     </div>
+     <div class="tbl-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
+     ${isStore ? `<div id="rec"></div>` : ""}`;
+  wireTabs();
+  $("q").addEventListener("keydown", e => { if (e.key === "Enter") { state.q = $("q").value.trim(); state.offset = 0; render(); } });
+  $("prev").addEventListener("click", () => { state.offset = Math.max(0, state.offset - state.limit); render(); });
+  $("next").addEventListener("click", () => { state.offset += state.limit; render(); });
+  $("main").querySelectorAll("thead th[data-col]").forEach(th => th.addEventListener("click", () => {
+    const c = th.dataset.col;
+    if (state.sort === c) state.dir = state.dir === "asc" ? "desc" : "asc";
+    else { state.sort = c; state.dir = "asc"; }
+    state.offset = 0; render();
+  }));
+  if (isStore) {
+    $("main").querySelectorAll("tbody tr").forEach(tr => tr.addEventListener("click", async () => {
+      const key = d.rows[+tr.dataset.i][0];
+      const rec = await api(`/api/v1/data/${state.store}/record?table=${encodeURIComponent(state.table)}&key=${encodeURIComponent(key)}`);
+      $("rec").innerHTML = `<pre class="rec">${esc(JSON.stringify(rec, null, 2))}</pre>`;
+    }));
+  }
+}
+
+async function renderCoverage() {
+  $("main").innerHTML = tableTabs() + `<p class="loading">Scanning…</p>`;
+  wireTabs();
+  const d = await api(`/api/v1/data/${state.store}/coverage?table=${encodeURIComponent(state.table)}`);
+  const rows = d.columns.map(c => {
+    const cls = c.pct === 0 ? "dead" : c.pct >= 99 ? "full" : "";
+    return `<div class="cname">${esc(c.name)}</div>
+      <div class="track"><div class="fill ${cls}" style="width:${c.pct}%"></div></div>
+      <div class="pct">${c.pct}%</div>`;
+  }).join("");
+  $("main").innerHTML = tableTabs() +
+    `<p class="cov-note">${fmtNum(d.total)} rows. Red = 0% (dead column), green = ≥99% populated.</p>
+     <div class="cov">${rows}</div>`;
+  wireTabs();
+}
+
+function wireTabs() {
+  $("main").querySelectorAll(".tab[data-v]").forEach(t => t.addEventListener("click", () => {
+    state.view = t.dataset.v; state.offset = 0; render();
+  }));
+}
+
+init().catch(e => { $("main").innerHTML = `<p class="muted">Failed to load: ${esc(e.message)}</p>`; });
+</script>
+</body>
+</html>
