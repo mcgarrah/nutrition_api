@@ -25,9 +25,9 @@ orchestrator._fetch_gpc_categories), not a lookup table pretending to be one.
 The 350 FDC categories are Pareto-distributed — the top 20 alone cover 48.7%
 of all branded foods, the top 90 cover 90.7% — so a curated table does not
 need to be exhaustive to be worth having. Between them, FDC_CATEGORY_TO_BRICK
-(128 entries, a specific brick) and FDC_CATEGORY_TO_CLASS (76 entries, a
+(128 entries, a specific brick) and FDC_CATEGORY_TO_CLASS (82 entries, a
 coarser class used when no single brick fits — see that table's own docstring)
-cover 87.0% of all FDC foods with a category. A GPC brick or class was only
+cover 91.2% of all FDC foods with a category. A GPC brick or class was only
 added when the match was genuinely confident, not merely plausible. Categories
 with no clean GPC equivalent at either level (see "Deliberately excluded"
 below) are left out rather than forced onto the nearest approximate match — a
@@ -337,48 +337,89 @@ FDC_CATEGORY_TO_CLASS: dict[str, str] = {
     # brick split would misrepresent roughly half the products either way.
     "Frozen Poultry, Chicken & Turkey": "50240200",
     "Confectionery": "50161800",  # Confectionery Products
+
+    # -- Fourth verification pass --
+    # These six supersede a round 1/2 exclusion. Rounds 1-2 only checked for a
+    # BRICK fit here (correctly finding none -- GPC has no cola/soda brick, no
+    # rice brick, no ethnic-sauce brick). This round checked whether the
+    # *class* the near-miss brick lives under is itself a clean, non-misleading
+    # fit, and verified each one by sampling real foods.description rows --
+    # not merely by name resemblance.
+    #
+    # Non Alcoholic Beverages - Ready to Drink; the sample is 100% carbonated
+    # soft drinks, root beer, ginger ale, and energy drinks -- exactly what
+    # this class means. (Round 1 correctly found no brick: GPC has no
+    # cola/soda-specific brick, only this coarser class.)
+    "Soda": "50202300",
+    # Grains/Flour; this class already holds the "Cereal" brick, but its
+    # class-level scope is grains generally -- confirmed against real
+    # products: white/brown/basmati/jasmine rice, no contamination.
+    "Rice": "50221000",
+    # Same Grains/Flour class; sample is rice-based dinner mixes and pilafs
+    # (chicken rice, rice pilaf, jambalaya mix) -- still squarely grain-based.
+    "Flavored Rice Dishes": "50221000",
+    # Same Grains/Flour class; sample is quinoa, flax, chia, hemp, millet,
+    # farro, barley -- genuine grains and seeds, not a catch-all in practice.
+    "Other Grains & Seeds": "50221000",
+    # Sauces/Spreads/Dips/Condiments; vinegar-contamination check (the reason
+    # "Other Cooking Sauces" below stays excluded) came back 1/3,600 = 0.0%
+    # for this category -- essentially pure pasta/pizza sauce.
+    "Prepared Pasta & Pizza Sauces": "50171800",
+    # Same Sauces/Spreads/Dips/Condiments class; vinegar-contamination check
+    # came back 12/3,559 = 0.3% -- essentially pure ethnic sauce/paste
+    # (teriyaki, soy sauce, curry paste, salsa). Round 2 excluded this for
+    # colliding with the "Other Sauces" *brick* already used elsewhere; the
+    # class itself has no such collision.
+    "Oriental, Mexican & Ethnic Sauces": "50171800",
 }
 
 # Deliberately excluded, and why -- documented so the gap reads as a decision,
-# not an oversight, and so nobody re-adds a low-confidence guess later:
+# not an oversight, and so nobody re-adds a low-confidence guess later. Some
+# entries below have since been superseded by a class-level match found in a
+# later pass -- see FDC_CATEGORY_TO_CLASS's "Fourth verification pass" comment
+# for the ones that moved from here into that table.
 #
-#   Soda                          GPC has no carbonated-soft-drink/cola brick.
-#                                  The nearest bricks (Drinks Flavoured, Stimu-
-#                                  lant/Energy Drinks) are different products.
 #   Other Drinks, Other Deli,
 #   Other Meats, Snacks (dup.)    Genuinely catch-all FDC labels with no single
 #                                  correct GPC brick by definition.
-#   Nut & Seed Butters            No dedicated GPC brick found (checked the
-#                                  Sweet Spreads class, where Honey and Jam
-#                                  live -- peanut butter is not there).
-#   Prepared Pasta & Pizza
-#   Sauces / Oriental, Mexican &
-#   Ethnic Sauces                 Would collide with Ketchup/Mustard/BBQ on the
-#                                  same "Other Sauces" brick, which already
-#                                  covers one FDC category better than three.
-#   Rice                          GPC has no standalone rice brick; the closest
-#                                  (Grains/Cereal) is used for the "Cereal"
-#                                  category above and would be a worse fit here.
-#   Pre-Packaged Fruit & Vegetables  Too ambiguous (fresh-cut? mixed? which
-#                                  state?) for a confident single brick.
+#   Nut & Seed Butters            No dedicated GPC brick *or class* found --
+#                                  checked Sweet Spreads (honey/jam bricks
+#                                  only) and Sauces/Spreads/Dips/Condiments
+#                                  (savoury dressings/mayo/mustard/pate only);
+#                                  peanut/nut butter fits neither.
+#   Pre-Packaged Fruit & Vegetables  Sample spans whole fresh fruit, fresh-cut
+#                                  vegetables, AND prepared salad kits with
+#                                  dressing -- three different GPC states
+#                                  (Fresh / Fresh Cut / Prepared) in one FDC
+#                                  label; no single class covers all three.
 #
 #   -- second pass additions --
 #   Deli Salads, Cooked & Prepared,
-#   Other Grains & Seeds, Lunch
-#   Snacks & Combinations,
-#   Frozen Patties and Burgers,
-#   Chili & Stew                  No dedicated brick or class exists for any
-#                                  of these (checked adjacent classes -- e.g.
-#                                  no burger/patty or chili/stew brick in GPC
-#                                  at all); forcing one onto a near neighbour
-#                                  would misrepresent the product.
+#   Lunch Snacks & Combinations    No dedicated brick or class exists for
+#                                  either (checked adjacent classes); forcing
+#                                  one onto a near neighbour would misrepresent
+#                                  the product.
+#   Frozen Patties and Burgers    GPC's meat classes/bricks are strictly
+#                                  species-specific (Beef, Pork, Chicken, ...),
+#                                  and the sample mixes beef, venison, chicken,
+#                                  AND plant-based patties -- no single one
+#                                  represents the category without the rest
+#                                  being wrong.
+#   Chili & Stew                  Sample mixes actual chili, pasta-in-sauce
+#                                  dishes (beefaroni, spaghetti & meatballs),
+#                                  canned diced chiles, and vegetable stew --
+#                                  spans classes already used elsewhere
+#                                  (Ready-Made Combination Meals, canned
+#                                  vegetables); no single fit.
 #   Frozen Appetizers &
 #   Hors D'oeuvres                Spans too many GPC bricks (pastry, meat,
 #                                  seafood, vegetable) to pick one honestly.
-#   Flavored Rice Dishes,
 #   Frozen Pancakes, Waffles,
-#   French Toast & Crepes          Same "no rice/pancake brick exists" gap as
-#                                  plain Rice above.
+#   French Toast & Crepes          Checked Sweet Bakery Products (cakes/pies),
+#                                  Savoury Bakery Products (pies/pizza/quiche),
+#                                  and Grain Based Products/Meals (savoury
+#                                  grain meals) -- none represent pancakes or
+#                                  waffles. Confirmed genuine GPC gap.
 #
 #   -- third pass additions --
 #   Specialty Formula Supplements, Meal Replacement Supplements, Weight
@@ -391,10 +432,15 @@ FDC_CATEGORY_TO_CLASS: dict[str, str] = {
 #                                  supplement without misrepresenting it as an
 #                                  ordinary food or beverage.
 #   Other Cooking Sauces,
-#   Other Condiments              Sampled products are dominated by vinegar,
-#                                  not sauce/condiment -- would collide with
-#                                  the existing "Other Sauces" bucket on a
-#                                  worse fit than what's already mapped there.
+#   Other Condiments              49.5% and 74.7% of these categories
+#                                  respectively are literally vinegar by
+#                                  description (exact counts, not a sample) --
+#                                  contrast the two Sauces/Spreads/Dips/
+#                                  Condiments class entries in
+#                                  FDC_CATEGORY_TO_CLASS below, which came back
+#                                  under 1% vinegar-contaminated. Genuinely
+#                                  mixed sauce+vinegar catch-alls; no single
+#                                  code fits without misrepresenting half.
 #   Frozen Bacon, Sausages & Ribs Sample mixes pork, beef, and turkey in one
 #                                  category; GPC's meat bricks are
 #                                  species-specific and there is no
