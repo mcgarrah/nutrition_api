@@ -92,7 +92,8 @@ Then open:
 
 - `/` — browser-based lookup tester (product card, per-source contributions, upstream latency, cache round-trip)
 - `/gpc` — GPC taxonomy browser (search + drill Segment → Family → Class → Brick → Attributes)
-- `/data` — read-only Data Browser for the local stores (OFF, FDC, GPC, response cache): schema, rows, and per-column coverage. The response cache's linked `usda/upc` (barcode → fdc_id) and `usda/food` (fdc_id → food) records are shown merged as one `usda` table, not two disconnected ones
+- `/gpc/mappings` — GPC Mapping Viewer: every curated FDC-category → GPC brick/class entry (`app/core/gpc_match.py`), resolved to its full hierarchy, plus live coverage against the local FDC corpus and the ranked list of categories still uncovered
+- `/data` — read-only Data Browser for the local stores (OFF, FDC, GPC, response cache): schema, rows, and per-column coverage. The response cache's linked `usda/upc` (barcode → fdc_id) and `usda/food` (fdc_id → food) records are shown merged as one `usda` table, not two disconnected ones. Row pages default to 10 records, with a picker (5/10/20/50/custom, capped at 200) next to Prev/Next
 - `/docs` — Swagger UI, or `/redoc` for reference-style docs
 
 ### Docker
@@ -199,6 +200,7 @@ Example: `GET /api/v1/lookup/04963406021372` returns product name, brand, per-10
 | GET | `/api/v1/gpc/bricks/` | List bricks (filterable by class) |
 | GET | `/api/v1/gpc/bricks/{code}` | Brick detail with attributes |
 | GET | `/api/v1/gpc/search/?q=...` | Cross-entity search over segments, families, classes, bricks **and attributes** (capped; `limit` up to 200, `counts` reports the real totals) |
+| GET | `/api/v1/gpc/mappings` | Every curated FDC-category → GPC brick/class entry, resolved to its full hierarchy, plus live coverage against the local FDC corpus |
 
 GPC keeps the specifics in attributes, not brick names — "olive oil" is the attribute value `OLIVE OIL` of *Type of Edible Vegetable or Plant Oil* on the generic *Oils Edible* brick, not a brick of its own. Search therefore reaches into attribute types and values, and each attribute match carries the bricks that hold it, so `?q=olive` finds the oils brick that a description-only search would miss. Filter with `category=attributes`.
 

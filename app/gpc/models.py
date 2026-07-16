@@ -156,3 +156,52 @@ class SearchResponse(BaseModel):
         default=False,
         description="True when at least one entity type had more matches than the limit",
     )
+
+
+# --- Curated FDC-category -> GPC mapping viewer ------------------------
+
+class CuratedMapping(BaseModel):
+    """One hand-verified entry from gpc_match.py's curated tables."""
+
+    category: str = Field(description="FDC branded_food_category, exact string")
+    level: str = Field(description="'brick' (specific) or 'class' (coarser)")
+    code: str = Field(description="The matched GPC brick_code or class_code")
+    hierarchy: list[str] = Field(
+        default_factory=list,
+        description="Segment > Family > Class[ > Brick], resolved from the code",
+    )
+
+
+class UncoveredCategory(BaseModel):
+    """An FDC category with no curated mapping at either level, ranked by size."""
+
+    category: str
+    food_count: int
+
+
+class MappingCoverage(BaseModel):
+    """How much of the real local FDC corpus the curated tables reach.
+
+    Measured live against the local FDC bulk copy, not asserted — the number
+    here and the number in ARCH.md are computed the same way and cannot drift
+    apart the way a hand-maintained doc comment can.
+    """
+
+    total_categorized_foods: int
+    covered_foods: int
+    coverage_pct: float
+    distinct_fdc_categories: int
+    curated_brick_entries: int
+    curated_class_entries: int
+    uncovered_categories: list[UncoveredCategory] = Field(
+        default_factory=list,
+        description="FDC categories with no curated mapping, largest first",
+    )
+
+
+class MappingsResponse(BaseModel):
+    mappings: list[CuratedMapping] = Field(default_factory=list)
+    coverage: MappingCoverage | None = Field(
+        default=None,
+        description="None when the local FDC bulk copy isn't available to measure against",
+    )

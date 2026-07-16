@@ -21,6 +21,8 @@ const noop = () => {};
 const PAGES = [
   "app/static/index.html",
   "app/static/gpc.html",
+  "app/static/data.html",
+  "app/static/gpc_mappings.html",
   "deploy/site/index.html",
   "deploy/site/status.html",
 ];

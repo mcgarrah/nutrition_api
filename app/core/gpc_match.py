@@ -47,6 +47,7 @@ today's fuzzy matcher choosing an unrelated category outright.
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
+import sqlite3
 
 # FDC branded_food_category (exact string, as FDC publishes it) -> GPC
 # brick_code. Verified against the real April 2026 GPC taxonomy — every code
@@ -386,3 +387,101 @@ async def curated_hierarchy_for_fdc_category(db, category: str | None) -> list[s
         return await hierarchy_for_class(db, cls)
 
     return []
+
+
+# ── Bulk hierarchy lookups, for the mapping viewer ─────────────────────
+#
+# The viewer renders every curated entry at once (currently 85 brick + 73
+# class rows) — one query per row would mean over a hundred round trips for a
+# single page load. These resolve the whole table in two queries instead.
+
+async def hierarchy_for_bricks(db, brick_codes) -> dict[str, list[str]]:
+    """hierarchy_for_brick, batched: {brick_code: [Segment, Family, Class, Brick]}."""
+    codes = sorted(set(brick_codes))
+    if not codes:
+        return {}
+    placeholders = ",".join("?" for _ in codes)
+    rows = await db.execute_fetchall(
+        f"""SELECT b.brick_code, b.description, c.description, f.description, s.description
+            FROM bricks b
+            LEFT JOIN classes c ON b.class_code = c.class_code
+            LEFT JOIN families f ON c.family_code = f.family_code
+            LEFT JOIN segments s ON f.segment_code = s.segment_code
+            WHERE b.brick_code IN ({placeholders})""",
+        codes,
+    )
+    return {r[0]: [p for p in (r[4], r[3], r[2], r[1]) if p] for r in rows}
+
+
+async def hierarchy_for_classes(db, class_codes) -> dict[str, list[str]]:
+    """hierarchy_for_class, batched: {class_code: [Segment, Family, Class]}."""
+    codes = sorted(set(class_codes))
+    if not codes:
+        return {}
+    placeholders = ",".join("?" for _ in codes)
+    rows = await db.execute_fetchall(
+        f"""SELECT c.class_code, c.description, f.description, s.description
+            FROM classes c
+            LEFT JOIN families f ON c.family_code = f.family_code
+            LEFT JOIN segments s ON f.segment_code = s.segment_code
+            WHERE c.class_code IN ({placeholders})""",
+        codes,
+    )
+    return {r[0]: [p for p in (r[3], r[2], r[1]) if p] for r in rows}
+
+
+# ── Coverage report, for the mapping viewer ─────────────────────────────
+#
+# How much of the real FDC corpus the curated tables actually reach, measured
+# against the local bulk copy rather than asserted in a docstring — so the
+# number in ARCH.md and the number on screen can never quietly drift apart.
+
+def fdc_category_counts() -> dict[str, int] | None:
+    """{branded_food_category: food count}, from the local FDC bulk copy.
+
+    None if the local copy isn't present -- the caller decides how to degrade
+    (the mapping viewer shows the curated tables without a coverage number
+    rather than failing outright).
+    """
+    from . import fdc_local
+    if not fdc_local.DB_PATH.exists():
+        return None
+    conn = sqlite3.connect(f"file:{fdc_local.DB_PATH}?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            "SELECT category, COUNT(*) FROM foods "
+            "WHERE category IS NOT NULL AND category != '' GROUP BY category"
+        ).fetchall()
+        return dict(rows)
+    finally:
+        conn.close()
+
+
+def coverage_report() -> dict | None:
+    """How much of the real FDC corpus the two curated tables reach.
+
+    None if the local FDC copy isn't available to measure against.
+    """
+    counts = fdc_category_counts()
+    if counts is None:
+        return None
+
+    total = sum(counts.values())
+    covered = 0
+    uncovered = []
+    for category, count in counts.items():
+        if category in FDC_CATEGORY_TO_BRICK or category in FDC_CATEGORY_TO_CLASS:
+            covered += count
+        else:
+            uncovered.append({"category": category, "food_count": count})
+    uncovered.sort(key=lambda entry: -entry["food_count"])
+
+    return {
+        "total_categorized_foods": total,
+        "covered_foods": covered,
+        "coverage_pct": round(covered / total * 100, 1) if total else 0.0,
+        "distinct_fdc_categories": len(counts),
+        "curated_brick_entries": len(FDC_CATEGORY_TO_BRICK),
+        "curated_class_entries": len(FDC_CATEGORY_TO_CLASS),
+        "uncovered_categories": uncovered,
+    }

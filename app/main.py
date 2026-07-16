@@ -183,6 +183,12 @@ async def data_browser_page():
     return FileResponse(STATIC_DIR / "data.html")
 
 
+@app.get("/gpc/mappings", include_in_schema=False)
+async def gpc_mappings_page():
+    """Serve the curated FDC-category -> GPC mapping viewer UI."""
+    return FileResponse(STATIC_DIR / "gpc_mappings.html")
+
+
 @app.get("/api/v1/health", tags=["Operations"], summary="Health check")
 async def health():
     from .database import get_db
