@@ -400,15 +400,17 @@ async def lookup(gtin: str, fresh: bool = False) -> CanonicalProduct:
     # FDC's own category is tried FIRST, through a hand-verified table
     # (gpc_match.py) rather than text matching. When it hits, the result is
     # trustworthy in a way fuzzy matching against OFF's free-form tags never
-    # is, so it wins outright and the fuzzy path below is skipped.
+    # is, so it wins outright and the fuzzy path below is skipped. Brick-level
+    # matches (specific) are tried before class-level ones (coarser, used
+    # when we're confident about the category but not a single brick within
+    # it) — curated_hierarchy_for_fdc_category does both in one call.
     gpc_ms = 0.0
-    curated_brick = gpc_match.curated_brick_for_fdc_category(
-        usda_data.get("category") if usda_data else None
-    )
-    if curated_brick:
+    fdc_category = usda_data.get("category") if usda_data else None
+    if gpc_match.curated_brick_for_fdc_category(fdc_category) or \
+            gpc_match.curated_class_for_fdc_category(fdc_category):
         start = time.monotonic()
         db = await get_db()
-        curated_hierarchy = await gpc_match.hierarchy_for_brick(db, curated_brick)
+        curated_hierarchy = await gpc_match.curated_hierarchy_for_fdc_category(db, fdc_category)
         gpc_ms += (time.monotonic() - start) * 1000
         if curated_hierarchy:
             product.category_hierarchy = curated_hierarchy

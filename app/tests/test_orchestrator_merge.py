@@ -390,6 +390,13 @@ from app.core import gpc_match  # noqa: E402
 def _curated_to_fixture_brick(monkeypatch, category, brick_code="10000201"):
     """Point one FDC category at a real gpc_db fixture brick (Cola Drinks)."""
     monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_BRICK", {category: brick_code})
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_CLASS", {})
+
+
+def _curated_to_fixture_class(monkeypatch, category, class_code="50101800"):
+    """Point one FDC category at a real gpc_db fixture class (Fresh Fruits)."""
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_CLASS", {category: class_code})
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_BRICK", {})
 
 
 async def test_fdc_curated_category_wins_over_off_fuzzy(monkeypatch, gpc_db):
@@ -476,3 +483,70 @@ async def test_no_categories_anywhere_leaves_source_as_none(monkeypatch, gpc_db)
 
     assert p.category_hierarchy == []
     assert p.category_hierarchy_source == "none"
+
+
+# ── GPC: class-level curated fallback ───────────────────────────────────
+#
+# A class-level match is the coarser of the two curated tables -- used when
+# FDC's category is confidently mapped to a GPC class but no single brick
+# within it. It must still outrank the fuzzy OFF path, and must lose to a
+# brick-level match when both exist for the same category.
+
+async def test_class_level_curated_match_wins_over_off_fuzzy(monkeypatch, gpc_db):
+    """No brick match, but a class match -- must still beat the fuzzy path,
+    and the hierarchy is three levels (no brick description to add)."""
+    _curated_to_fixture_class(monkeypatch, "Fruit")
+    fuzzy_calls = {"n": 0}
+
+    async def fake_off(barcode, *a, **k):
+        return {"categories": ["en:fresh-fruits"]}, 10.0, None
+
+    async def fake_usda(barcode, *a, **k):
+        return {"description": "APPLE", "category": "Fruit", "nutrients": []}, 20.0, None
+
+    async def counting_fuzzy(categories):
+        fuzzy_calls["n"] += 1
+        return ["should not be used"], 1.0
+
+    monkeypatch.setattr(orchestrator, "_fetch_off", fake_off)
+    monkeypatch.setattr(orchestrator, "_fetch_usda", fake_usda)
+    monkeypatch.setattr(orchestrator, "_fetch_gpc_categories", counting_fuzzy)
+
+    p = await orchestrator.lookup("1")
+
+    assert p.category_hierarchy == ["Food/Beverage", "Fruits/Vegetables", "Fresh Fruits"]
+    assert p.category_hierarchy_source == "fdc_curated"
+    assert fuzzy_calls["n"] == 0, "the fuzzy matcher ran despite a curated class-level hit"
+    assert "GS1_GPC" in p.data_sources
+
+
+async def test_brick_level_match_wins_over_class_level_match(monkeypatch, gpc_db):
+    """When the same category has both a brick and a class entry, the more
+    specific brick-level hierarchy must be the one returned."""
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_BRICK", {"Fizzy": "10000201"})
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_CLASS", {"Fizzy": "50101800"})
+    patch_sources(
+        monkeypatch,
+        off_data={"categories": []},
+        usda_data={"description": "COLA", "category": "Fizzy", "nutrients": []},
+    )
+
+    p = await orchestrator.lookup("1")
+
+    assert p.category_hierarchy == [
+        "Food/Beverage", "Beverages", "Carbonated Drinks", "Cola Drinks"]
+    assert p.category_hierarchy_source == "fdc_curated"
+
+
+async def test_class_level_category_not_curated_falls_back_to_off_fuzzy(monkeypatch, gpc_db):
+    _curated_to_fixture_class(monkeypatch, "Some Curated Class")
+    patch_sources(
+        monkeypatch,
+        off_data={"categories": ["en:cola-drinks"]},
+        usda_data={"description": "COLA", "category": "Uncurated Category", "nutrients": []},
+        gpc=["Food/Beverage", "Beverages", "Carbonated Drinks", "Cola Drinks"],
+    )
+
+    p = await orchestrator.lookup("1")
+
+    assert p.category_hierarchy_source == "off_fuzzy"
