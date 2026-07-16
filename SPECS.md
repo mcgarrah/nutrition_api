@@ -20,6 +20,7 @@ Retrieves a standardized, consolidated profile of a food product using its GTIN/
     "Carbonated Soft Drinks",
     "Cola Drinks"
   ],
+  "category_hierarchy_source": "fdc_curated",
   "calories_kcal": 42.0,
   "protein": { "value": 0.0, "unit": "g" },
   "fat": { "value": 0.0, "unit": "g" },
@@ -78,6 +79,7 @@ class CanonicalProduct(BaseModel):
     product_name: str = "Unknown"
     brand: str | None = None
     category_hierarchy: list[str] = []
+    category_hierarchy_source: Literal["fdc_curated", "off_fuzzy", "none"] = "none"
     calories_kcal: float | None = None
     protein: NutrientValue | None = None
     fat: NutrientValue | None = None
@@ -102,7 +104,7 @@ When fields are provided concurrently across vendors, conflicts are evaluated de
 | :--- | :--- | :--- |
 | **Nutrients** | **USDA FDC** | Reconciles raw laboratory outputs; per-100g baselines. Open Food Facts values are provisional and overridden when USDA data exists. |
 | **Media / Images** | **Open Food Facts** | Validates public URLs; grabs real-time label photography strings. |
-| **Taxonomy** | **GS1 GPC** | Maps classification trees down to the specific Brick segments via local SQLite cache; Open Food Facts category tags are the fallback. |
+| **Taxonomy** | **GS1 GPC** | Two tiers, graded by confidence and reported in `category_hierarchy_source`: FDC's own category resolves through a hand-curated, verified mapping (`fdc_curated`) when one exists; otherwise Open Food Facts' tags are matched against GPC brick descriptions by best-effort text search (`off_fuzzy`). See ARCH.md, "GPC Category Matching". |
 | **Ingredients** | **Open Food Facts** | Parses text strings from public product labeling array; USDA ingredients used when OFF has none. |
 
 ## 4. Resilience Contracts

@@ -374,3 +374,105 @@ async def test_usda_fiber_and_sugars_override_off(monkeypatch, off_product):
 
     assert p.fiber.value == 2.5              # OFF had none
     assert p.sugars.value == 9.9             # overrides OFF's 10.6
+
+
+# ── GPC: curated FDC category vs. fuzzy OFF matching ───────────────────
+#
+# gpc_match.FDC_CATEGORY_TO_BRICK is monkeypatched to point at a brick that
+# actually exists in the gpc_db fixture (real fixture data, not the real
+# curated table's real-world entries — those are validated separately against
+# the real GPC/FDC databases). What is under test here is the *wiring*: which
+# source wins, and whether the loser is even asked.
+
+from app.core import gpc_match  # noqa: E402
+
+
+def _curated_to_fixture_brick(monkeypatch, category, brick_code="10000201"):
+    """Point one FDC category at a real gpc_db fixture brick (Cola Drinks)."""
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_BRICK", {category: brick_code})
+
+
+async def test_fdc_curated_category_wins_over_off_fuzzy(monkeypatch, gpc_db):
+    """Both sources could answer; the curated one must win, and the fuzzy
+    matcher must not even be asked -- it is the lower-confidence source."""
+    _curated_to_fixture_brick(monkeypatch, "Soda")
+    fuzzy_calls = {"n": 0}
+
+    async def fake_off(barcode, *a, **k):
+        return {"categories": ["en:cola-drinks"]}, 10.0, None
+
+    async def fake_usda(barcode, *a, **k):
+        return {"description": "COLA", "category": "Soda", "nutrients": []}, 20.0, None
+
+    async def counting_fuzzy(categories):
+        fuzzy_calls["n"] += 1
+        return ["should not be used"], 1.0
+
+    monkeypatch.setattr(orchestrator, "_fetch_off", fake_off)
+    monkeypatch.setattr(orchestrator, "_fetch_usda", fake_usda)
+    monkeypatch.setattr(orchestrator, "_fetch_gpc_categories", counting_fuzzy)
+
+    p = await orchestrator.lookup("1")
+
+    assert p.category_hierarchy == [
+        "Food/Beverage", "Beverages", "Carbonated Drinks", "Cola Drinks"]
+    assert p.category_hierarchy_source == "fdc_curated"
+    assert fuzzy_calls["n"] == 0, "the fuzzy matcher ran despite a curated hit"
+    assert "GS1_GPC" in p.data_sources
+
+
+async def test_falls_back_to_off_fuzzy_when_fdc_category_is_not_curated(monkeypatch, gpc_db):
+    """FDC has a category, but it's not one we've curated -- must not block
+    the fuzzy path from running."""
+    _curated_to_fixture_brick(monkeypatch, "Some Other Category")
+    patch_sources(
+        monkeypatch,
+        off_data={"categories": ["en:cola-drinks"]},
+        usda_data={"description": "COLA", "category": "Uncurated Category", "nutrients": []},
+        gpc=["Food/Beverage", "Beverages", "Carbonated Drinks", "Cola Drinks"],
+    )
+
+    p = await orchestrator.lookup("1")
+
+    assert p.category_hierarchy_source == "off_fuzzy"
+    assert p.category_hierarchy[-1] == "Cola Drinks"
+
+
+async def test_falls_back_to_off_fuzzy_when_there_is_no_usda_data(monkeypatch, gpc_db):
+    patch_sources(
+        monkeypatch,
+        off_data={"categories": ["en:cola-drinks"]},
+        usda_data=None,
+        gpc=["Food/Beverage", "Beverages", "Carbonated Drinks", "Cola Drinks"],
+    )
+
+    p = await orchestrator.lookup("1")
+
+    assert p.category_hierarchy_source == "off_fuzzy"
+
+
+async def test_raw_off_tags_fallback_is_never_labelled_as_a_verified_source(monkeypatch, gpc_db):
+    """Neither source can classify the product, but OFF still has tags. They
+    are shown (better than nothing), but source must stay 'none' -- an
+    upstream label is not a GPC classification, and a caller must be able to
+    tell the difference."""
+    patch_sources(
+        monkeypatch,
+        off_data={"categories": ["en:totally-unmatched-tag"]},
+        usda_data={"description": "X", "category": "Not In The Table", "nutrients": []},
+        gpc=[],  # the fuzzy matcher found nothing either
+    )
+
+    p = await orchestrator.lookup("1")
+
+    assert p.category_hierarchy_source == "none"
+    assert p.category_hierarchy == ["Totally Unmatched Tag"]  # the raw-tag fallback
+
+
+async def test_no_categories_anywhere_leaves_source_as_none(monkeypatch, gpc_db):
+    patch_sources(monkeypatch, off_data={"categories": []}, usda_data=None, gpc=[])
+
+    p = await orchestrator.lookup("1")
+
+    assert p.category_hierarchy == []
+    assert p.category_hierarchy_source == "none"

@@ -152,6 +152,10 @@ async def get_food(fdc_id: int | str, use_store: bool = True) -> dict | None:
         "ingredients": food.ingredients,
         "serving_size": food.serving_size,
         "serving_size_unit": food.serving_size_unit,
+        # Matches the local copy's "category" column (fdc_local.py), so the
+        # curated GPC mapping (gpc_match.py) works the same whether this food
+        # came from the bulk local copy or a live cache-miss lookup.
+        "category": food.food_category,
         # A list, not a dict keyed by name: FDC publishes energy twice under
         # the identical name "Energy" (kcal id 1008, kJ id 1062), so a
         # name-keyed dict keeps whichever arrived last — and served cheddar at

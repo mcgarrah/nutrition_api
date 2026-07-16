@@ -24,6 +24,7 @@ from usda_fdc.exceptions import FdcRateLimitError
 
 from .models import CanonicalProduct, NutrientValue, SourceProvenance
 from . import fdc_local
+from . import gpc_match
 from . import off_local
 from . import usda_fdc
 from . import open_food_facts as off
@@ -396,18 +397,42 @@ async def lookup(gtin: str, fresh: bool = False) -> CanonicalProduct:
             product.ingredients_text = _text(usda_data.get("ingredients"))
 
     # --- Layer 3: GS1 GPC (category taxonomy) ---
-    off_categories = _str_list(off_data.get("categories")) if off_data else []
-    gpc_hierarchy, gpc_ms = await _fetch_gpc_categories(off_categories)
+    # FDC's own category is tried FIRST, through a hand-verified table
+    # (gpc_match.py) rather than text matching. When it hits, the result is
+    # trustworthy in a way fuzzy matching against OFF's free-form tags never
+    # is, so it wins outright and the fuzzy path below is skipped.
+    gpc_ms = 0.0
+    curated_brick = gpc_match.curated_brick_for_fdc_category(
+        usda_data.get("category") if usda_data else None
+    )
+    if curated_brick:
+        start = time.monotonic()
+        db = await get_db()
+        curated_hierarchy = await gpc_match.hierarchy_for_brick(db, curated_brick)
+        gpc_ms += (time.monotonic() - start) * 1000
+        if curated_hierarchy:
+            product.category_hierarchy = curated_hierarchy
+            product.category_hierarchy_source = "fdc_curated"
+            product.data_sources.append("GS1_GPC")
+
+    if not product.category_hierarchy:
+        off_categories = _str_list(off_data.get("categories")) if off_data else []
+        fuzzy_hierarchy, fuzzy_ms = await _fetch_gpc_categories(off_categories)
+        gpc_ms += fuzzy_ms
+        if fuzzy_hierarchy:
+            product.category_hierarchy = _str_list(fuzzy_hierarchy)
+            product.category_hierarchy_source = "off_fuzzy"
+            product.data_sources.append("GS1_GPC")
+        elif off_categories:
+            # Last resort: raw OFF tags, not a GPC classification at all --
+            # source stays "none" so a caller can't mistake upstream labels
+            # for a verified match.
+            product.category_hierarchy = [
+                tag.split(":")[-1].replace("-", " ").title() if ":" in tag else tag
+                for tag in off_categories[:5]
+            ]
+
     product.upstream_latency_ms["GS1_GPC"] = round(gpc_ms, 1)
-    if gpc_hierarchy:
-        product.category_hierarchy = _str_list(gpc_hierarchy)
-        product.data_sources.append("GS1_GPC")
-    elif off_categories:
-        # Fallback: use OFF category tags as-is
-        product.category_hierarchy = [
-            tag.split(":")[-1].replace("-", " ").title() if ":" in tag else tag
-            for tag in off_categories[:5]
-        ]
 
     # Attribution is a licence condition for Open Food Facts (ODbL), so it
     # accompanies the data it describes rather than living only in the docs.
