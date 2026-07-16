@@ -136,6 +136,68 @@ def test_the_response_store_is_browsable_as_namespaces(monkeypatch):
     assert rec["payload"] == {"product_name": "Cola"}
 
 
+# ── usda/upc + usda/food are one relationship, shown as one table ──────
+#
+# usda/upc (key=GTIN, payload=fdc_id) and usda/food (key=fdc_id, payload=the
+# food) are two files on disk for a single fact: a barcode resolves to a food.
+# Browsing them as separate tables split that fact across two rows a reader had
+# to cross-reference by hand.
+
+def test_linked_upc_and_food_records_merge_into_one_row(monkeypatch):
+    monkeypatch.setattr(db, "_STORES", dict(store=db._STORES["store"]))
+    store.put(store.USDA_UPC, "00028400021524", 1603628)
+    store.put(store.USDA_FOOD, 1603628, {"fdc_id": 1603628, "description": "DORITOS"})
+
+    tables = {t["name"] for t in db.schema("store")}
+    assert tables == {"off/product", "usda"}       # not usda/food, usda/upc
+
+    page = db.rows("store", "usda")
+    assert page["total"] == 1
+    rec = db.record("store", "usda", "00028400021524")
+    assert rec["payload"]["fdc_id"] == 1603628
+    assert rec["payload"]["food"]["description"] == "DORITOS"
+
+
+def test_a_food_fetched_without_a_barcode_lookup_still_appears(monkeypatch):
+    """GET /api/v1/usda/food/{id} can populate usda/food alone. It must not be
+    silently dropped just because it has no GTIN to key it by."""
+    monkeypatch.setattr(db, "_STORES", dict(store=db._STORES["store"]))
+    store.put(store.USDA_FOOD, 999999, {"fdc_id": 999999, "description": "ORPHAN"})
+
+    page = db.rows("store", "usda")
+    assert page["total"] == 1
+    assert page["rows"][0][0] == "fdc:999999"
+    rec = db.record("store", "usda", "fdc:999999")
+    assert rec["payload"]["food"]["description"] == "ORPHAN"
+
+
+def test_a_upc_pointing_to_a_food_not_yet_cached_still_shows_the_gtin(monkeypatch):
+    """The food record may have expired or never been written; the barcode
+    mapping is still real information and should not vanish."""
+    monkeypatch.setattr(db, "_STORES", dict(store=db._STORES["store"]))
+    store.put(store.USDA_UPC, "00099999999999", 42)
+    # No usda/food record for fdc_id 42.
+
+    page = db.rows("store", "usda")
+    assert page["total"] == 1
+    rec = db.record("store", "usda", "00099999999999")
+    assert rec["payload"]["fdc_id"] == 42
+    assert rec["payload"]["food"] is None
+
+
+def test_multiple_products_each_merge_independently(monkeypatch):
+    monkeypatch.setattr(db, "_STORES", dict(store=db._STORES["store"]))
+    store.put(store.USDA_UPC, "111", 1)
+    store.put(store.USDA_FOOD, 1, {"fdc_id": 1, "description": "A"})
+    store.put(store.USDA_UPC, "222", 2)
+    store.put(store.USDA_FOOD, 2, {"fdc_id": 2, "description": "B"})
+
+    page = db.rows("store", "usda")
+    assert page["total"] == 2
+    by_key = {r[0]: r for r in page["rows"]}
+    assert "111" in by_key and "222" in by_key
+
+
 # ── Route layer ───────────────────────────────────────────────────────
 
 def test_rows_route_404s_on_an_unknown_table(fixture_store):

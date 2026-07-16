@@ -70,9 +70,10 @@ NUTRIENT_FIELDS = [spec.field for spec in NUTRIENTS]
 SCHEMA_VERSION = "1"
 BATCH = 20_000
 
-# The text columns we keep, mapped from OFF's CSV names. The *_tags columns are
-# comma-separated lists that the live SDK returns already split, so they are
-# stored joined and split again at lookup time.
+# The text columns we keep, mapped from OFF's CSV names. The *_tags columns
+# (and plain "allergens" — the bulk export does not call it "allergens_tags",
+# unlike the live API/SDK) are comma-separated lists that the live SDK returns
+# already split, so they are stored joined and split again at lookup time.
 TEXT_COLUMNS = {
     "product_name": "product_name",
     "brands": "brands",
@@ -81,7 +82,7 @@ TEXT_COLUMNS = {
     "quantity": "quantity",
     "serving_size": "serving_size",
     "categories": "categories_tags",
-    "allergens": "allergens_tags",
+    "allergens": "allergens",
     "labels": "labels_tags",
 }
 STORED_TEXT = list(TEXT_COLUMNS.keys())
@@ -111,6 +112,26 @@ def _float_or_none(value: str) -> float | None:
         return float(value) if value not in ("", None) else None
     except ValueError:
         return None
+
+
+def _warn_about_missing_columns(header_index: dict, expected_names, label: str) -> None:
+    """Log loudly if a configured CSV column name is not in this export's header.
+
+    A missing column does not raise: cell() just returns "" for it on every
+    row. That is exactly how the allergens column shipped 100% empty across
+    2.24M products for weeks — TEXT_COLUMNS pointed at "allergens_tags", a
+    column that does not exist in the bulk export (only the live API uses that
+    name), and cell() silently absorbed the mismatch. This does not fail the
+    build — OFF does rename and drop columns between exports, and a build
+    script is not the place to turn that into an outage — but it puts the
+    mismatch in the build log where it can be seen, rather than nowhere.
+    """
+    missing = sorted(set(expected_names) - set(header_index))
+    if missing:
+        logger.warning(
+            "%s(s) not found in this export's header, will be stored empty "
+            "for every row: %s", label, ", ".join(missing),
+        )
 
 
 def build(gz_path: Path, out_path: Path, dataset: str) -> dict:
@@ -148,6 +169,8 @@ def build(gz_path: Path, out_path: Path, dataset: str) -> dict:
     reader = _open_csv(gz_path)
     header = next(reader)
     idx = {name: i for i, name in enumerate(header)}
+    _warn_about_missing_columns(idx, TEXT_COLUMNS.values(), "text column")
+    _warn_about_missing_columns(idx, (spec.off_key for spec in NUTRIENTS), "nutrient column")
 
     def cell(row, csv_name):
         i = idx.get(csv_name)
