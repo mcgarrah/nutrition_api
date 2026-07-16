@@ -92,3 +92,5 @@ Open Food Facts' tags have no equivalent closed vocabulary to curate — the sen
 A future `reviewed` tier is planned for `off_fuzzy` matches that have since been human-checked, once that review workflow exists. Not implemented yet — the field is typed to make adding it additive, not a breaking change.
 
 The curated path is tried first and, on a hit, the fuzzy path is skipped entirely — not run in the background and discarded, actually skipped, so a curated answer never pays for a query it doesn't need.
+
+**Progress on the curation effort is browsable, not just documented here.** `/gpc/mappings` (backed by `GET /api/v1/gpc/mappings`) lists every entry in both curated tables with its resolved GPC hierarchy, a live coverage percentage measured against the local FDC bulk copy, and the ranked list of FDC categories still uncovered — so the next category worth curating is visible without reading `gpc_match.py`'s source, and the coverage number on screen and the one in this document are computed the same way.

@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nutrition API — GPC Mapping Viewer</title>
+<style>
+  :root {
+    --surface-0: #f2f2f0;
+    --surface-1: #fcfcfb;
+    --surface-2: #e9e9e5;
+    --border:    #dedddA;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #78776f;
+    --gpc:  #b57e00;
+    --gpc-soft: #f3e6c8;
+    --brick: #2a78d6;
+    --brick-soft: #dbe9fb;
+    --cls: #7a4fc9;
+    --cls-soft: #e8e0f8;
+    --bad:  #c8322f;
+    --bad-soft: #f8dedd;
+    --good: #1a8a3e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-0: #111110;
+      --surface-1: #1a1a19;
+      --surface-2: #232320;
+      --border:    #35342f;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #8f8e84;
+      --gpc:  #d9a53a;
+      --gpc-soft: #3a2f16;
+      --brick: #6ba7ea;
+      --brick-soft: #1e2c3d;
+      --cls: #b39bec;
+      --cls-soft: #2b2340;
+      --bad:  #ef6b68;
+      --bad-soft: #3a2220;
+      --good: #58c877;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1rem 4rem;
+    background: var(--surface-0); color: var(--text-primary);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; margin-bottom: .25rem; }
+  h1 { font-size: 1.35rem; margin: 0; letter-spacing: -.01em; }
+  h1 .g { color: var(--gpc); }
+  .sub { color: var(--text-secondary); font-size: .875rem; margin: 0 0 1.25rem; }
+  a { color: var(--brick); }
+  .nav { margin-left: auto; font-size: .8125rem; }
+
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1rem 1.15rem; margin-bottom: 1rem;
+  }
+  .card h2 {
+    font-size: .75rem; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--text-muted); margin: 0 0 .7rem; font-weight: 700;
+    display: flex; align-items: center; gap: .5rem;
+  }
+  .card h2 .n {
+    font-variant-numeric: tabular-nums; background: var(--surface-2);
+    color: var(--text-secondary); border-radius: 999px; padding: 0 .5rem;
+    font-size: .6875rem; letter-spacing: 0;
+  }
+
+  /* coverage summary */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; margin-bottom: .9rem; }
+  .stat .v { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  .stat .l { font-size: .75rem; color: var(--text-muted); }
+  .bar { height: 14px; border-radius: 7px; background: var(--surface-2); overflow: hidden; display: flex; }
+  .bar .brick-seg { background: var(--brick); height: 100%; }
+  .bar .cls-seg { background: var(--cls); height: 100%; }
+  .barlabel { display: flex; justify-content: space-between; font-size: .75rem; color: var(--text-muted); margin-top: .4rem; }
+  .legend { display: flex; gap: 1rem; font-size: .75rem; color: var(--text-secondary); margin-top: .5rem; flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: .35rem; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  /* toolbar */
+  .toolbar { display: flex; gap: .5rem; margin-bottom: .8rem; flex-wrap: wrap; align-items: center; }
+  input[type=text] {
+    flex: 1; min-width: 180px; padding: .55rem .75rem; font-size: .9375rem;
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  input[type=text]:focus { outline: 2px solid var(--gpc); outline-offset: 1px; }
+  .chips { display: flex; gap: .35rem; }
+  .chip {
+    font-size: .8125rem; padding: .3rem .8rem; border-radius: 999px; cursor: pointer;
+    background: var(--surface-1); color: var(--text-secondary); border: 1px solid var(--border);
+  }
+  .chip.on { border-color: var(--gpc); color: var(--gpc); background: var(--gpc-soft); }
+
+  /* mapping table */
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+  table { border-collapse: collapse; width: 100%; font-size: .8125rem; }
+  th, td { padding: .5rem .7rem; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+  thead th { position: sticky; top: 0; background: var(--surface-2); font-size: .6875rem;
+    text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+  tr:last-child td { border-bottom: 0; }
+  tbody tr:hover { background: var(--surface-2); }
+  td.cat { font-weight: 600; white-space: nowrap; }
+  td.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem; color: var(--text-muted); white-space: nowrap; }
+  td.hier { color: var(--text-secondary); }
+  td.hier .seg { color: var(--text-muted); }
+  td.hier .arrow { color: var(--text-muted); margin: 0 .25rem; }
+  td.hier .leaf { color: var(--text-primary); font-weight: 600; }
+  .level-badge {
+    font-size: .625rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+    padding: .1rem .45rem; border-radius: 4px; white-space: nowrap;
+  }
+  .level-badge.brick { color: var(--brick); background: var(--brick-soft); }
+  .level-badge.class { color: var(--cls); background: var(--cls-soft); }
+
+  /* uncovered table */
+  .unc td.cat { font-weight: 500; }
+  .unc td.count { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+  .unc-toggle {
+    font-size: .8125rem; color: var(--brick); cursor: pointer; background: none; border: 0;
+    padding: 0; font: inherit; margin-top: .3rem;
+  }
+
+  .muted { color: var(--text-muted); font-size: .875rem; }
+  .loading { color: var(--text-muted); font-size: .875rem; padding: .5rem 0; }
+  footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border);
+    font-size: .75rem; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="g">GPC</span> Mapping Viewer</h1>
+    <span class="nav"><a href="/">← Lookup tester</a> · <a href="/gpc">GPC taxonomy</a> · <a href="/data">Data Browser</a></span>
+  </header>
+  <p class="sub">
+    Every hand-verified entry linking an FDC <code>branded_food_category</code> to a GPC brick or class
+    (<code>app/core/gpc_match.py</code>), and how much of the real local FDC corpus the curated tables reach right now.
+    See ARCH.md, "GPC Category Matching".
+  </p>
+
+  <div id="coverage"><p class="loading">Loading…</p></div>
+
+  <div class="toolbar">
+    <input type="text" id="q" placeholder="Filter by FDC category, GPC code, or hierarchy…" autocomplete="off">
+    <div class="chips" id="levelChips">
+      <button class="chip on" data-level="all">All</button>
+      <button class="chip" data-level="brick">Brick</button>
+      <button class="chip" data-level="class">Class</button>
+    </div>
+  </div>
+
+  <div id="mappings"><p class="loading">Loading mappings…</p></div>
+  <div id="uncoveredWrap"></div>
+
+  <footer>Read-only, computed live from <code>gpc_match.py</code>'s curated tables and the local FDC bulk copy.</footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const api = p => fetch(p).then(r => r.json());
+const fmtNum = n => typeof n === "number" ? n.toLocaleString() : n;
+
+const state = { level: "all", q: "", mappings: [], coverage: null, uncoveredOpen: false };
+
+function renderCoverage() {
+  const c = state.coverage;
+  if (!c) {
+    $("coverage").innerHTML = `<div class="card"><p class="muted">
+      Local FDC bulk copy not available — showing the curated tables without a live coverage number.</p></div>`;
+    return;
+  }
+  const brickPct = c.total_categorized_foods
+    ? (c.covered_foods / c.total_categorized_foods * 100) : 0;
+  $("coverage").innerHTML = `
+    <div class="card">
+      <h2>Coverage of the local FDC corpus</h2>
+      <div class="stats">
+        <div class="stat"><div class="v">${c.coverage_pct}%</div><div class="l">of categorized foods covered</div></div>
+        <div class="stat"><div class="v">${fmtNum(c.covered_foods)}</div><div class="l">covered foods</div></div>
+        <div class="stat"><div class="v">${fmtNum(c.total_categorized_foods)}</div><div class="l">total categorized foods</div></div>
+        <div class="stat"><div class="v">${c.curated_brick_entries + c.curated_class_entries}</div><div class="l">curated entries</div></div>
+        <div class="stat"><div class="v">${c.distinct_fdc_categories - c.uncovered_categories.length}</div><div class="l">of ${c.distinct_fdc_categories} FDC categories mapped</div></div>
+      </div>
+      <div class="bar"><div class="brick-seg" style="width:${brickPct}%"></div></div>
+      <div class="barlabel"><span>0%</span><span>100%</span></div>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--brick)"></span>${c.curated_brick_entries} brick-level entries</span>
+        <span><span class="swatch" style="background:var(--cls)"></span>${c.curated_class_entries} class-level entries</span>
+        <span><span class="swatch" style="background:var(--bad)"></span>${c.uncovered_categories.length} uncovered categories (${fmtNum(c.total_categorized_foods - c.covered_foods)} foods)</span>
+      </div>
+    </div>`;
+
+  renderUncovered(c.uncovered_categories);
+}
+
+function renderUncovered(uncovered) {
+  if (!uncovered || !uncovered.length) { $("uncoveredWrap").innerHTML = ""; return; }
+  const shown = state.uncoveredOpen ? uncovered : uncovered.slice(0, 10);
+  const rows = shown.map(u => `<tr><td class="cat">${esc(u.category)}</td><td class="count">${fmtNum(u.food_count)}</td></tr>`).join("");
+  $("uncoveredWrap").innerHTML = `
+    <div class="card unc">
+      <h2>Uncovered FDC categories<span class="n">${uncovered.length}</span></h2>
+      <div class="tbl-wrap"><table><thead><tr><th>FDC category</th><th style="text-align:right">Foods</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+      ${uncovered.length > 10
+        ? `<button class="unc-toggle" id="uncToggle">${state.uncoveredOpen ? "Show fewer ▲" : `Show all ${uncovered.length} ▼`}</button>`
+        : ""}
+    </div>`;
+  const toggle = $("uncToggle");
+  if (toggle) toggle.addEventListener("click", () => { state.uncoveredOpen = !state.uncoveredOpen; renderUncovered(uncovered); });
+}
+
+function hierarchyHtml(hierarchy) {
+  if (!hierarchy || !hierarchy.length) return `<span class="muted">unresolved</span>`;
+  return hierarchy.map((h, i) =>
+    `<span class="${i === hierarchy.length - 1 ? "leaf" : "seg"}">${esc(h)}</span>`
+  ).join(`<span class="arrow">›</span>`);
+}
+
+function filteredMappings() {
+  let rows = state.mappings;
+  if (state.level !== "all") rows = rows.filter(m => m.level === state.level);
+  if (state.q) {
+    const needle = state.q.toLowerCase();
+    rows = rows.filter(m =>
+      m.category.toLowerCase().includes(needle) ||
+      m.code.toLowerCase().includes(needle) ||
+      (m.hierarchy || []).some(h => h.toLowerCase().includes(needle)));
+  }
+  return rows;
+}
+
+function renderMappings() {
+  const rows = filteredMappings();
+  const body = rows.map(m => `
+    <tr>
+      <td class="cat">${esc(m.category)}</td>
+      <td><span class="level-badge ${m.level}">${m.level}</span></td>
+      <td class="code">${esc(m.code)}</td>
+      <td class="hier">${hierarchyHtml(m.hierarchy)}</td>
+    </tr>`).join("");
+  $("mappings").innerHTML = `
+    <div class="card">
+      <h2>Curated mappings<span class="n">${rows.length}${rows.length !== state.mappings.length ? ` of ${state.mappings.length}` : ""}</span></h2>
+      ${rows.length
+        ? `<div class="tbl-wrap"><table><thead><tr>
+             <th>FDC category</th><th>Level</th><th>GPC code</th><th>Hierarchy</th>
+           </tr></thead><tbody>${body}</tbody></table></div>`
+        : `<p class="muted">No mappings match “${esc(state.q)}”.</p>`}
+    </div>`;
+}
+
+async function init() {
+  const mappingsResp = await api("/api/v1/gpc/mappings");
+  state.mappings = mappingsResp.mappings || [];
+  state.coverage = mappingsResp.coverage || null;
+  renderCoverage();
+  renderMappings();
+
+  $("q").addEventListener("input", () => { state.q = $("q").value.trim(); renderMappings(); });
+  $("levelChips").addEventListener("click", e => {
+    const c = e.target.closest(".chip"); if (!c) return;
+    state.level = c.dataset.level;
+    $("levelChips").querySelectorAll(".chip").forEach(el => el.classList.toggle("on", el === c));
+    renderMappings();
+  });
+}
+
+init().catch(e => {
+  $("coverage").innerHTML = "";
+  $("mappings").innerHTML = `<p class="muted">Failed to load: ${esc(e.message)}</p>`;
+});
+</script>
+</body>
+</html>

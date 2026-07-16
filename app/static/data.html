@@ -68,6 +68,11 @@
     background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; }
   input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   .count { font-size: .8125rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .pagesize { display: flex; gap: .35rem; align-items: center; font-size: .8125rem; color: var(--text-secondary); }
+  .pagesize select, .pagesize input[type=number] {
+    padding: .3rem .5rem; font-size: .8125rem; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--surface-1); color: inherit; font: inherit; }
+  .pagesize input[type=number] { width: 4.5rem; }
   .pager { display: flex; gap: .4rem; align-items: center; }
   .pager button { padding: .3rem .6rem; border-radius: 7px; border: 1px solid var(--border);
     background: var(--surface-1); color: inherit; cursor: pointer; font: inherit; font-size: .8125rem; }
@@ -122,7 +127,7 @@
 <div class="wrap">
   <header>
     <h1><span class="g">Data</span> Browser</h1>
-    <span class="nav"><a href="/">← Home</a> · <a href="/gpc">GPC taxonomy</a> · <a href="/status">Status</a></span>
+    <span class="nav"><a href="/">← Home</a> · <a href="/gpc">GPC taxonomy</a> · <a href="/gpc/mappings">GPC mappings</a> · <a href="/status">Status</a></span>
   </header>
   <p class="sub">Read-only look inside the local data stores — schema, rows, and per-column coverage.</p>
 
@@ -141,8 +146,14 @@ const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp
 const api = p => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)));
 const fmtNum = n => typeof n === "number" ? n.toLocaleString() : n;
 
+// Mirrors data_browser.MAX_ROWS — the backend clamps to this regardless, but
+// echoing it here means a too-large custom value is corrected before the
+// request goes out, not silently truncated after.
+const MAX_LIMIT = 200;
+const LIMIT_PRESETS = [5, 10, 20, 50];
+
 const state = { store: null, schema: [], table: null, view: "rows",
-  offset: 0, limit: 50, q: "", sort: "", dir: "asc" };
+  offset: 0, limit: 10, q: "", sort: "", dir: "asc" };
 
 async function init() {
   const { stores } = await api("/api/v1/data/stores");
@@ -238,9 +249,19 @@ async function renderRows() {
   const countTxt = state.q
     ? `${fmtNum(d.matched)} match${d.matched === 1 ? "" : "es"} · showing ${from}–${to}`
     : `${fmtNum(from)}–${fmtNum(to)} of ${fmtNum(d.total)}`;
+  const isPreset = LIMIT_PRESETS.includes(state.limit);
+  const limitOptions = LIMIT_PRESETS.map(n =>
+    `<option value="${n}" ${state.limit === n ? "selected" : ""}>${n}</option>`).join("")
+    + `<option value="custom" ${isPreset ? "" : "selected"}>Custom…</option>`;
   $("main").innerHTML = tableTabs() +
     `<div class="toolbar">
        <input type="text" id="q" placeholder="Search the text columns…" value="${esc(state.q)}">
+       <span class="pagesize">
+         <label for="limit">Show</label>
+         <select id="limit">${limitOptions}</select>
+         <input type="number" id="limitCustom" min="1" max="${MAX_LIMIT}" placeholder="#"
+           value="${isPreset ? "" : state.limit}" style="${isPreset ? "display:none" : ""}">
+       </span>
        <span class="count">${countTxt}</span>
        <span class="pager">
          <button id="prev" ${d.offset === 0 ? "disabled" : ""}>‹ Prev</button>
@@ -253,6 +274,22 @@ async function renderRows() {
   $("q").addEventListener("keydown", e => { if (e.key === "Enter") { state.q = $("q").value.trim(); state.offset = 0; render(); } });
   $("prev").addEventListener("click", () => { state.offset = Math.max(0, state.offset - state.limit); render(); });
   $("next").addEventListener("click", () => { state.offset += state.limit; render(); });
+  $("limit").addEventListener("change", () => {
+    if ($("limit").value === "custom") {
+      $("limitCustom").style.display = "";
+      $("limitCustom").focus();
+      return;
+    }
+    state.limit = parseInt($("limit").value, 10);
+    state.offset = 0;
+    render();
+  });
+  $("limitCustom").addEventListener("change", () => {
+    const n = Math.min(MAX_LIMIT, Math.max(1, parseInt($("limitCustom").value, 10) || state.limit));
+    state.limit = n;
+    state.offset = 0;
+    render();
+  });
   $("main").querySelectorAll("thead th[data-col]").forEach(th => th.addEventListener("click", () => {
     const c = th.dataset.col;
     if (state.sort === c) state.dir = state.dir === "asc" ? "desc" : "asc";
