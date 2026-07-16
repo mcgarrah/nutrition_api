@@ -25,9 +25,9 @@ orchestrator._fetch_gpc_categories), not a lookup table pretending to be one.
 The 350 FDC categories are Pareto-distributed — the top 20 alone cover 48.7%
 of all branded foods, the top 90 cover 90.7% — so a curated table does not
 need to be exhaustive to be worth having. Between them, FDC_CATEGORY_TO_BRICK
-(85 entries, a specific brick) and FDC_CATEGORY_TO_CLASS (73 entries, a
+(128 entries, a specific brick) and FDC_CATEGORY_TO_CLASS (76 entries, a
 coarser class used when no single brick fits — see that table's own docstring)
-cover 86.0% of all FDC foods with a category. A GPC brick or class was only
+cover 87.0% of all FDC foods with a category. A GPC brick or class was only
 added when the match was genuinely confident, not merely plausible. Categories
 with no clean GPC equivalent at either level (see "Deliberately excluded"
 below) are left out rather than forced onto the nearest approximate match — a
@@ -172,6 +172,71 @@ FDC_CATEGORY_TO_BRICK: dict[str, str] = {
     # the string FDC actually publishes, not the correct English spelling.
     "Prepared Wraps and Burittos": "10000254",
     "Flavored Snack Crackers": "10000161",  # shares Biscuits/Cookies
+
+    # -- Third verification pass. Most of these are FDC borrowing a GPC
+    # *brick* description verbatim -- the same vocabulary-alignment pattern
+    # that produced most of FDC_CATEGORY_TO_CLASS below, one level deeper.
+    # A handful (marked) are manually researched by sampling real
+    # foods.description rows under the category, the same discipline as the
+    # Baby/Infant and Burittos entries above.
+    "Biscuits/Cookies (Shelf Stable)": "10000161",
+    "Chips/Crisps/Snack Mixes - Natural/Extruded (Shelf Stable)": "10000177",
+    "Cereal/Muesli Bars": "10000287",
+    "Fruit - Prepared/Processed (Shelf Stable)": "10000206",
+    "Vegetable Based Products / Meals - Not Ready to Eat (Frozen)": "10000291",
+    "Cakes - Sweet (Frozen)": "10000170",
+    "Pies/Pastries - Sweet (Shelf Stable)": "10000247",
+    "Drinks Flavoured - Ready to Drink": "10000201",
+    "Ice Cream/Ice Novelties (Shelf Stable)": "10000216",
+    "Baking/Cooking Supplies (Shelf Stable)": "10000158",
+    "Pies/Pastries/Pizzas/Quiches - Savoury (Frozen)": "10000248",
+    "Vegetables - Prepared/Processed (Shelf Stable)": "10000272",
+    "Dough Based Products / Meals - Not Ready to Eat - Savoury (Shelf Stable)": "10000302",
+    "Baking/Cooking Mixes (Shelf Stable)": "10000156",
+    "Popcorn (Shelf Stable)": "10000252",
+    "Egg Based Products / Meals - Not Ready to Eat (Frozen)": "10005224",
+    "Beer": "10000159",
+    "Soups - Prepared (Shelf Stable)": "10000262",
+    "Baking/Cooking Mixes (Perishable)": "10000068",
+    "Turkey - Unprepared/Unprocessed": "10005803",
+    "Pork Sausages - Prepared/Processed": "10005840",
+    "Dressings/Dips (Shelf Stable)": "10000200",
+    "Sauces - Cooking (Shelf Stable)": "10000057",
+    "Pork - Unprepared/Unprocessed": "10005800",
+    "Pork - Prepared/Processed": "10005781",
+    "Grain Based Products / Meals - Not Ready to Eat - Savoury (Shelf Stable)": "10000297",
+    "Flour - Cereal/Pulse (Shelf Stable)": "10000203",
+    "Cakes - Sweet (Shelf Stable)": "10000172",
+    "Beef - Prepared/Processed": "10005767",
+    "Baking/Cooking Mixes/Supplies Variety Packs": "10000595",
+    # Meat Substitutes - Non Animal Based (Frozen); sampled products are all
+    # meatless/plant-based ("meatless meatballs", "veggie sausage", ...).
+    "Vegetarian Frozen Meats": "10005823",
+    # Mixed Species Sausages; GPC's sausage bricks carry no Frozen/SS split,
+    # so the same brick used for "Sausages, Hotdogs & Brats" fits here too.
+    "Frozen Sausages, Hotdogs & Brats": "10005836",
+    # Dessert Sauces/Toppings/Fillings (SS); sample is dominated by pie and
+    # fruit filling, which is what this brick already covers.
+    "Pastry Shells & Fillings": "10000195",
+    # Packaged Water - Flavoured; 616/685 sampled products literally contain
+    # the word "WATER" (coconut water, flavoured/enhanced water).
+    "Plant Based Water": "10008410",
+    # Baking/Cooking Mixes; sample is boxed stuffing mix, not raw bread.
+    "Stuffing": "10000156",
+    # Ready-Made Combination Meals - Not RTE (Perishable) -- refrigerated,
+    # not frozen, unlike the already-curated "Frozen Breakfast..." category.
+    "Breakfast Sandwiches, Biscuits & Meals": "10006749",
+    # Same product as "Breads & Buns" above under FDC's AU/NZ-style naming.
+    "Bread - Incl. Buns And Rolls": "10000165",
+    "Baking Needs": "10000156",  # sample is brownie/cake/batter mixes
+    "Snack Foods - Chips": "10000177",
+    "Snack Foods - Other": "10007276",  # sample is jerky/dried-fish snacks
+    "Bacon": "10005781",
+    # "Smallgoods" is AU/NZ for cured/processed meats -- same product as the
+    # existing "Sausages, Hotdogs & Brats" entry.
+    "Sausages/Smallgoods": "10005836",
+    # Fish - Prepared/Processed (SS); despite the name, sample is 100% fish.
+    "Canned Fish and Meat": "10000018",
 }
 
 # FDC branded_food_category -> GPC class_code, for categories where FDC's own
@@ -262,6 +327,16 @@ FDC_CATEGORY_TO_CLASS: dict[str, str] = {
     "Canned Meat": "50240100",  # Meat/Poultry/Other Animals - Prepared/Processed
     "Eggs & Egg Substitutes": "50132500",  # Eggs/Eggs Substitutes
     "Cream": "50132000",  # Cream/Cream Substitutes
+
+    # -- Third verification pass --
+    # Coffee/Coffee Substitutes; unqualified "Coffee" spans ground, whole-bean,
+    # K-cup, and ready-to-drink forms -- no single brick covers all of them.
+    "Coffee": "50202600",
+    # Same Unprepared/Unprocessed class as "Poultry, Chicken & Turkey" above --
+    # the sample mixes raw and seasoned-raw chicken, so a Prepared/Unprepared
+    # brick split would misrepresent roughly half the products either way.
+    "Frozen Poultry, Chicken & Turkey": "50240200",
+    "Confectionery": "50161800",  # Confectionery Products
 }
 
 # Deliberately excluded, and why -- documented so the gap reads as a decision,
@@ -301,9 +376,54 @@ FDC_CATEGORY_TO_CLASS: dict[str, str] = {
 #   Hors D'oeuvres                Spans too many GPC bricks (pastry, meat,
 #                                  seafood, vegetable) to pick one honestly.
 #   Flavored Rice Dishes,
-#   Frozen Pancakes/Waffles/
+#   Frozen Pancakes, Waffles,
 #   French Toast & Crepes          Same "no rice/pancake brick exists" gap as
 #                                  plain Rice above.
+#
+#   -- third pass additions --
+#   Specialty Formula Supplements, Meal Replacement Supplements, Weight
+#   Control, Digestive & Fiber Supplements, Herbal Supplements, Green
+#   Supplements, Children's Nutritional Supplements, Health Care
+#                                  Out of scope, not merely uncurated: these
+#                                  are dietary supplements, and only the
+#                                  Food/Beverage GPC segment is imported (see
+#                                  README) -- no brick in it represents a
+#                                  supplement without misrepresenting it as an
+#                                  ordinary food or beverage.
+#   Other Cooking Sauces,
+#   Other Condiments              Sampled products are dominated by vinegar,
+#                                  not sauce/condiment -- would collide with
+#                                  the existing "Other Sauces" bucket on a
+#                                  worse fit than what's already mapped there.
+#   Frozen Bacon, Sausages & Ribs Sample mixes pork, beef, and turkey in one
+#                                  category; GPC's meat bricks are
+#                                  species-specific and there is no
+#                                  mixed-species "Prepared" brick to use.
+#   Other Frozen Meats            Catch-all label, no single correct brick by
+#                                  definition (same reasoning as "Other Meats").
+#   Pizza Mixes & Other Dry
+#   Dinners                       Misleadingly named -- the sample is grain/
+#                                  rice/noodle salad mixes, not pizza.
+#   Sugar And Flour                Spans two categories already curated
+#                                  separately (Granulated/Brown/Powdered Sugar
+#                                  and Flours & Corn Meal); no single code
+#                                  represents both without misrepresenting half.
+#   Dairy Foods/Yoghurts           Small mixed category (yogurt and condensed
+#                                  milk together); no single dairy brick
+#                                  covers both without misrepresenting half.
+#   Sushi                          Data-quality problem, not a mapping one --
+#                                  the sample includes non-sushi items (a
+#                                  pretzel sandwich roll, a turkey sausage
+#                                  patty) alongside real sushi, so the category
+#                                  itself looks mistagged in FDC's own data.
+#   Crusts & Dough                 Superficially close to the already-curated
+#                                  "Dough Based Products / Meals" class, but
+#                                  that class's real FDC products are boxed
+#                                  macaroni & cheese dinners, not raw dough --
+#                                  reusing it here would be wrong. Checked and
+#                                  ruled out Biscuits/Cookies (means sweet
+#                                  cookies) and Bread (means baked bread) too;
+#                                  no brick represents raw refrigerated dough.
 
 
 def curated_brick_for_fdc_category(category: str | None) -> str | None:
