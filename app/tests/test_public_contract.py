@@ -25,6 +25,7 @@ CANONICAL_FIELDS = {
     "product_name",
     "brand",
     "category_hierarchy",
+    "category_hierarchy_source",
     "calories_kcal",
     "protein",
     "fat",

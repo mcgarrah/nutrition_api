@@ -59,3 +59,31 @@ This is not a micro-optimization. On the shared pool a stalled upstream holds ev
 
 ### 4. Fault Tolerance & Resiliency
 External boundaries are protected by tight timeout windows (2.0s per upstream call, via `asyncio.wait_for`) and per-source **circuit breakers** (`app/core/resilience.py`): after 5 consecutive failures a source is skipped entirely for a 60s cooldown, then probed half-open. When an upstream dependency fails or drops connections, the error is isolated. The `DataOrchestrator` converts the partial response into the standardized contract, noting the contributing sources inside the metadata payload (`data_sources`, `upstream_latency_ms`) while ensuring high platform availability (200 OK statuses with partial contents over systematic downtime).
+
+### 5. GPC Category Matching
+
+Mapping a product to the GS1 GPC taxonomy turned out to be a much harder problem than it looked, and the investigation that led to the current design is worth recording so nobody re-discovers the same failure modes by hand.
+
+**The starting point was worse than it appeared.** The only matcher in the system (`orchestrator._fetch_gpc_categories`) took Open Food Facts' first three category tags and did `bricks.description LIKE '%label%'`, first hit wins. On the real local corpus this matched only **44.9%** of OFF products carrying a category — and a manual audit of the matches showed **69% of them were noise**: a generic single word (`beverages`, `snacks`, `food`) happened to be a literal substring of an unrelated brick's name. The clearest case: the tag `en:beverages` matched the brick *"Alcoholic Beverages Variety Packs"* — because "beverages" is a substring of it — and that single collision misclassified 110,000+ products, including things like plain pasta. Three separable causes, each independently confirmed:
+
+1. **Wrong tag order.** OFF orders category tags broad → narrow (`beverages` → `carbonated-drinks` → `sodas`). The code took the *first* three tags — the broadest, least specific ones — which is exactly backwards.
+2. **Substring matching, no word boundaries.** `LIKE '%beverages%'` matches the word anywhere, including inside an unrelated brick name.
+3. **Even word-boundary matching has a precision ceiling.** A corrected prototype (in-memory word index, most-specific-tag-first, stopword filtering, "prefer the least common word") pushed recall to ~87% — but a manual spot-check still found real misclassifications from polysemous words (`beans` → coffee beans vs. legumes; `spring` → spring water vs. spring onions) and OFF vocabulary that simply isn't in GPC's ~730-word brick description vocabulary at all (`flageolet`, a bean variety, has no representation anywhere in GPC). **No amount of tuning text matching removes this ceiling** — GPC's ~879 bricks are a coarse, closed vocabulary; OFF's millions of free-text, multi-language tags are not.
+
+**FDC's own category was a separate, larger gap.** `usda_data["category"]` (FDC's `branded_food_category`, 100% populated on every branded food) was **never even consulted** — the matcher only ever looked at OFF's tags, so every FDC-only product got an empty `category_hierarchy` regardless of how good a match its own category would have made.
+
+**The fix treats the two sources differently, because they have different shapes.** FDC's `branded_food_category` is a **closed, controlled vocabulary** — 350 distinct values across the whole corpus, GDSN-standardised, Pareto-distributed (the top 20 alone cover 48.7% of all branded foods; the top 90 cover 90.7%). That is small and stable enough to **hand-verify**, so `app/core/gpc_match.py` carries a curated `FDC_CATEGORY_TO_BRICK` table — each entry looked up and read against the real GPC taxonomy, not matched by string similarity — covering roughly the top 50 categories (67.4% of all FDC foods). Categories with no clean GPC equivalent (`Soda` — GPC has no carbonated-drink brick at all; `Nut & Seed Butters`; several "Other X" catch-alls) are **deliberately left out** rather than forced onto an approximate brick: a wrong curated entry undermines the one property that makes curation worth having.
+
+Open Food Facts' tags have no equivalent closed vocabulary to curate — the sensible response there is a smarter *matcher*, not a lookup table pretending to be one. The original fuzzy `_fetch_gpc_categories` path is retained as the fallback for products without a curated FDC match; its known ~69% noise rate on raw hits is why it is explicitly graded lower than the curated path (see below), not why it was removed.
+
+**The result is exposed as a confidence field, not a single ambiguous list.** `CanonicalProduct.category_hierarchy_source` tells a caller which of the two paths (or neither) produced the answer:
+
+| value | meaning |
+| :--- | :--- |
+| `fdc_curated` | FDC's category, resolved through the hand-verified table. High confidence. |
+| `off_fuzzy` | OFF's tags, resolved by best-effort text matching. Real matches, not verified case by case — a hint, not ground truth. |
+| `none` | Neither path produced a GPC classification. `category_hierarchy` may still carry OFF's *raw* tags as a last-resort fallback in this case — those are upstream labels, not a GPC match, which is exactly why the source stays `none` rather than being labelled as a result. |
+
+A future `reviewed` tier is planned for `off_fuzzy` matches that have since been human-checked, once that review workflow exists. Not implemented yet — the field is typed to make adding it additive, not a breaking change.
+
+The curated path is tried first and, on a hit, the fuzzy path is skipped entirely — not run in the background and discarded, actually skipped, so a curated answer never pays for a query it doesn't need.

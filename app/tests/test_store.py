@@ -254,7 +254,7 @@ async def test_a_known_barcode_skips_the_usda_search(monkeypatch):
                 description = "DORITOS"
                 data_type = "Branded"
                 brand_owner = brand_name = ingredients = None
-                serving_size = serving_size_unit = None
+                serving_size = serving_size_unit = food_category = None
                 nutrients = [N()]
             f = F()
             f.fdc_id = fdc_id

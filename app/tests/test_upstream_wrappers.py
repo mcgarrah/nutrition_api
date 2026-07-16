@@ -47,6 +47,7 @@ class _FakeFood:
     ingredients = "CARBONATED WATER"
     serving_size = 355.0
     serving_size_unit = "ml"
+    food_category = "Soda"
     nutrients = [_FakeNutrient("Energy", 42.0, "KCAL")]
 
 

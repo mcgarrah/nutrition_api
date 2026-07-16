@@ -10,6 +10,8 @@ All nutrient values are normalized to per-100g basis.
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -47,6 +49,26 @@ class CanonicalProduct(BaseModel):
     category_hierarchy: list[str] = Field(
         default_factory=list,
         description="GS1 category path: Segment > Family > Class > Brick",
+    )
+    category_hierarchy_source: Literal["fdc_curated", "off_fuzzy", "none"] = Field(
+        default="none",
+        description=(
+            "How category_hierarchy was produced, so a caller can tell a "
+            "verified classification from a best-effort guess:\n"
+            "'fdc_curated' — FDC's own branded_food_category, resolved through "
+            "a hand-verified table (app/core/gpc_match.py). High confidence.\n"
+            "'off_fuzzy' — Open Food Facts category tags, resolved by "
+            "best-effort text matching against GPC brick descriptions. "
+            "Real matches, but not verified case by case — treat as a hint, "
+            "not ground truth.\n"
+            "'none' — no source produced a GPC-verified category. "
+            "category_hierarchy may still be populated with raw OFF tags as "
+            "a fallback in that case; those are upstream labels, not a GPC "
+            "classification.\n"
+            "A future 'reviewed' tier is planned for off_fuzzy matches that "
+            "have been human-checked, once that review process exists — not "
+            "implemented yet."
+        ),
     )
 
     # Normalized nutrition facts (per 100g or 100mL).

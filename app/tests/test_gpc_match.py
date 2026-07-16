@@ -1,0 +1,95 @@
+"""
+Tests for the curated FDC-category -> GPC-brick mapping.
+
+The table itself is verified against the real GPC/FDC data separately (that is
+what "curated" means — see ARCH.md, "GPC Category Matching"); these tests cover
+the lookup and hierarchy-resolution machinery around it, plus a structural
+sanity check on the table so a future edit can't silently introduce a
+malformed entry.
+
+Copyright (c) 2026 Michael McGarrah
+Licensed under MIT License
+"""
+import re
+
+from app.core.gpc_match import (
+    FDC_CATEGORY_TO_BRICK,
+    curated_brick_for_fdc_category,
+    hierarchy_for_brick,
+)
+
+_BRICK_CODE = re.compile(r"^\d{8}$")
+
+
+# ── Table integrity ─────────────────────────────────────────────────
+
+def test_the_table_is_non_trivial():
+    """A curated table with a handful of entries isn't worth having."""
+    assert len(FDC_CATEGORY_TO_BRICK) >= 40
+
+
+def test_every_brick_code_has_the_right_shape():
+    """GPC brick codes are 8-digit strings. Catches a fat-fingered entry
+    before it reaches the database — a malformed code fails a lookup
+    silently (no rows), which is exactly the kind of error curation exists
+    to prevent."""
+    for category, code in FDC_CATEGORY_TO_BRICK.items():
+        assert _BRICK_CODE.match(code), f"{category!r} -> {code!r} is not an 8-digit brick code"
+
+
+def test_no_category_key_is_blank_or_whitespace_only():
+    for category in FDC_CATEGORY_TO_BRICK:
+        assert category.strip(), "a blank category key can never match anything"
+
+
+# ── curated_brick_for_fdc_category ────────────────────────────────────
+
+def test_a_known_category_resolves():
+    assert curated_brick_for_fdc_category("Cheese") == "10000028"
+
+
+def test_an_unknown_category_returns_none():
+    assert curated_brick_for_fdc_category("Artisanal Yak Jerky") is None
+
+
+def test_none_input_returns_none():
+    assert curated_brick_for_fdc_category(None) is None
+
+
+def test_empty_string_returns_none():
+    assert curated_brick_for_fdc_category("") is None
+
+
+def test_surrounding_whitespace_is_stripped():
+    """FDC's own category field is not always clean (see the Baby/Infant
+    double-space case); a stray space either side must not break a match."""
+    assert curated_brick_for_fdc_category("  Cheese  ") == "10000028"
+
+
+def test_matching_is_exact_not_fuzzy():
+    """The whole point of a curated table is that it does NOT guess. A near
+    miss must return None, not the nearest plausible entry."""
+    assert curated_brick_for_fdc_category("Cheeses") is None
+    assert curated_brick_for_fdc_category("cheese") is None  # case-sensitive
+
+
+def test_the_two_baby_infant_spellings_both_resolve():
+    """FDC's own data has two spellings of this one category; both are
+    curated so neither silently falls through to the weaker fuzzy path."""
+    assert curated_brick_for_fdc_category("Baby/Infant  Foods/Beverages") == "10000610"
+    assert curated_brick_for_fdc_category("Baby/Infant - Foods/Beverages") == "10000610"
+
+
+# ── hierarchy_for_brick ────────────────────────────────────────────────
+
+async def test_hierarchy_for_a_known_brick(gpc_db):
+    from app.database import get_db
+    db = await get_db()
+    hierarchy = await hierarchy_for_brick(db, "10000201")  # Cola Drinks, in the fixture
+    assert hierarchy == ["Food/Beverage", "Beverages", "Carbonated Drinks", "Cola Drinks"]
+
+
+async def test_hierarchy_for_an_unknown_brick_is_empty(gpc_db):
+    from app.database import get_db
+    db = await get_db()
+    assert await hierarchy_for_brick(db, "99999999") == []
