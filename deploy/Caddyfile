@@ -27,6 +27,35 @@ import caddy/site.caddy
 # 	import nutrition_api
 # }
 
+# ── Option A+ — the above, plus Tailscale Funnel ───────────────────────
+# Publishing this site with `tailscale funnel` needs two more things beyond
+# Option A, both explained in detail in README.md's "Tailscale Funnel" section:
+#
+#   1. localhost/127.0.0.1 added to the site address, so Caddy answers
+#      whichever hostname Funnel's local proxy connects with -- an IP-only
+#      site block won't match it, and the request goes nowhere.
+#   2. A loopback-only plain-HTTP listener for Funnel to target instead of
+#      the HTTPS one -- Funnel's own local proxy client hit an unresolved TLS
+#      interop failure against Caddy on this deployment (never reproduced
+#      with a normal TLS client -- curl, openssl s_client -- against the same
+#      port), and the loopback hop doesn't need its own TLS layer anyway:
+#      Funnel already terminates real, trusted TLS on the internet-facing side.
+#
+# {
+# 	default_sni localhost
+# }
+#
+# https://192.168.1.50, https://localhost, https://127.0.0.1 {
+# 	import nutrition_api
+# }
+#
+# :8090 {
+# 	bind 127.0.0.1
+# 	import nutrition_api
+# }
+#
+# Then: tailscale funnel --bg http://localhost:8090
+
 # ── Option B — public domain with automatic, publicly-trusted HTTPS ───
 # The host must resolve to this machine and ports 80/443 be reachable; Caddy
 # provisions and renews the certificate via ACME. No CA to trust.
