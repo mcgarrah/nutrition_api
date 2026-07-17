@@ -73,10 +73,13 @@ class CanonicalProduct(BaseModel):
 
     # Normalized nutrition facts (per 100g or 100mL).
     #
-    # This is the complete US Nutrition Facts panel — what a consumer expects to
-    # find on a label — rather than an arbitrary subset. Units are OURS, not the
-    # source's: sodium is always mg whether it came from USDA (mg) or Open Food
-    # Facts (grams), so the same field never changes unit with its provenance.
+    # This is the US Nutrition Facts panel plus every vitamin and mineral
+    # tracked in app/core/nutrients.py — a label's macros, and the
+    # micronutrient panel beyond it. Individual amino acids and sugar-type
+    # breakdowns are deliberately out of scope; see that module's docstring.
+    # Units are OURS, not the source's: sodium is always mg whether it came
+    # from USDA (mg) or Open Food Facts (grams), so the same field never
+    # changes unit with its provenance.
     calories_kcal: float | None = None
     protein: NutrientValue | None = None
     fat: NutrientValue | None = None
@@ -92,6 +95,32 @@ class CanonicalProduct(BaseModel):
     calcium: NutrientValue | None = None
     iron: NutrientValue | None = None
     vitamin_d: NutrientValue | None = None
+
+    # Vitamins beyond the mandatory label panel.
+    vitamin_a: NutrientValue | None = None
+    vitamin_c: NutrientValue | None = None
+    vitamin_e: NutrientValue | None = None
+    vitamin_k: NutrientValue | None = None
+    thiamin: NutrientValue | None = Field(default=None, description="Vitamin B1")
+    riboflavin: NutrientValue | None = Field(default=None, description="Vitamin B2")
+    niacin: NutrientValue | None = Field(default=None, description="Vitamin B3")
+    vitamin_b6: NutrientValue | None = None
+    folate: NutrientValue | None = Field(default=None, description="Vitamin B9")
+    vitamin_b12: NutrientValue | None = None
+    pantothenic_acid: NutrientValue | None = Field(default=None, description="Vitamin B5")
+    biotin: NutrientValue | None = Field(default=None, description="Vitamin B7")
+    choline: NutrientValue | None = None
+
+    # Minerals beyond the mandatory label panel.
+    magnesium: NutrientValue | None = None
+    zinc: NutrientValue | None = None
+    phosphorus: NutrientValue | None = None
+    selenium: NutrientValue | None = None
+    copper: NutrientValue | None = None
+    manganese: NutrientValue | None = None
+    molybdenum: NutrientValue | None = None
+
+    caffeine: NutrientValue | None = None
 
     # Product metadata from OFF (images, ingredients, labels)
     image_url: str | None = None

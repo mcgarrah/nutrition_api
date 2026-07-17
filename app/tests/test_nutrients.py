@@ -141,6 +141,25 @@ def test_off_gram_nutrients_pass_through_unscaled():
     assert values["carbohydrates"] == 57.5
 
 
+def test_off_microgram_scale_nutrients_are_converted():
+    """The µg-scale extension (vitamin A/K, folate, B12, biotin, selenium,
+    molybdenum) needs the same gram -> published-unit scaling as vitamin D,
+    just with a bigger multiplier: 1,000,000, not 1,000."""
+    values = from_off({"folate": 0.00017, "vitamin_b12": 0.0000009, "selenium": 0.00004})
+
+    assert values["folate"] == pytest.approx(170.0)
+    assert values["vitamin_b12"] == pytest.approx(0.9)
+    assert values["selenium"] == pytest.approx(40.0)
+
+
+def test_off_milligram_scale_extension_nutrients_are_converted():
+    values = from_off({"magnesium": 0.073, "zinc": 0.02273, "copper": 0.002})
+
+    assert values["magnesium"] == pytest.approx(73.0)
+    assert values["zinc"] == pytest.approx(22.73)
+    assert values["copper"] == pytest.approx(2.0)
+
+
 def test_off_non_numeric_values_are_dropped():
     """OFF is crowdsourced: ">100" and "trace" arrive off real labels."""
     assert from_off({"protein": ">100", "fat": 30.9}) == {"fat": 30.9}
@@ -156,14 +175,31 @@ def test_off_missing_nutrients_are_absent_not_zero():
 # ══ The published panel ═══════════════════════════════════════════════
 
 def test_the_panel_covers_the_us_nutrition_facts_label():
-    """What a consumer expects to find on a label, rather than an arbitrary
-    subset of it."""
+    """The mandatory label panel must be a subset of what we publish, rather
+    than an arbitrary approximation of it."""
+    fields = {spec.field for spec in NUTRIENTS}
+
+    assert fields >= {
+        "calories_kcal", "protein", "fat", "saturated_fat", "trans_fat",
+        "cholesterol", "carbohydrates", "fiber", "sugars", "added_sugars",
+        "sodium", "potassium", "calcium", "iron", "vitamin_d",
+    }
+
+
+def test_the_panel_covers_every_vitamin_and_mineral_beyond_the_label():
+    """The vitamin/mineral extension beyond the mandatory label panel --
+    pinned exactly, so an addition or removal here is a deliberate act."""
     fields = {spec.field for spec in NUTRIENTS}
 
     assert fields == {
         "calories_kcal", "protein", "fat", "saturated_fat", "trans_fat",
         "cholesterol", "carbohydrates", "fiber", "sugars", "added_sugars",
         "sodium", "potassium", "calcium", "iron", "vitamin_d",
+        "vitamin_a", "vitamin_c", "vitamin_e", "vitamin_k",
+        "thiamin", "riboflavin", "niacin", "vitamin_b6", "folate",
+        "vitamin_b12", "pantothenic_acid", "biotin", "choline",
+        "magnesium", "zinc", "phosphorus", "selenium", "copper",
+        "manganese", "molybdenum", "caffeine",
     }
 
 
@@ -244,6 +280,55 @@ def test_the_microgram_unit_is_recognised_however_it_is_spelled(spelling):
     values = from_usda([usda(1114, "Vitamin D", 10.0, spelling)])
 
     assert values["vitamin_d"] == 10.0
+
+
+# ══ The vitamin A IU / µg RAE collision ════════════════════════════════
+#
+# The same two-id split as vitamin D (1106 in µg RAE, 1104 in IU), but the
+# conversion is an approximation, not a physical constant -- see the
+# IU_PER_UG_RAE_VITAMIN_A comment in nutrients.py for why. 0.3 µg RAE per IU
+# is the FDA's own historical label conversion factor.
+
+def test_vitamin_a_in_iu_is_converted_not_taken_at_face_value():
+    values = from_usda([usda(1104, "Vitamin A, IU", 1000.0, "IU")])
+
+    assert values["vitamin_a"] == 300.0          # not 1000.0
+
+
+def test_vitamin_a_in_rae_micrograms_is_left_alone():
+    values = from_usda([usda(1106, "Vitamin A, RAE", 300.0, "UG")])
+
+    assert values["vitamin_a"] == 300.0
+
+
+def test_rae_micrograms_win_when_a_food_carries_both_vitamin_a_ids():
+    """RAE is the direct measurement; IU is the approximation. Direct wins."""
+    values = from_usda([
+        usda(1104, "Vitamin A, IU", 1000.0, "IU"),
+        usda(1106, "Vitamin A, RAE", 300.0, "UG"),
+    ])
+
+    assert values["vitamin_a"] == 300.0
+
+
+# ══ Copper: mg on the wire, not µg ══════════════════════════════════════
+#
+# nutrimetrics' own display_unit for copper is micrograms (chosen for its DRI
+# comparison, where the 900 µg RDA is the natural unit to show) but FDC's id
+# 1098 actually arrives in milligrams -- confirmed against a live FDC payload.
+# Publishing an FDC "mg" value under a "µg" label would overstate copper
+# 1000x, the same class of error the rest of this module exists to prevent.
+
+def test_copper_is_published_in_milligrams():
+    values = from_usda([usda(1098, "Copper, Cu", 2.0, "MG")])
+
+    assert values["copper"] == 2.0
+
+
+def test_copper_in_the_wrong_unit_is_skipped_not_published():
+    values = from_usda([usda(1098, "Copper, Cu", 2.0, "UG")])
+
+    assert "copper" not in values
 
 
 # ══ The unit is checked, not assumed ══════════════════════════════════
