@@ -179,6 +179,12 @@ Only the Food/Beverage segment (50000000) is imported. The full GPC taxonomy cov
 
 Example: `GET /api/v1/lookup/04963406021372` returns product name, brand, per-100g nutrition, category hierarchy, image, ingredients, `data_sources`, and `upstream_latency_ms`. See [SPECS.md](SPECS.md) for the full contract.
 
+### Search
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/search?q=...` | Search the local FDC/OFF copies by product name; returns identity fields only (barcode, name, brand, image) — pass a result's GTIN to `/api/v1/lookup/{gtin}` for the full nutrition panel |
+
 ### Source-Specific
 
 | Method | Endpoint | Description |
@@ -206,12 +212,25 @@ Example: `GET /api/v1/lookup/04963406021372` returns product name, brand, per-10
 
 GPC keeps the specifics in attributes, not brick names — "olive oil" is the attribute value `OLIVE OIL` of *Type of Edible Vegetable or Plant Oil* on the generic *Oils Edible* brick, not a brick of its own. Search therefore reaches into attribute types and values, and each attribute match carries the bricks that hold it, so `?q=olive` finds the oils brick that a description-only search would miss. Filter with `category=attributes`.
 
+### Data Browser
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/data/stores` | Every local store the browser can open, with table names and row counts |
+| GET | `/api/v1/data/{store_id}/schema` | Schema of one store (columns, types, foreign keys) |
+| GET | `/api/v1/data/{store_id}/rows?table=...` | Paginated, searchable, sortable rows |
+| GET | `/api/v1/data/{store_id}/coverage?table=...` | Per-column non-null percentage |
+| GET | `/api/v1/data/{store_id}/record?table=...&key=...` | One full response-store record, untruncated |
+
+`store_id` is one of `off`, `fdc`, `gpc`, `store` (the response cache). Read-only; see `app/core/data_browser.py` for the safety model.
+
 ### Operations
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/v1/health` | Health check with GPC segment count |
 | GET | `/api/v1/version` | API version and git hash |
+| GET | `/api/v1/attribution` | Data sources, licences, and required attribution text |
 
 ## Project Structure
 
