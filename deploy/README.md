@@ -112,6 +112,53 @@ dates, and the external upstream APIs. It reads `/api/v1/health` through the
 proxy and refreshes every 20 s. Because Caddy serves the page itself, a backend
 outage shows as a red tile rather than an unreachable page.
 
+### Tailscale Funnel
+
+Publishing this site to the public internet with [Funnel](https://tailscale.com/kb/1223/funnel)
+needs two changes beyond a normal Option A deployment (see the Caddyfile's
+"Option A+" block for the exact config):
+
+1. **Add `localhost`/`127.0.0.1` to the site address**, alongside the LAN IP.
+   `tailscale funnel status` shows what its local proxy actually connects to —
+   on this deployment it was `https+insecure://localhost:443` — and a site
+   block scoped to `https://<LAN-IP>` only answers requests whose SNI/Host is
+   that IP. A connection presenting `localhost` instead has no matching site
+   and goes nowhere, which looks like Funnel silently not working. Caddy's
+   internal CA issues certs for `localhost`/`127.0.0.1` the same way it does
+   for the IP, so this is a one-line addition, not a new cert story. A
+   `default_sni` global option is worth adding alongside it as a fallback for
+   any connection that doesn't present a recognizable SNI at all.
+
+2. **Give Funnel a plain-HTTP, loopback-only target instead of the HTTPS
+   one**, if step 1 alone doesn't fix it. On this deployment, Funnel's local
+   proxy client failed the TLS handshake against Caddy specifically —
+   `tailscaled`'s own logs showed `http: proxy error: remote error: tls:
+   internal error` — in a way that direct testing with `curl` or
+   `openssl s_client` against the exact same port never reproduced, meaning
+   it was specific to Funnel's own proxy client rather than a Caddy
+   misconfiguration reachable by any other diagnostic. Rather than chasing
+   that interop question further, the fix was to stop asking the loopback hop
+   to speak TLS at all: Funnel already terminates real, publicly-trusted TLS
+   on the actual internet-facing side, so the local hop from `tailscaled` to
+   Caddy doesn't need its own TLS layer. A second Caddy site block on a bare
+   port (`:8090`, `bind 127.0.0.1` so nothing but this host can ever reach it)
+   serves the same `nutrition_api` snippet over plain HTTP, and Funnel is
+   pointed at that instead:
+
+   ```bash
+   tailscale funnel reset
+   tailscale funnel --bg http://localhost:8090
+   ```
+
+   **Testing note:** if the public Funnel URL fails when curled *from the
+   same box that's running Funnel*, that is not conclusive — it may be a
+   same-node routing quirk rather than a real problem (this happened during
+   the original setup: identical, unexplained `TLS alert, internal error` on
+   every self-test, zero corresponding log entries even immediately after a
+   `tailscaled` restart, yet it worked immediately when tested from an actual
+   external device). Test from a phone on cellular data or another network
+   before concluding Funnel itself is broken.
+
 ### Install (Debian/Ubuntu, via apt)
 
 ```bash
