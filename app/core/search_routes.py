@@ -16,6 +16,9 @@ from .models import SearchResponse, SearchResult
 
 router = APIRouter(prefix="/api/v1", tags=["Search"])
 
+# No real product name approaches this; a longer query is padding, not intent.
+MAX_QUERY_LENGTH = 200
+
 
 @router.get(
     "/search",
@@ -23,7 +26,10 @@ router = APIRouter(prefix="/api/v1", tags=["Search"])
     summary="Search local product copies by name",
 )
 async def search_by_name(
-    q: str = Query("", description="Product name (or a substring of it) to search for"),
+    q: str = Query(
+        "", max_length=MAX_QUERY_LENGTH,
+        description="Product name (or a substring of it) to search for",
+    ),
     limit: int = Query(
         search.DEFAULT_RESULTS, ge=1, le=search.MAX_RESULTS,
         description="Maximum results to return",

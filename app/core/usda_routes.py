@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/v1/usda", tags=["USDA FDC"])
 
 @router.get("/search", summary="Search USDA FDC foods")
 async def usda_search(
-    q: str = Query(..., description="Search query (food name, brand, etc.)"),
+    q: str = Query(..., max_length=200, description="Search query (food name, brand, etc.)"),
     page_size: int = Query(25, ge=1, le=200, description="Results per page"),
 ):
     """Search the USDA FoodData Central database by keyword."""

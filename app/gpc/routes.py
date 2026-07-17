@@ -419,7 +419,7 @@ async def _search_attributes(db, like, limit):
 
 @router.get("/search/", response_model=SearchResponse, summary="Search across all GPC entities")
 async def search_gpc(
-    q: str = Query("", description="Search query"),
+    q: str = Query("", max_length=200, description="Search query"),
     category: Literal[
         "all", "segments", "families", "classes", "bricks", "attributes"
     ] = Query("all", description="Category filter"),

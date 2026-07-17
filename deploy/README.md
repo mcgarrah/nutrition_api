@@ -55,6 +55,29 @@ the app self-updates the GS1 GPC taxonomy there on startup — dropping that lin
 makes the taxonomy update fail silently, so keep it if you move the data
 directory.
 
+`MemoryHigh`/`MemoryMax`/`CPUQuota` are sized for a 12 GB RAM / 4 vCPU host
+that also runs Caddy and other services — adjust for your own box.
+
+**uvicorn binds `0.0.0.0:8080`, not `127.0.0.1`,** so that other machines on
+the LAN (and, once installed, the tailnet) can reach the backend directly for
+debugging without going through Caddy. That only stays safe with a host
+firewall restricting who can actually reach 8080 — Caddy's own protections
+(rate limiting, TLS) don't help you if the backend is reachable by skipping
+Caddy entirely. On this deployment that's enforced with `iptables`
+(`iptables-persistent` keeps it across reboots):
+
+```bash
+sudo iptables -A INPUT -p tcp --dport 8080 -s 127.0.0.1 -j ACCEPT      # Caddy
+sudo iptables -A INPUT -p tcp --dport 8080 -s <your-LAN-CIDR> -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 8080 -s 100.64.0.0/10 -j ACCEPT  # tailnet
+sudo iptables -A INPUT -p tcp --dport 8080 -j DROP
+sudo apt-get install iptables-persistent && sudo netfilter-persistent save
+```
+
+If you don't need LAN/tailnet access to the raw backend, bind uvicorn to
+`127.0.0.1` in `ExecStart` instead and skip the firewall rules — simpler, and
+nothing but Caddy can ever reach port 8080 at all.
+
 ## Caddy (public front — TLS + landing page)
 
 `Caddyfile` puts a [Caddy](https://caddyserver.com/) reverse proxy in front of
