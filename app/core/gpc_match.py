@@ -25,9 +25,9 @@ orchestrator._fetch_gpc_categories), not a lookup table pretending to be one.
 The 350 FDC categories are Pareto-distributed — the top 20 alone cover 48.7%
 of all branded foods, the top 90 cover 90.7% — so a curated table does not
 need to be exhaustive to be worth having. Between them, FDC_CATEGORY_TO_BRICK
-(128 entries, a specific brick) and FDC_CATEGORY_TO_CLASS (82 entries, a
+(154 entries, a specific brick) and FDC_CATEGORY_TO_CLASS (89 entries, a
 coarser class used when no single brick fits — see that table's own docstring)
-cover 91.2% of all FDC foods with a category. A GPC brick or class was only
+cover 91.4% of all FDC foods with a category. A GPC brick or class was only
 added when the match was genuinely confident, not merely plausible. Categories
 with no clean GPC equivalent at either level (see "Deliberately excluded"
 below) are left out rather than forced onto the nearest approximate match — a
@@ -237,6 +237,50 @@ FDC_CATEGORY_TO_BRICK: dict[str, str] = {
     "Sausages/Smallgoods": "10005836",
     # Fish - Prepared/Processed (SS); despite the name, sample is 100% fish.
     "Canned Fish and Meat": "10000018",
+
+    # -- Fifth verification pass. All long-tail categories (5-112 foods
+    # each); every one verified by reading its actual product sample, not by
+    # name resemblance alone -- several near-miss category names (e.g. "Salad
+    # Dressings", "Snack Foods - Nuts") were investigated and rejected this
+    # round because their real products didn't match the label (see the
+    # exclusion comment for details).
+    "Cereals Products - Ready to Eat (Shelf Stable)": "10000284",  # near-exact brick match
+    "Cereals Products - Not Ready to Eat (Shelf Stable)": "10000285",  # near-exact brick match
+    "Frozen Fish/Seafood": "10000626",  # shares Frozen Fish & Seafood
+    "Ice-Cream Take Home": "10000215",  # shares Ice Cream & Frozen Yogurt; AU/NZ tub format
+    "Biscuits Cracker": "10000161",  # shares Biscuits/Cookies; no separate crackers brick
+    "Canned/Dried Veges": "10000272",  # shares Canned Vegetables
+    # FDC's own data has a literal trailing space on this category string,
+    # but curated_brick_for_fdc_category() strips its input before the
+    # lookup -- so the dict key must be stripped too, or it can never match.
+    "Cheese - Speciality": "10000028",
+    "Cheese - Block": "10000028",  # shares Cheese
+    "Dips/Hummus/Pate": "10000200",  # shares Dressings/Dips
+    "Milk/Cream - Shelf Stable": "10006971",  # shares Milk/Milk Substitutes
+    "Biscuits Chocolate": "10000161",  # shares Biscuits/Cookies
+    "Herbs And Spices": "10000049",  # shares Herbs & Spices
+    # Nuts/Seeds - Prepared/Processed (Out of Shell); sample is shelled
+    # snack seeds (sunflower, pumpkin) -- not a verbatim string match, GPC's
+    # bricks here split by shell state, which FDC's category doesn't carry.
+    "Nuts/Seeds - Prepared/Processed (Shelf Stable)": "10000236",
+    "Smoked fish": "10000018",  # shares Fish - Prepared/Processed
+    "Cakes and Slices": "10000172",  # shares Cakes - Sweet
+    "Snack Foods - Cereal Snacks": "10000177",  # shares Chips/Crisps/Snack Mixes
+    "Wrapped Snacks - Muesli Bars": "10000287",  # shares Cereal/Muesli Bars
+    # Chutneys/Relishes; despite the name, sample has no standalone vinegar --
+    # peppers, gherkins, relish, kraut, olives.
+    "Pickles, Relishes and Vinegar": "10000180",
+    "Salami / Cured Meat": "10005781",  # shares the Pepperoni/Salami/Pork brick
+    # Spelling variant (no space before the dash) of the already-curated
+    # "Sauces - Cooking (Shelf Stable)" -- a third FDC spelling-inconsistency
+    # pattern (missing-space) alongside the double-space and hyphen ones.
+    "Sauces- Cooking": "10000057",
+    "Pastries/Pies/Pizzas": "10000248",  # shares Pies/Pastries/Pizzas/Quiches (Frozen)
+    "Wrapped Snacks - Nut Bars": "10000287",  # shares Cereal/Muesli Bars
+    "Biscuits Plain/Sweet": "10000161",  # shares Biscuits/Cookies
+    "Cooking Oils and Fats": "10000040",  # shares Vegetable & Cooking Oils
+    "Frozen Potato": "10000270",  # shares Frozen Vegetables
+    "Puddings and desserts": "10000312",  # shares Puddings & Custards
 }
 
 # FDC branded_food_category -> GPC class_code, for categories where FDC's own
@@ -371,6 +415,31 @@ FDC_CATEGORY_TO_CLASS: dict[str, str] = {
     # colliding with the "Other Sauces" *brick* already used elsewhere; the
     # class itself has no such collision.
     "Oriental, Mexican & Ethnic Sauces": "50171800",
+
+    # -- Fifth verification pass. Coverage gains here are small (91.2% ->
+    # 91.4%) -- this and the fourth pass have now checked every uncovered
+    # category with real volume at both brick and class level; what remains
+    # uncovered is either a genuine GPC gap or too small/noisy to curate
+    # honestly (see the exclusion comment for what was investigated and
+    # rejected this round).
+    "Prepared Meals": "50193800",  # Ready-Made Combination Meals
+    # Sauces/Spreads/Dips/Condiments; vinegar-contamination check came back
+    # 2/38 = 5.3% -- clean, contrast "Other Cooking Sauces" below at 49.5%.
+    "Sauces": "50171800",
+    # Aquatic Invertebrates/Fish/Shellfish/Seafood Combination; sample
+    # genuinely spans dried fish, shellfish, and mixed seafood -- too varied
+    # for any single brick, which is exactly what this class is for.
+    "Seafood Miscellaneous": "50122500",
+    # Alcoholic Beverages (Includes De-Alcoholised Variants); sample is
+    # Belgian beers AND Portuguese fortified wine (Porto) -- no single brick
+    # spans both, but this umbrella class covers both by design.
+    "Alcoholic Beverages": "50202200",
+    "Frozen Chicken - Processed": "50240100",  # Meat/Poultry/Other Animals - Prepared/Processed
+    "Drinks - Soft Drinks": "50202300",  # shares the Soda / Non-Alcoholic-RTD class
+    # Fruits - Unprepared/Unprocessed (Frozen); NOT the same product as the
+    # already-curated "Frozen Fruit & Fruit Juice Concentrates" brick (that
+    # one is juice concentrate) -- this is whole/cut frozen fruit.
+    "Frozen Fruit": "50270100",
 }
 
 # Deliberately excluded, and why -- documented so the gap reads as a decision,
@@ -470,6 +539,42 @@ FDC_CATEGORY_TO_CLASS: dict[str, str] = {
 #                                  ruled out Biscuits/Cookies (means sweet
 #                                  cookies) and Bread (means baked bread) too;
 #                                  no brick represents raw refrigerated dough.
+#
+#   -- fifth pass: investigated and rejected on closer inspection --
+#   Salad Dressings                Only 3/10 sampled products are actually
+#                                  dressing; the rest are salad toppers,
+#                                  dressed prepared salads, and standalone
+#                                  aioli. Majority mismatch.
+#   Desserts & Custard             4/7 jelly (fits), 3/7 pastry/tarts
+#                                  (doesn't) -- too mixed to pick one.
+#   Snack Foods - Nuts             Only 3/7 sampled products are actually
+#                                  nuts; the rest are porridge and crackers.
+#   Fresh Meat, Frozen Meat,
+#   Frozen Meals                   Same species-mixing and product-type
+#                                  heterogeneity that already excluded
+#                                  "Frozen Patties and Burgers" -- burgers,
+#                                  dumplings, sides, and curries all mixed
+#                                  in one label, no single fit.
+#   Drinks - Juices, Drinks and
+#   Cordials, Spreads, Desserts/
+#   Dessert Sauces/Toppings        Genuine multi-product catch-alls (juice +
+#                                  cordial + bubble tea + soft drink; jam +
+#                                  honey + pate + peanut butter; pudding +
+#                                  pie filling + cookie dough + pastry).
+#   Pancakes, Waffles, French
+#   Toast & Crepes (non-frozen)    Same "no pancake/waffle brick or class
+#                                  exists" gap already confirmed for the
+#                                  frozen version above.
+#   Breakfast Drinks               Sample is meal-replacement/protein shakes
+#                                  -- same supplement-adjacent nature as the
+#                                  already-excluded "Weight Control" and
+#                                  "Meal Replacement Supplements".
+#
+#   Everything smaller than the above (single- and low-double-digit food
+#   counts, several internally mixed or mislabeled on inspection, many
+#   AU/NZ-regional-labelled per the third-pass finding) was checked and is
+#   not worth curating individually -- see coverage_report()'s
+#   uncovered_categories for the current, complete, live list.
 
 
 def curated_brick_for_fdc_category(category: str | None) -> str | None:
@@ -636,7 +741,13 @@ def coverage_report() -> dict | None:
     covered = 0
     uncovered = []
     for category, count in counts.items():
-        if category in FDC_CATEGORY_TO_BRICK or category in FDC_CATEGORY_TO_CLASS:
+        # Stripped, exactly like curated_brick_for_fdc_category /
+        # curated_class_for_fdc_category strip their input -- a raw category
+        # with surrounding whitespace (FDC has at least one: "Cheese -
+        # Speciality ") must be measured the same way it's actually resolved
+        # at lookup time, or this report and the real runtime path disagree.
+        key = category.strip()
+        if key in FDC_CATEGORY_TO_BRICK or key in FDC_CATEGORY_TO_CLASS:
             covered += count
         else:
             uncovered.append({"category": category, "food_count": count})
