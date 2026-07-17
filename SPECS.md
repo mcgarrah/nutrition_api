@@ -28,6 +28,8 @@ Retrieves a standardized, consolidated profile of a food product using its GTIN/
   "fiber": null,
   "sugars": { "value": 10.6, "unit": "g" },
   "sodium": { "value": 4.0, "unit": "mg" },
+  "caffeine": { "value": 9.6, "unit": "mg" },
+  "vitamin_c": null,
   "image_url": "https://static.openfoodfacts.org/images/products/049/634/060/21372/front_en.400.jpg",
   "ingredients_text": "Carbonated water, high fructose corn syrup, caramel color, phosphoric acid, natural flavors, caffeine",
   "allergens": [],
@@ -87,6 +89,8 @@ class CanonicalProduct(BaseModel):
     fiber: NutrientValue | None = None
     sugars: NutrientValue | None = None
     sodium: NutrientValue | None = None
+    # ...plus every vitamin and mineral app/core/nutrients.py tracks (36
+    # nutrient fields in total) -- see app/core/models.py for the full set.
     image_url: str | None = None
     ingredients_text: str | None = None
     allergens: list[str] = []

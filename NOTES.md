@@ -80,11 +80,22 @@ While fixing it: `gpcc` was only a *transitive* dependency (via `gs1-gpc`)
 despite being imported directly, so it is now declared in `requirements.txt`.
 A direct import deserves a direct dependency.
 
+### 3. `nutrimetrics`' copper `display_unit` does not match what FDC returns
+
+Learned from `nutrimetrics` while expanding `app/core/nutrients.py` from the
+US label panel to the full vitamin/mineral set: its `Nutrient('copper', ...,
+unit_microgram)` declares copper in micrograms. A live FDC payload (id 1098,
+checked against a real Foundation Foods entry) actually returns it in
+**milligrams**. `display_unit` there is chosen for `nutrimetrics`' own
+DRI-comparison workbook — copper's 900 µg RDA is the natural unit to show a
+person — not for what FDC puts on the wire, so the two purposes silently
+diverged. Not a `nutrimetrics` bug, since it never claims to describe FDC's
+transport unit, but a trap for anyone porting its nutrient list assuming it
+does. `nutrients.py` publishes copper in mg, verified against the live API,
+with the discrepancy documented in a code comment. No upstream change needed.
+
 ## Ideas not yet acted on
 
-- **Nutrient coverage.** `CanonicalProduct` carries 7 nutrients. `nutrimetrics`
-  models 60+. If the canonical model ever needs to grow past macros, that's the
-  natural source rather than hand-rolling more fields.
 - **Real GTIN→GPC classification.** Worth being honest that we don't have one.
   `gpcc`'s own README says the classification "cannot be inferred from the
   product barcode or even packaging" — companies assign it internally. Our

@@ -17,10 +17,18 @@ served was decided by luck.
 Nutrients are therefore selected by **id**, and the unit is checked rather than
 assumed. The id groupings follow those in `nutrimetrics`
 (https://github.com/mcgarrah/nutrimetrics), which has the same discipline of
-listing only the kcal energy ids and never 1062.
+listing only the kcal energy ids and never 1062 — cross-checked against real
+FDC and Open Food Facts payloads before being added, not ported blindly: one
+id here (copper, 1098) turned out to differ from what `nutrimetrics` itself
+declares, because its `display_unit` is chosen for its own DRI-comparison
+workbook rather than for what FDC actually returns on the wire.
 
-The set below is the complete **US Nutrition Facts panel** — what a consumer
-expects to find on a label — rather than an arbitrary subset.
+The set below is the **US Nutrition Facts panel plus every vitamin and
+mineral** `nutrimetrics` tracks — the macros a label shows, and the
+micronutrient panel beyond it. Individual amino acids and sugar-type
+breakdowns (starch, sucrose, glucose, ...) are deliberately out of scope: this
+is a food-lookup API, not a nutrition-analysis tool, and that level of detail
+is rarely populated for branded, UPC-scanned foods even when we ask for it.
 
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
@@ -57,10 +65,27 @@ KJ_PER_KCAL = 4.184
 # went out as 400 µg: 2,667% of the daily value.
 IU_PER_UG_VITAMIN_D = 40.0
 
+# Vitamin A carries the same two-id split (1106 in µg RAE, 1104 in IU), but the
+# conversion is NOT the clean physical constant vitamin D's is. Vitamin D's
+# 40 IU/µg holds for cholecalciferol regardless of source; vitamin A's IU mixes
+# preformed retinol (potent) with provitamin-A carotenoids (much less potent
+# per IU), so the "right" IU->RAE ratio genuinely depends on what is in the
+# food. There is no exact answer available from the FDC payload alone.
+#
+# 0.3 µg RAE per IU is not invented here: it is the FDA's own historical label
+# conversion factor (21 CFR 101.9(c)(8)(iv), the pre-2016 Nutrition Facts
+# standard), and it is a reasonable approximation specifically for *branded,
+# fortified* foods, whose added vitamin A is preformed retinyl palmitate/
+# acetate rather than carotenoids -- which is the food population this API
+# actually serves. It is an approximation nonetheless, unlike vitamin D's exact
+# factor, and is applied only when 1106 is absent.
+IU_PER_UG_RAE_VITAMIN_A = 1.0 / 0.3
+
 # What FDC declares each id in, so we can convert rather than assume. Anything
 # whose declared unit already matches the unit we publish needs no entry here.
 _FDC_SCALE: dict[int, float] = {
     1110: 1.0 / IU_PER_UG_VITAMIN_D,  # IU -> µg
+    1104: 1.0 / IU_PER_UG_RAE_VITAMIN_A,  # IU -> µg RAE (approximate, see above)
 }
 
 # The unit FDC is expected to declare for each id we read. An entry arriving in
@@ -73,6 +98,15 @@ _FDC_UNIT: dict[int, str] = {
     1079: "G", 2033: "G", 2000: "G", 1063: "G", 1235: "G",
     1253: "MG", 1093: "MG", 1092: "MG", 1087: "MG", 1089: "MG",
     1114: "UG", 1110: "IU",
+    # Vitamins
+    1106: "UG", 1104: "IU", 1162: "MG", 1109: "MG", 1185: "UG",
+    1165: "MG", 1166: "MG", 1167: "MG", 1175: "MG", 1177: "UG",
+    1178: "UG", 1170: "MG", 1176: "UG", 1180: "MG",
+    # Minerals
+    1090: "MG", 1095: "MG", 1091: "MG", 1103: "UG", 1098: "MG",
+    1101: "MG", 1102: "UG",
+    # Other
+    1057: "MG",
 }
 
 # FDC is not consistent about how it spells a unit, and neither is the SDK.
@@ -239,6 +273,44 @@ NUTRIENTS: tuple[NutrientSpec, ...] = (
     NutrientSpec("calcium", (1087,), "calcium_100g", "mg"),
     NutrientSpec("iron", (1089,), "iron_100g", "mg"),
     NutrientSpec("vitamin_d", (1114, 1110), "vitamin-d_100g", "µg"),
+
+    # Vitamins beyond the mandatory label panel. FDC id, OFF key, and unit for
+    # every one of these were independently verified against real live FDC and
+    # Open Food Facts payloads this round (see the module docstring) — not
+    # taken on nutrimetrics' word alone.
+    NutrientSpec("vitamin_a", (1106, 1104), "vitamin-a_100g", "µg"),
+    NutrientSpec("vitamin_c", (1162,), "vitamin-c_100g", "mg"),
+    NutrientSpec("vitamin_e", (1109,), "vitamin-e_100g", "mg"),
+    NutrientSpec("vitamin_k", (1185,), "vitamin-k_100g", "µg"),
+    NutrientSpec("thiamin", (1165,), "vitamin-b1_100g", "mg"),
+    NutrientSpec("riboflavin", (1166,), "vitamin-b2_100g", "mg"),
+    NutrientSpec("niacin", (1167,), "vitamin-pp_100g", "mg"),
+    NutrientSpec("vitamin_b6", (1175,), "vitamin-b6_100g", "mg"),
+    NutrientSpec("folate", (1177,), "vitamin-b9_100g", "µg"),
+    NutrientSpec("vitamin_b12", (1178,), "vitamin-b12_100g", "µg"),
+    NutrientSpec("pantothenic_acid", (1170,), "pantothenic-acid_100g", "mg"),
+    NutrientSpec("biotin", (1176,), "biotin_100g", "µg"),
+    NutrientSpec("choline", (1180,), "choline_100g", "mg"),
+
+    # Minerals beyond the mandatory label panel.
+    NutrientSpec("magnesium", (1090,), "magnesium_100g", "mg"),
+    NutrientSpec("zinc", (1095,), "zinc_100g", "mg"),
+    NutrientSpec("phosphorus", (1091,), "phosphorus_100g", "mg"),
+    NutrientSpec("selenium", (1103,), "selenium_100g", "µg"),
+    # 1098 is milligrams on the wire, not micrograms — nutrimetrics' own
+    # `display_unit` says µg, which is wrong for what FDC actually returns
+    # (confirmed against a live FDC Foundation Foods payload). Copper's own
+    # Daily Value is commonly quoted in µg (900 µg), which is presumably how
+    # that mismatch happened; the two are easy to conflate by eye.
+    NutrientSpec("copper", (1098,), "copper_100g", "mg"),
+    NutrientSpec("manganese", (1101,), "manganese_100g", "mg"),
+    # Molybdenum's OFF key was not directly observed in a live sample (it is
+    # among the most sparsely-analyzed nutrients in both FDC and OFF), but
+    # follows the same `{element}_100g` pattern confirmed for every other
+    # mineral above.
+    NutrientSpec("molybdenum", (1102,), "molybdenum_100g", "µg"),
+
+    NutrientSpec("caffeine", (1057,), "caffeine_100g", "mg"),
 )
 
 _BY_FIELD: dict[str, NutrientSpec] = {spec.field: spec for spec in NUTRIENTS}
@@ -246,8 +318,16 @@ _BY_FIELD: dict[str, NutrientSpec] = {spec.field: spec for spec in NUTRIENTS}
 # Units Open Food Facts publishes in, where they differ from ours. OFF reports
 # every one of these in grams per 100 g, including the ones a label shows in
 # milligrams — so sodium arrives as 0.0428 g, not 42.8 mg.
-_OFF_GRAMS_TO_MG = {"sodium", "potassium", "calcium", "iron", "cholesterol"}
-_OFF_GRAMS_TO_UG = {"vitamin_d"}
+_OFF_GRAMS_TO_MG = {
+    "sodium", "potassium", "calcium", "iron", "cholesterol",
+    "vitamin_c", "vitamin_e", "thiamin", "riboflavin", "niacin", "vitamin_b6",
+    "pantothenic_acid", "choline", "magnesium", "zinc", "phosphorus",
+    "copper", "manganese", "caffeine",
+}
+_OFF_GRAMS_TO_UG = {
+    "vitamin_d", "vitamin_a", "vitamin_k", "folate", "vitamin_b12", "biotin",
+    "selenium", "molybdenum",
+}
 
 
 def from_usda(nutrients: list[dict]) -> dict[str, float]:
