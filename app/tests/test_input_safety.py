@@ -124,10 +124,18 @@ def test_unicode_search_terms_are_handled(term):
     assert resp.status_code == 200
 
 
-def test_very_long_search_term_does_not_error():
-    resp = client.get("/api/v1/gpc/search/", params={"q": "a" * 5000})
+def test_a_search_term_within_the_length_cap_is_accepted():
+    resp = client.get("/api/v1/gpc/search/", params={"q": "a" * 200})
     assert resp.status_code == 200
     assert resp.json()["bricks"] == []
+
+
+def test_an_excessively_long_search_term_is_rejected():
+    """No real GPC/product/USDA/OFF search term approaches this length; past
+    the cap it's padding, not intent, and rejecting it early means it never
+    reaches a LIKE scan at all."""
+    resp = client.get("/api/v1/gpc/search/", params={"q": "a" * 5000})
+    assert resp.status_code == 422
 
 
 def test_null_byte_in_search_is_rejected_or_handled():
@@ -138,6 +146,17 @@ def test_null_byte_in_search_is_rejected_or_handled():
 
 def test_whitespace_only_search_is_harmless():
     assert client.get("/api/v1/gpc/search/", params={"q": "   "}).status_code == 200
+
+
+# ── The same length cap on every other search endpoint ─────────────────
+
+@pytest.mark.parametrize("path", [
+    "/api/v1/search",
+    "/api/v1/off/search",
+    "/api/v1/usda/search",
+])
+def test_every_search_endpoint_rejects_an_excessively_long_query(path):
+    assert client.get(path, params={"q": "a" * 5000}).status_code == 422
 
 
 # ── GTIN normalization against hostile input ──────────────────────────

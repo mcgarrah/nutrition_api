@@ -33,5 +33,16 @@ ProtectSystem=full
 ProtectHome=read-only
 ReadWritePaths=/opt/nutrition_api/data
 
+# Sized for a 12 GB RAM / 4 vCPU host that also runs Caddy, Docker, and other
+# services -- these bound a runaway (a memory leak, a pathological response)
+# without touching normal operation, which sits around 120 MB RSS. MemoryHigh
+# is a soft throttle point reached well before the hard MemoryMax kill, so the
+# service degrades under pressure rather than being OOM-killed outright.
+# CPUQuota=200% is 2 of the 4 cores, matching --workers 2 above, leaving the
+# other 2 for everything else on the box.
+MemoryHigh=1536M
+MemoryMax=2G
+CPUQuota=200%
+
 [Install]
 WantedBy=multi-user.target

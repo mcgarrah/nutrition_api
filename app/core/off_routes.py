@@ -43,7 +43,7 @@ async def off_product(barcode: str):
 
 @router.get("/search", summary="Search Open Food Facts")
 async def off_search(
-    q: str = Query(..., description="Search query"),
+    q: str = Query(..., max_length=200, description="Search query"),
     page_size: int = Query(25, ge=1, le=100, description="Results per page"),
 ):
     """Search the Open Food Facts database by keyword."""
