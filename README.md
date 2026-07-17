@@ -90,7 +90,9 @@ uvicorn app.main:app --reload
 
 Then open:
 
-- `/` — browser-based lookup tester (product card, per-source contributions, upstream latency, cache round-trip)
+- `/` — landing page: choose between the two lookup types below
+- `/lookup` — browser-based barcode (GTIN/UPC) lookup tester (product card, per-source contributions, upstream latency, cache round-trip)
+- `/search` — search by product name against the local FDC/OFF copies; pick a result to see its Nutrition Facts label
 - `/gpc` — GPC taxonomy browser (search + drill Segment → Family → Class → Brick → Attributes)
 - `/gpc/mappings` — GPC Mapping Viewer: every curated FDC-category → GPC brick/class entry (`app/core/gpc_match.py`), resolved to its full hierarchy, plus live coverage against the local FDC corpus and the ranked list of categories still uncovered
 - `/data` — read-only Data Browser for the local stores (OFF, FDC, GPC, response cache): schema, rows, and per-column coverage. The response cache's linked `usda/upc` (barcode → fdc_id) and `usda/food` (fdc_id → food) records are shown merged as one `usda` table, not two disconnected ones. Row pages default to 10 records, with a picker (5/10/20/50/custom, capped at 200) next to Prev/Next

@@ -15,7 +15,6 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from .core import attribution
 from .core import fdc_local
 from .core import off_local
@@ -113,9 +112,9 @@ app.add_middleware(
 
 # Paths the limiter must never shed. /health is polled by the platform, and a
 # 429 there reads as "unhealthy" — the rate limiter would get the container
-# restarted. The docs and UI are static and cost no upstream calls.
+# restarted. The docs are static and cost no upstream calls.
 _RATE_LIMIT_EXEMPT = ("/api/v1/health", "/api/v1/version", "/api/v1/attribution",
-                      "/docs", "/redoc", "/openapi.json", "/ui")
+                      "/docs", "/redoc", "/openapi.json")
 
 
 def _client_key(request: Request) -> str:
@@ -164,13 +163,18 @@ app.include_router(data_router)
 app.include_router(search_router)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
 
 
 @app.get("/", include_in_schema=False)
 async def index():
-    """Serve the lookup tester UI at the root."""
+    """Serve the landing page: a choice between the two lookup types."""
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/lookup", include_in_schema=False)
+async def lookup_page():
+    """Serve the barcode (GTIN/UPC) lookup tester UI."""
+    return FileResponse(STATIC_DIR / "lookup.html")
 
 
 @app.get("/gpc", include_in_schema=False)
