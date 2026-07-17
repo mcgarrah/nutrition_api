@@ -77,6 +77,36 @@ def test_coverage_report_ranks_uncovered_by_size(fdc_db, monkeypatch):
     assert report["coverage_pct"] == 0.0
 
 
+def test_coverage_report_matches_the_real_lookup_for_whitespace_padded_categories(
+    tmp_path, monkeypatch,
+):
+    """FDC has at least one real category with a literal trailing space
+    ("Cheese - Speciality "). coverage_report() counts a raw category as
+    covered by checking dict membership; curated_brick_for_fdc_category()
+    resolves it at request time by stripping first. If those two disagree,
+    the coverage number on /gpc/mappings lies about what the orchestrator
+    actually resolves -- this pins them together."""
+    path = tmp_path / "fdc_whitespace.sqlite3"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE foods (fdc_id INTEGER PRIMARY KEY, category TEXT)")
+    conn.executemany("INSERT INTO foods (category) VALUES (?)", [
+        ("Cheese - Speciality ",),  # trailing space, exactly like the real FDC data
+        ("Cheese - Speciality ",),
+    ])
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(fdc_local, "DB_PATH", path)
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_BRICK", {"Cheese - Speciality": "10000028"})
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_CLASS", {})
+
+    report = gpc_match.coverage_report()
+
+    assert report["covered_foods"] == 2
+    assert report["uncovered_categories"] == []
+    # And the real runtime path resolves the same raw (unstripped) value too.
+    assert gpc_match.curated_brick_for_fdc_category("Cheese - Speciality ") == "10000028"
+
+
 # ── hierarchy_for_bricks / hierarchy_for_classes (bulk) ──────────────────
 
 async def test_hierarchy_for_bricks_batches_known_and_ignores_unknown(gpc_db):

@@ -47,6 +47,21 @@ def test_no_category_key_is_blank_or_whitespace_only():
         assert category.strip(), "a blank category key can never match anything"
 
 
+def test_no_dict_key_has_unstripped_surrounding_whitespace():
+    """curated_brick_for_fdc_category / curated_class_for_fdc_category strip
+    their input before the lookup (see test_surrounding_whitespace_is_stripped
+    below) -- so a dict key with a literal leading/trailing space (FDC has at
+    least one real category like this: "Cheese - Speciality ") can NEVER be
+    reached, since the stripped input will never equal the unstripped key.
+    This silently shipped once already; this test catches it structurally so
+    it can't happen again without a test failure pointing at the exact key."""
+    for category in list(FDC_CATEGORY_TO_BRICK) + list(FDC_CATEGORY_TO_CLASS):
+        assert category == category.strip(), (
+            f"{category!r} has surrounding whitespace and can never match a "
+            f"lookup, which always strips its input first -- store it stripped"
+        )
+
+
 # ── curated_brick_for_fdc_category ────────────────────────────────────
 
 def test_a_known_category_resolves():
