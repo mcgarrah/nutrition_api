@@ -23,6 +23,7 @@ const PAGES = [
   "app/static/gpc.html",
   "app/static/data.html",
   "app/static/gpc_mappings.html",
+  "app/static/search.html",
   "deploy/site/index.html",
   "deploy/site/status.html",
 ];

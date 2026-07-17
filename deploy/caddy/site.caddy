@@ -13,7 +13,7 @@
 	}
 
 	# The application and API, served by the uvicorn backend.
-	@backend path /api/* /ui /ui/* /gpc /gpc/mappings /data /docs /docs/* /redoc /openapi.json
+	@backend path /api/* /ui /ui/* /gpc /gpc/mappings /data /search /docs /docs/* /redoc /openapi.json
 	handle @backend {
 		reverse_proxy 127.0.0.1:8080
 	}

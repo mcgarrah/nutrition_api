@@ -27,6 +27,7 @@ from .core.usda_routes import router as usda_router
 from .core.off_routes import router as off_router
 from .core.lookup_routes import router as lookup_router
 from .core.data_routes import router as data_router
+from .core.search_routes import router as search_router
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,7 @@ app.include_router(gpc_router)
 app.include_router(usda_router)
 app.include_router(off_router)
 app.include_router(data_router)
+app.include_router(search_router)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
@@ -181,6 +183,12 @@ async def gpc_browser():
 async def data_browser_page():
     """Serve the read-only data browser UI."""
     return FileResponse(STATIC_DIR / "data.html")
+
+
+@app.get("/search", include_in_schema=False)
+async def search_page():
+    """Serve the product name search UI, with a Nutrition Facts label popup."""
+    return FileResponse(STATIC_DIR / "search.html")
 
 
 @app.get("/gpc/mappings", include_in_schema=False)

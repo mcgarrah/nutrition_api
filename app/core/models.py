@@ -165,3 +165,24 @@ class CanonicalProduct(BaseModel):
             "data rather than living only in the documentation."
         ),
     )
+
+
+class SearchResult(BaseModel):
+    """One product-name search hit — identity only, not the full nutrient panel.
+
+    A search result exists to populate a list a caller picks from; the full
+    merged CanonicalProduct for whichever GTIN they choose comes from the
+    existing GET /api/v1/lookup/{gtin}, so there is exactly one place that
+    merges FDC, OFF, and GPC data, not a second, lighter copy of it here.
+    """
+
+    gtin: str = Field(description="The product barcode (UPC/EAN/GTIN)")
+    product_name: str
+    brand: str | None = None
+    image_url: str | None = None
+    source: str = Field(description="Which local copy this hit came from")
+
+
+class SearchResponse(BaseModel):
+    query: str
+    results: list[SearchResult] = Field(default_factory=list)

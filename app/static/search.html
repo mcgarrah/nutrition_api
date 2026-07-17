@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nutrition API — Product Search</title>
+<style>
+  :root {
+    --surface-0: #f2f2f0; --surface-1: #fcfcfb; --surface-2: #e9e9e5;
+    --border: #dedddA; --text-primary: #0b0b0b; --text-secondary: #52514e;
+    --text-muted: #78776f; --accent: #2f7d4f; --accent-soft: #dcefe2;
+    --fk: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-0: #101010; --surface-1: #1a1a19; --surface-2: #242320;
+      --border: #35342f; --text-primary: #fff; --text-secondary: #c3c2b7;
+      --text-muted: #8f8e84; --accent: #5fbf8a; --accent-soft: #16261d;
+      --fk: #6ba7ea;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 1.75rem 1rem 4rem; background: var(--surface-0);
+    color: var(--text-primary); font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; margin-bottom: .3rem; }
+  h1 { font-size: 1.35rem; margin: 0; letter-spacing: -.01em; }
+  h1 .g { color: var(--accent); }
+  .nav { margin-left: auto; font-size: .8125rem; } .nav a { color: var(--text-secondary); }
+  .sub { color: var(--text-secondary); font-size: .8125rem; margin: 0 0 1.25rem; }
+  a { color: var(--fk); }
+
+  form { display: flex; gap: .5rem; margin-bottom: 1.25rem; }
+  input[type=search] {
+    flex: 1; padding: .65rem .8rem; font-size: 1rem;
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  input[type=search]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button {
+    padding: .65rem 1.1rem; font-size: .9375rem; font-weight: 600; cursor: pointer;
+    background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+  }
+  button:disabled { opacity: .55; cursor: progress; }
+
+  .count { font-size: .8125rem; color: var(--text-muted); margin: 0 0 .6rem; }
+  .results { display: flex; flex-direction: column; gap: .5rem; }
+  .result {
+    display: flex; align-items: center; gap: .8rem; width: 100%; text-align: left;
+    padding: .6rem .7rem; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--surface-1); color: inherit; cursor: pointer; font: inherit;
+  }
+  .result:hover { border-color: var(--accent); }
+  .result .thumb {
+    width: 48px; height: 48px; border-radius: 6px; object-fit: contain;
+    background: var(--surface-2); flex: none;
+  }
+  .result .thumb.placeholder { display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted); font-size: 1.3rem; }
+  .result .info { min-width: 0; flex: 1; }
+  .result .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .result .meta { font-size: .75rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .result .src {
+    flex: none; font-size: .625rem; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px; padding: .15rem .5rem;
+  }
+
+  .muted { color: var(--text-muted); font-size: .875rem; padding: .5rem 0; }
+  .loading { color: var(--text-muted); font-size: .875rem; padding: .5rem 0; }
+  footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border);
+    font-size: .75rem; color: var(--text-muted); }
+
+  /* ── The label popup ──────────────────────────────────────────────
+     A real Nutrition Facts panel is a fixed physical object — white
+     background, black rules, condensed bold type — regardless of the
+     site's own light/dark theme. That is a deliberate choice, not an
+     oversight: it is meant to look like the box in your hand. */
+  dialog#labelDialog {
+    border: 0; border-radius: 12px; padding: 0; max-width: 380px; width: 92vw;
+    max-height: 88vh; overflow: hidden; color: #000;
+    box-shadow: 0 20px 60px rgba(0,0,0,.35);
+  }
+  dialog#labelDialog::backdrop { background: rgba(0,0,0,.55); }
+  .label-scroll { max-height: 88vh; overflow-y: auto; background: #fff; }
+  .label-head {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem;
+    padding: .8rem 1rem .5rem; background: #fff; position: sticky; top: 0; z-index: 1;
+    border-bottom: 1px solid #eee;
+  }
+  .label-head .titles { min-width: 0; }
+  .label-head .pname { font-weight: 700; font-size: .9375rem; color: #111;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .label-head .pbrand { font-size: .75rem; color: #555; }
+  .label-head button { background: none; color: #555; font-size: 1.1rem; font-weight: 400;
+    padding: .1rem .5rem; border-radius: 6px; line-height: 1; }
+  .label-head button:hover { background: #eee; }
+
+  .nf { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; color: #000;
+    padding: .5rem 1rem 1.1rem; }
+  .nf-title { font-size: 2rem; font-weight: 900; letter-spacing: -.02em; margin: 0 0 .15rem; line-height: 1; }
+  .nf-serving { display: flex; justify-content: space-between; font-weight: 700;
+    font-size: .9375rem; padding: .25rem 0; border-bottom: 8px solid #000; }
+  .nf-cal-row { display: flex; justify-content: space-between; align-items: baseline;
+    padding: .3rem 0; border-bottom: 4px solid #000; }
+  .nf-cal-row .lbl { font-weight: 700; font-size: 1rem; }
+  .nf-cal-row .val { font-weight: 900; font-size: 2.2rem; line-height: 1; }
+  .nf-dv-label { text-align: right; font-size: .7rem; font-weight: 700; padding: .15rem 0;
+    border-bottom: 1px solid #000; }
+  .nf-row { display: flex; justify-content: space-between; gap: .5rem; font-size: .875rem;
+    padding: .28rem 0; border-bottom: 1px solid #000; }
+  .nf-row.sub { padding-left: 1rem; }
+  .nf-row.subsub { padding-left: 2rem; font-size: .8rem; }
+  .nf-row .name { font-weight: 400; }
+  .nf-row.bold .name, .nf-row .name b { font-weight: 700; }
+  .nf-row .dv { font-weight: 700; flex: none; }
+  .nf-row .dv.blank { color: #bbb; }
+  .nf-thick { border-bottom: 8px solid #000; }
+  .nf-micro-block .nf-row { border-bottom: 1px solid #ccc; }
+  .nf-micro-block .nf-row:last-child { border-bottom: 1px solid #000; }
+  .nf-footnote { font-size: .6875rem; color: #333; padding-top: .5rem; line-height: 1.35; }
+  .nf-empty { font-size: .8125rem; color: #777; padding: .4rem 0; }
+
+  .nf-extra { padding: .9rem 1rem 1.1rem; border-top: 8px solid #000; font-size: .8125rem; color: #333; }
+  .nf-extra h4 { font-size: .6875rem; text-transform: uppercase; letter-spacing: .06em;
+    color: #777; margin: 0 0 .3rem; font-weight: 700; }
+  .nf-extra p { margin: 0 0 .7rem; line-height: 1.45; }
+  .nf-extra .tags { display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: .7rem; }
+  .nf-extra .tag { font-size: .6875rem; padding: .15rem .5rem; border-radius: 999px;
+    background: #f0f0f0; color: #333; }
+  .nf-extra .src-note { font-size: .6875rem; color: #999; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="g">Product</span> Search</h1>
+    <span class="nav"><a href="/">← Lookup tester</a> · <a href="/gpc">GPC</a> · <a href="/data">Data Browser</a></span>
+  </header>
+  <p class="sub">
+    Search products by name (local FDC/OFF copies only — see the Data Browser for what's imported).
+    Click a result for its Nutrition Facts label.
+  </p>
+
+  <form id="form">
+    <input type="search" id="q" placeholder="Search by product name…" autocomplete="off" autofocus>
+    <button type="submit" id="go">Search</button>
+  </form>
+
+  <div id="out"><p class="muted">Type a product name to search.</p></div>
+
+  <footer>Search is local-DB only — a miss here doesn't mean no upstream has it, only that neither local copy's product name matched.</footer>
+</div>
+
+<dialog id="labelDialog">
+  <div class="label-scroll">
+    <div class="label-head">
+      <div class="titles">
+        <div class="pname" id="lname"></div>
+        <div class="pbrand" id="lbrand"></div>
+      </div>
+      <button type="button" id="lclose" aria-label="Close">✕</button>
+    </div>
+    <div id="lbody"><p class="loading" style="padding:1rem;">Loading…</p></div>
+  </div>
+</dialog>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const api = p => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)));
+
+// FDA 21 CFR 101.9 reference Daily Values (adults/children 4+), the same
+// public table printed on every US Nutrition Facts label. Our API stores raw
+// amounts, not %DV, so this is computed here — the same way a label's own
+// printer would from the product's own lab values.
+const DV = {
+  fat: 78, saturated_fat: 20, cholesterol: 300, sodium: 2300,
+  carbohydrates: 275, fiber: 28, added_sugars: 50,
+  vitamin_d: 20, calcium: 1300, iron: 18, potassium: 4700,
+  vitamin_a: 900, vitamin_c: 90, vitamin_e: 15, vitamin_k: 120,
+  thiamin: 1.2, riboflavin: 1.3, niacin: 16, vitamin_b6: 1.7,
+  folate: 400, vitamin_b12: 2.4, biotin: 30, pantothenic_acid: 5,
+  choline: 550, phosphorus: 1250, magnesium: 420, zinc: 11,
+  selenium: 55, copper: 0.9, manganese: 2.3, molybdenum: 45,
+};
+function pctDV(field, nv) {
+  const dv = DV[field];
+  if (!dv || !nv || nv.value == null) return null;
+  return Math.round((nv.value / dv) * 100);
+}
+function dvCell(field, nv) {
+  const pct = pctDV(field, nv);
+  return pct == null ? `<span class="dv blank">—</span>` : `<span class="dv">${pct}%</span>`;
+}
+function amt(nv, digits = 1) {
+  if (!nv || nv.value == null) return "0";
+  const v = nv.value;
+  return Number.isInteger(v) ? String(v) : v.toFixed(digits);
+}
+
+const state = { q: "", results: [] };
+
+async function search() {
+  const q = $("q").value.trim();
+  state.q = q;
+  if (!q) { $("out").innerHTML = `<p class="muted">Type a product name to search.</p>`; return; }
+  $("go").disabled = true;
+  $("out").innerHTML = `<p class="loading">Searching…</p>`;
+  try {
+    const body = await api(`/api/v1/search?q=${encodeURIComponent(q)}&limit=25`);
+    state.results = body.results || [];
+    renderResults();
+  } catch (e) {
+    $("out").innerHTML = `<p class="muted">Search failed: ${esc(e.message)}</p>`;
+  } finally {
+    $("go").disabled = false;
+  }
+}
+
+function renderResults() {
+  const results = state.results;
+  if (!results.length) {
+    $("out").innerHTML = `<p class="muted">No local matches for “${esc(state.q)}”.</p>`;
+    return;
+  }
+  const rows = results.map((r, i) => {
+    const thumb = r.image_url
+      ? `<img class="thumb" src="${esc(r.image_url)}" alt="" loading="lazy">`
+      : `<span class="thumb placeholder">🍽️</span>`;
+    return `<button class="result" data-i="${i}">
+      ${thumb}
+      <span class="info">
+        <span class="name">${esc(r.product_name)}</span>
+        <span class="meta">${esc(r.brand || "Unknown brand")} · ${esc(r.gtin)}</span>
+      </span>
+      <span class="src">${r.source === "OpenFoodFacts" ? "OFF" : "FDC"}</span>
+    </button>`;
+  }).join("");
+  $("out").innerHTML = `<p class="count">${results.length} result${results.length === 1 ? "" : "s"}</p>
+    <div class="results">${rows}</div>`;
+  $("out").querySelectorAll(".result").forEach(el =>
+    el.addEventListener("click", () => openLabel(results[+el.dataset.i])));
+}
+
+async function openLabel(result) {
+  $("lname").textContent = result.product_name;
+  $("lbrand").textContent = result.brand || "";
+  $("lbody").innerHTML = `<p class="loading" style="padding:1rem;">Loading…</p>`;
+  $("labelDialog").showModal();
+  try {
+    const p = await api(`/api/v1/lookup/${encodeURIComponent(result.gtin)}`);
+    $("lname").textContent = p.product_name;
+    $("lbrand").textContent = p.brand || "";
+    $("lbody").innerHTML = renderLabel(p);
+  } catch (e) {
+    $("lbody").innerHTML = `<p class="muted" style="padding:1rem;">Couldn't load full data: ${esc(e.message)}</p>`;
+  }
+}
+
+function renderLabel(p) {
+  const macroRow = (label, field, unit, opts = {}) => {
+    const nv = p[field];
+    const has = nv && nv.value != null;
+    return `<div class="nf-row ${opts.cls || ""}">
+      <span class="name">${opts.bold ? `<b>${label}</b>` : label}${has ? ` ${amt(nv, opts.digits ?? 1)}${unit}` : ""}</span>
+      ${opts.noDV ? "" : dvCell(field, nv)}
+    </div>`;
+  };
+
+  const microFields = [
+    ["Vitamin D", "vitamin_d", "µg"], ["Calcium", "calcium", "mg"],
+    ["Iron", "iron", "mg"], ["Potassium", "potassium", "mg"],
+    ["Vitamin A", "vitamin_a", "µg"], ["Vitamin C", "vitamin_c", "mg"],
+    ["Vitamin E", "vitamin_e", "mg"], ["Vitamin K", "vitamin_k", "µg"],
+    ["Thiamin", "thiamin", "mg"], ["Riboflavin", "riboflavin", "mg"],
+    ["Niacin", "niacin", "mg"], ["Vitamin B6", "vitamin_b6", "mg"],
+    ["Folate", "folate", "µg"], ["Vitamin B12", "vitamin_b12", "µg"],
+    ["Pantothenic Acid", "pantothenic_acid", "mg"], ["Biotin", "biotin", "µg"],
+    ["Choline", "choline", "mg"], ["Magnesium", "magnesium", "mg"],
+    ["Zinc", "zinc", "mg"], ["Phosphorus", "phosphorus", "mg"],
+    ["Selenium", "selenium", "µg"], ["Copper", "copper", "mg"],
+    ["Manganese", "manganese", "mg"], ["Molybdenum", "molybdenum", "µg"],
+  ];
+  const microRows = microFields
+    .filter(([, field]) => p[field] && p[field].value != null)
+    .map(([label, field, unit]) =>
+      `<div class="nf-row"><span class="name">${label} ${amt(p[field])}${unit}</span>${dvCell(field, p[field])}</div>`)
+    .join("");
+
+  const nf = `
+    <div class="nf">
+      <h2 class="nf-title">Nutrition Facts</h2>
+      <div class="nf-serving"><span>Amount Per 100 g</span></div>
+      <div class="nf-cal-row">
+        <span class="lbl">Calories</span>
+        <span class="val">${p.calories_kcal != null ? Math.round(p.calories_kcal) : "0"}</span>
+      </div>
+      <div class="nf-dv-label">% Daily Value*</div>
+      ${macroRow("Total Fat", "fat", "g", { bold: true })}
+      ${macroRow("Saturated Fat", "saturated_fat", "g", { cls: "sub" })}
+      ${macroRow("Trans Fat", "trans_fat", "g", { cls: "sub", noDV: true })}
+      ${macroRow("Cholesterol", "cholesterol", "mg", { bold: true })}
+      ${macroRow("Sodium", "sodium", "mg", { bold: true })}
+      ${macroRow("Total Carbohydrate", "carbohydrates", "g", { bold: true })}
+      ${macroRow("Dietary Fiber", "fiber", "g", { cls: "sub" })}
+      ${macroRow("Total Sugars", "sugars", "g", { cls: "sub", noDV: true })}
+      ${macroRow("Includes Added Sugars", "added_sugars", "g", { cls: "subsub" })}
+      <div class="nf-row nf-thick"><span class="name"><b>Protein</b>${p.protein && p.protein.value != null ? ` ${amt(p.protein)}g` : ""}</span></div>
+      ${microRows
+        ? `<div class="nf-micro-block">${microRows}</div>`
+        : `<p class="nf-empty">No vitamin/mineral data reported for this product.</p>`}
+      <p class="nf-footnote">* The % Daily Value tells you how much a nutrient in a
+        serving of food contributes to a daily diet. 2,000 calories a day is used
+        for general nutrition advice. Values shown are per 100&nbsp;g, not per
+        serving — this API does not track serving size.</p>
+    </div>`;
+
+  const allergens = (p.allergens || []).length
+    ? `<p><b>Contains:</b> ${p.allergens.map(esc).join(", ")}</p>` : "";
+  const labels = (p.labels || []).length
+    ? `<div class="tags">${p.labels.map(l => `<span class="tag">${esc(l)}</span>`).join("")}</div>` : "";
+  const category = (p.category_hierarchy || []).length
+    ? `<p>${p.category_hierarchy.map(esc).join(" › ")}</p>` : "";
+
+  const extra = `
+    <div class="nf-extra">
+      ${category ? `<h4>Category</h4>${category}` : ""}
+      ${p.ingredients_text ? `<h4>Ingredients</h4><p>${esc(p.ingredients_text)}</p>` : ""}
+      ${allergens ? `<h4>Allergens</h4>${allergens}` : ""}
+      ${labels ? `<h4>Labels</h4>${labels}` : ""}
+      <p class="src-note">Sources: ${(p.data_sources || []).map(esc).join(", ") || "none"}
+        ${p.cached ? " · cached" : ""}</p>
+    </div>`;
+
+  return nf + extra;
+}
+
+$("form").addEventListener("submit", e => { e.preventDefault(); search(); });
+$("lclose").addEventListener("click", () => $("labelDialog").close());
+$("labelDialog").addEventListener("click", e => {
+  if (e.target === $("labelDialog")) $("labelDialog").close();
+});
+</script>
+</body>
+</html>
