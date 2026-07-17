@@ -42,9 +42,10 @@ sudo journalctl -u nutrition-api -f      # follow logs
 sudo systemctl restart nutrition-api     # pick up new code after a git pull
 ```
 
-Once running: the lookup tester is at `http://<host>:8080/`, the OpenAPI docs at
-`/docs`, and `/api/v1/health` reports per-source status (it returns `degraded`,
-not an error, when an upstream is unreachable).
+Once running: `http://<host>:8080/` is a landing page linking to the barcode
+lookup tester (`/lookup`) and the name-search UI (`/search`), the OpenAPI docs
+are at `/docs`, and `/api/v1/health` reports per-source status (it returns
+`degraded`, not an error, when an upstream is unreachable).
 
 ### Hardening notes
 
@@ -66,8 +67,10 @@ proxies the application and API paths to the backend on `127.0.0.1:8080`:
 | `/` | the static landing hub (Caddy, from `site/`) |
 | `/status` | the status dashboard (Caddy, from `site/`) |
 | `/caddy-health` | Caddy itself (proxy liveness) |
-| `/ui/` | lookup tester (backend) |
-| `/gpc` | GPC browser (backend) |
+| `/lookup` | barcode (GTIN/UPC) lookup tester (backend) |
+| `/search` | search by product name (backend) |
+| `/gpc`, `/gpc/mappings` | GPC browser, GPC mapping viewer (backend) |
+| `/data` | data browser (backend) |
 | `/docs`, `/redoc`, `/openapi.json` | API docs (backend) |
 | `/api/*` | JSON API (backend) |
 

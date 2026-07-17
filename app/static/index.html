@@ -3,391 +3,161 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Nutrition API — Lookup Tester</title>
+<title>Nutrition API</title>
 <style>
   :root {
-    --surface-0: #f2f2f0;
-    --surface-1: #fcfcfb;
-    --border:    #dedddA;
-    --text-primary:   #0b0b0b;
-    --text-secondary: #52514e;
-    --text-muted:     #78776f;
-    /* categorical slots, fixed order — one per upstream source */
-    --src-off:  #2a78d6;
-    --src-usda: #1baf7a;
-    --src-gpc:  #eda100;
-    --good: #008300;
-    --bad:  #e34948;
+    --surface-0: #f2f2f0; --surface-1: #fcfcfb; --surface-2: #e9e9e5;
+    --border: #dedddA; --text-primary: #0b0b0b; --text-secondary: #52514e;
+    --text-muted: #78776f; --off: #2a78d6; --usda: #1baf7a; --gpc: #b57e00;
+    --search: #2f7d4f; --good: #008300; --bad: #e34948;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --surface-0: #111110;
-      --surface-1: #1a1a19;
-      --border:    #35342f;
-      --text-primary:   #ffffff;
-      --text-secondary: #c3c2b7;
-      --text-muted:     #8f8e84;
-      --src-off:  #3987e5;
-      --src-usda: #199e70;
-      --src-gpc:  #c98500;
-      --good: #4caf50;
-      --bad:  #e66767;
+      --surface-0: #111110; --surface-1: #1a1a19; --surface-2: #232320;
+      --border: #35342f; --text-primary: #fff; --text-secondary: #c3c2b7;
+      --text-muted: #8f8e84; --off: #3987e5; --usda: #199e70; --gpc: #d9a53a;
+      --search: #5fbf8a; --good: #4caf50; --bad: #e66767;
     }
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0;
-    padding: 2rem 1rem 4rem;
-    background: var(--surface-0);
-    color: var(--text-primary);
-    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0; padding: 3rem 1rem 4rem;
+    background: var(--surface-0); color: var(--text-primary);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   }
-  .wrap { max-width: 860px; margin: 0 auto; }
-  header { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; margin-bottom: .25rem; }
-  h1 { font-size: 1.35rem; margin: 0; letter-spacing: -.01em; }
-  .sub { color: var(--text-secondary); font-size: .875rem; margin: 0 0 1.5rem; }
+  .wrap { max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 .35rem; letter-spacing: -.015em; }
+  .lede { color: var(--text-secondary); font-size: 1rem; margin: 0 0 .35rem; max-width: 60ch; }
+  .health { font-size: .8125rem; color: var(--text-secondary); margin: 0 0 2rem; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: .35rem;
+    background: var(--text-muted); vertical-align: baseline; }
+  .dot.ok { background: var(--good); } .dot.bad { background: var(--bad); }
 
-  .health { margin-left: auto; font-size: .8125rem; color: var(--text-secondary); }
-  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: .35rem; background: var(--text-muted); }
-  .dot.ok { background: var(--good); }
-  .dot.bad { background: var(--bad); }
-
-  form { display: flex; gap: .5rem; margin-bottom: .75rem; }
-  input[type=text] {
-    flex: 1; padding: .625rem .75rem; font-size: 1rem; font-variant-numeric: tabular-nums;
-    background: var(--surface-1); color: var(--text-primary);
-    border: 1px solid var(--border); border-radius: 8px;
-  }
-  input[type=text]:focus { outline: 2px solid var(--src-off); outline-offset: 1px; }
-  button {
-    padding: .625rem 1.1rem; font-size: .9375rem; font-weight: 600; cursor: pointer;
-    background: var(--src-off); color: #fff; border: 0; border-radius: 8px;
-  }
-  button:disabled { opacity: .55; cursor: progress; }
-
-  .fresh {
-    display: flex; align-items: center; gap: .45rem; margin-bottom: 1rem;
-    font-size: .8125rem; color: var(--text-secondary); cursor: pointer;
-  }
-  .fresh input { accent-color: var(--src-off); cursor: pointer; }
-
-  .samples { display: flex; flex-wrap: wrap; gap: .375rem; margin-bottom: 1.75rem; }
-  .chip {
-    padding: .3rem .6rem; font-size: .8125rem; cursor: pointer;
-    background: var(--surface-1); color: var(--text-secondary);
-    border: 1px solid var(--border); border-radius: 999px;
-  }
-  .chip:hover { color: var(--text-primary); border-color: var(--text-muted); }
-
-  .card {
+  /* The two lookup types -- the primary choice this page exists to make. */
+  .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+  a.choice {
+    display: block; text-decoration: none; color: inherit;
     background: var(--surface-1); border: 1px solid var(--border);
-    border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem;
+    border-radius: 14px; padding: 1.5rem 1.4rem;
+    border-top: 4px solid var(--accent, var(--text-muted));
+    transition: border-color .12s, transform .12s;
   }
-  .card h2 {
-    font-size: .75rem; text-transform: uppercase; letter-spacing: .06em;
-    color: var(--text-muted); margin: 0 0 .875rem; font-weight: 600;
-  }
+  a.choice:hover { transform: translateY(-2px); }
+  a.choice.lookup { --accent: var(--usda); }
+  a.choice.search { --accent: var(--search); }
+  a.choice .icon { font-size: 1.75rem; margin-bottom: .5rem; }
+  a.choice .t { font-weight: 700; font-size: 1.15rem; margin-bottom: .3rem; }
+  a.choice .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .75rem; color: var(--text-muted); font-weight: 400; margin-left: .5rem; }
+  a.choice .d { color: var(--text-secondary); font-size: .875rem; }
 
-  .product { display: flex; gap: 1.25rem; align-items: flex-start; }
-  .product img {
-    width: 96px; height: 96px; object-fit: contain; border-radius: 8px;
-    background: var(--surface-0); flex: none;
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .75rem; }
+  a.tile {
+    display: block; text-decoration: none; color: inherit;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 1.1rem 1.15rem;
+    border-left: 3px solid var(--accent, var(--text-muted)); transition: border-color .12s, transform .12s;
   }
-  .pname { font-size: 1.125rem; font-weight: 650; margin: 0 0 .2rem; }
-  .pbrand { color: var(--text-secondary); font-size: .875rem; margin: 0 0 .6rem; }
-  .crumb { font-size: .8125rem; color: var(--text-secondary); }
-  .crumb span:not(:last-child)::after { content: " › "; color: var(--text-muted); }
+  a.tile:hover { transform: translateY(-1px); border-color: var(--accent, var(--text-muted)); }
+  a.tile .t { font-weight: 650; font-size: 1.02rem; display: flex; align-items: baseline; gap: .5rem; }
+  a.tile .t .path {
+    margin-left: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .75rem; color: var(--text-muted); font-weight: 400;
+  }
+  a.tile .d { color: var(--text-secondary); font-size: .875rem; margin-top: .3rem; }
+  .tile.off  { --accent: var(--off); }
+  .tile.gpc  { --accent: var(--gpc); }
 
-  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-  th, td { text-align: left; padding: .4rem 0; border-bottom: 1px solid var(--border); }
-  th { font-weight: 500; color: var(--text-secondary); font-size: .875rem; }
-  td { text-align: right; font-weight: 600; }
-  tr:last-child th, tr:last-child td { border-bottom: 0; }
-  .none { color: var(--text-muted); font-weight: 400; }
+  .section { margin-top: 1.75rem; font-size: .75rem; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--text-muted); font-weight: 700; margin-bottom: .6rem; }
 
-  /* latency bars — direct-labeled (relief for light-mode contrast) */
-  .lat { display: grid; grid-template-columns: 7.5rem 1fr auto; gap: .5rem .75rem; align-items: center; }
-  .lat-name { font-size: .875rem; display: flex; align-items: center; gap: .4rem; }
-  .swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
-  .track { height: 10px; background: var(--surface-0); border-radius: 5px; overflow: hidden; }
-  .bar { height: 100%; border-radius: 0 4px 4px 0; min-width: 2px; }
-  .lat-val { font-size: .875rem; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
-  .miss { font-size: .8125rem; color: var(--text-muted); }
-
-  .badges { display: flex; flex-wrap: wrap; gap: .375rem; }
-  .badge {
-    font-size: .75rem; font-weight: 600; padding: .2rem .55rem; border-radius: 999px;
-    border: 1px solid currentColor;
-    display: inline-flex; align-items: baseline; gap: .35rem;
-  }
-  .badge .origin {
-    font-weight: 500; font-size: .6875rem; letter-spacing: .01em;
-    opacity: .85; font-variant-numeric: tabular-nums;
-  }
-  .badge .origin.live { font-style: italic; }
-  .tags { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .5rem; }
-  .tag {
-    font-size: .75rem; padding: .15rem .5rem; border-radius: 4px;
-    background: var(--surface-0); color: var(--text-secondary);
-  }
-
-  .stat { font-size: 1.75rem; font-weight: 680; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
-  .stat small { font-size: .875rem; font-weight: 500; color: var(--text-muted); margin-left: .15rem; }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-  @media (max-width: 620px) { .grid2 { grid-template-columns: 1fr; } .product { flex-direction: column; } }
-
-  details { margin-top: 1rem; }
-  summary { cursor: pointer; color: var(--text-secondary); font-size: .875rem; }
-  pre {
-    margin: .625rem 0 0; padding: .875rem; overflow-x: auto;
-    background: var(--surface-0); border-radius: 8px;
-    font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  .err { border-color: var(--bad); }
-  .err .code { color: var(--bad); font-weight: 700; }
-  a { color: var(--src-off); }
-  footer {
-    margin-top: 2.5rem; padding-top: 1rem;
-    border-top: 1px solid var(--border);
-    font-size: .75rem; line-height: 1.6; color: var(--text-muted);
-  }
-  footer p { margin: 0; }
+  footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--border);
+    font-size: .8125rem; color: var(--text-muted); line-height: 1.6; }
+  footer a { color: var(--off); }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <h1>Nutrition API</h1>
-    <span class="health" id="health"><span class="dot"></span>checking…</span>
-  </header>
-  <p class="sub">
-    GTIN lookup tester — merges USDA FDC, Open Food Facts, and GS1 GPC.
-    <a href="/search">Search by name</a> · <a href="/gpc">GPC browser</a> · API docs: <a href="/docs">/docs</a> (Swagger) · <a href="/redoc">/redoc</a> (ReDoc).
+  <h1>Nutrition API</h1>
+  <p class="lede">
+    A unified food-intelligence service: one lookup that merges USDA FoodData Central,
+    Open Food Facts, and the GS1 Global Product Classification.
   </p>
+  <p class="health" id="health"><span class="dot"></span>checking status…</p>
 
-  <form id="form">
-    <input type="text" id="gtin" placeholder="Enter a GTIN / UPC barcode…"
-           value="028400642255" inputmode="numeric" autocomplete="off">
-    <button type="submit" id="go">Look up</button>
-  </form>
-  <label class="fresh" for="fresh">
-    <input type="checkbox" id="fresh">
-    Skip cache — query the live upstream APIs (slower; ignores the local copies)
-  </label>
+  <div class="choices">
+    <a class="choice lookup" href="/lookup">
+      <div class="icon">🔢</div>
+      <div class="t">Look up by barcode <span class="path">/lookup</span></div>
+      <div class="d">Have a GTIN or UPC? Scan or type it to see the merged product card, per-source provenance, and latency.</div>
+    </a>
+    <a class="choice search" href="/search">
+      <div class="icon">🔎</div>
+      <div class="t">Search by name <span class="path">/search</span></div>
+      <div class="d">Don't have a barcode? Search by product name, pick a result, and see its Nutrition Facts label.</div>
+    </a>
+  </div>
 
-  <div class="samples" id="samples"></div>
+  <div class="section">More tools</div>
+  <div class="grid">
+    <a class="tile gpc" href="/gpc">
+      <div class="t">GPC browser <span class="path">/gpc</span></div>
+      <div class="d">Explore the GS1 taxonomy — Segment → Family → Class → Brick → Attributes. Search reaches into attributes.</div>
+    </a>
+    <a class="tile gpc" href="/gpc/mappings">
+      <div class="t">GPC mapping viewer <span class="path">/gpc/mappings</span></div>
+      <div class="d">Every curated FDC-category → GPC mapping, resolved, with live coverage against the local FDC corpus.</div>
+    </a>
+    <a class="tile" href="/data">
+      <div class="t">Data browser <span class="path">/data</span></div>
+      <div class="d">Look inside the local stores — OFF, FDC, GPC, and the response cache: schema, rows, and column coverage.</div>
+    </a>
+    <a class="tile" href="/status">
+      <div class="t">Status <span class="path">/status</span></div>
+      <div class="d">Live dashboard — proxy, backend, cached copies, and external APIs at a glance.</div>
+    </a>
+  </div>
 
-  <div id="out"></div>
+  <div class="section">API</div>
+  <div class="grid">
+    <a class="tile" href="/docs">
+      <div class="t">Swagger UI <span class="path">/docs</span></div>
+      <div class="d">Interactive API reference — call any endpoint from the browser.</div>
+    </a>
+    <a class="tile" href="/redoc">
+      <div class="t">ReDoc <span class="path">/redoc</span></div>
+      <div class="d">Clean, reference-style documentation of the same OpenAPI schema.</div>
+    </a>
+    <a class="tile usda" href="/api/v1/lookup/049000006346">
+      <div class="t">Example lookup <span class="path">/api/v1/lookup/{gtin}</span></div>
+      <div class="d">The core endpoint — a merged CanonicalProduct. This link looks up a Coca-Cola can.</div>
+    </a>
+  </div>
 
   <footer>
-    <p>
-      Product data from <a href="https://world.openfoodfacts.org/">Open Food Facts</a>,
-      licensed <a href="https://opendatacommons.org/licenses/odbl/1.0/">ODbL 1.0</a>;
-      product images licensed
-      <a href="https://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA 3.0</a>.
-      Nutrient data from <a href="https://fdc.nal.usda.gov/">USDA FoodData Central</a>
-      (public domain). Taxonomy from
-      <a href="https://www.gs1.org/standards/gpc">GS1 GPC</a>.
-    </p>
+    Data from
+    <a href="https://fdc.nal.usda.gov/">USDA FoodData Central</a> (public domain),
+    <a href="https://world.openfoodfacts.org/">Open Food Facts</a>
+    (<a href="https://opendatacommons.org/licenses/odbl/1.0/">ODbL 1.0</a>, images CC BY-SA 3.0), and
+    <a href="https://www.gs1.org/standards/gpc">GS1 GPC</a>.
+    Full attribution: <a href="/api/v1/attribution">/api/v1/attribution</a>.
+    Source: <a href="https://github.com/mcgarrah/nutrition_api">github.com/mcgarrah/nutrition_api</a>.
   </footer>
 </div>
 
 <script>
-const SOURCES = [
-  { key: "OpenFoodFacts", label: "Open Food Facts", color: "var(--src-off)" },
-  { key: "USDA_FDC",      label: "USDA FDC",        color: "var(--src-usda)" },
-  { key: "GS1_GPC",       label: "GS1 GPC",         color: "var(--src-gpc)" },
-];
-
-// A diverse spread of real barcodes, each verified to resolve against the
-// local USDA/OFF copies — every macro profile from pure fat to zero-calorie.
-const SAMPLES = [
-  ["049000006346", "🥤 Coca-Cola"],
-  ["044000041106", "🍪 Oreo"],
-  ["049000028706", "💧 Dasani water — 0 kcal"],
-  ["037600309806", "🥜 Skippy peanut butter"],
-  ["028400021524", "🔺 Doritos"],
-  ["034000213917", "🍫 Hershey's chocolate"],
-  ["030000010402", "🌾 Quaker oats"],
-  ["011161032588", "🫒 Olive oil — pure fat"],
-  ["007789045129", "🌰 Almonds"],
-  ["3017620422003", "🍫 Nutella — EU, no USDA"],
-  ["abc", "⛔ Invalid GTIN → 422"],
-];
-
-const NUTRIENTS = [
-  ["calories_kcal", "Energy", "kcal"],
-  ["protein", "Protein", null],
-  ["fat", "Fat", null],
-  ["carbohydrates", "Carbohydrates", null],
-  ["fiber", "Fiber", null],
-  ["sugars", "Sugars", null],
-  ["sodium", "Sodium", null],
-];
-
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
-
-// Sample chips
-$("samples").innerHTML = SAMPLES
-  .map(([code, name]) => `<button type="button" class="chip" data-code="${code}">${esc(name)}</button>`)
-  .join("");
-$("samples").addEventListener("click", (e) => {
-  const chip = e.target.closest(".chip");
-  if (!chip) return;
-  $("gtin").value = chip.dataset.code;
-  lookup();
-});
-
-// Health pill
-(async () => {
-  try {
-    const h = await (await fetch("/api/v1/health")).json();
+  fetch("/api/v1/health").then(r => r.json()).then(h => {
+    const el = document.getElementById("health");
     const ok = h.status === "ok";
-    const parts = [
-      `GPC ${h.gpc?.status === "ok" ? "✓" : "✗"}`,
-      `USDA ${h.usda_fdc?.status === "ok" ? "✓" : "✗"}`,
-      `OFF ${h.open_food_facts?.status === "ok" ? "✓" : "✗"}`,
-    ];
-    $("health").innerHTML =
-      `<span class="dot ${ok ? "ok" : "bad"}"></span>${esc(h.status)} — ${parts.join(" · ")}`;
-  } catch {
-    $("health").innerHTML = `<span class="dot bad"></span>unreachable`;
-  }
-})();
-
-function nutrientRows(p) {
-  return NUTRIENTS.map(([key, label, unit]) => {
-    const v = p[key];
-    let cell;
-    if (v === null || v === undefined) cell = `<td class="none">—</td>`;
-    else if (typeof v === "number") cell = `<td>${v} <small>${unit || ""}</small></td>`;
-    else cell = `<td>${v.value} <small>${esc(v.unit)}</small></td>`;
-    return `<tr><th>${label}</th>${cell}</tr>`;
-  }).join("");
-}
-
-function latencyBars(p) {
-  const lat = p.upstream_latency_ms || {};
-  const used = new Set(p.data_sources || []);
-  const max = Math.max(...Object.values(lat), 1);
-  return SOURCES.map(s => {
-    const ms = lat[s.key];
-    if (ms === undefined) return "";
-    const pct = Math.max((ms / max) * 100, 1.5);
-    const contributed = used.has(s.key);
-    return `
-      <div class="lat-name"><span class="swatch" style="background:${s.color}"></span>${s.label}</div>
-      <div class="track"><div class="bar" style="width:${pct}%;background:${s.color};${contributed ? "" : "opacity:.3"}"></div></div>
-      <div class="lat-val">${ms.toFixed(0)} ms${contributed ? "" : ' <span class="miss">· no data</span>'}</div>`;
-  }).join("");
-}
-
-function render(p, rtt) {
-  const img = p.image_url
-    ? `<img src="${esc(p.image_url)}" alt="" onerror="this.style.display='none'">` : "";
-  const crumb = (p.category_hierarchy || []).length
-    ? `<div class="crumb">${p.category_hierarchy.map(c => `<span>${esc(c)}</span>`).join("")}</div>`
-    : `<div class="crumb none">no category matched</div>`;
-
-  const prov = p.provenance || {};
-  const badges = SOURCES.map(s => {
-    const on = (p.data_sources || []).includes(s.key);
-    // Where this source's data came from: the local bulk copy (with the date of
-    // the dataset it was built from) or the live upstream API.
-    const pr = prov[s.key];
-    let origin = "";
-    if (on && pr) {
-      origin = pr.origin === "local"
-        ? `<small class="origin local">local · ${esc(pr.dataset_date || "?")}</small>`
-        : `<small class="origin live">live</small>`;
-    }
-    return `<span class="badge" style="color:${on ? s.color : "var(--text-muted)"};${on ? "" : "opacity:.6"}">
-      ${on ? "✓" : "○"} ${s.label}${origin}</span>`;
-  }).join("");
-
-  const tags = [...(p.allergens || []), ...(p.labels || [])]
-    .map(t => `<span class="tag">${esc(t.replace(/^en:/, ""))}</span>`).join("");
-
-  $("out").innerHTML = `
-    <div class="card">
-      <div class="product">
-        ${img}
-        <div>
-          <p class="pname">${esc(p.product_name)}</p>
-          <p class="pbrand">${p.brand ? esc(p.brand) : "<span class='none'>no brand</span>"} · <code>${esc(p.gtin)}</code></p>
-          ${crumb}
-          ${tags ? `<div class="tags">${tags}</div>` : ""}
-        </div>
-      </div>
-    </div>
-
-    <div class="grid2">
-      <div class="card">
-        <h2>Nutrition · per 100 g</h2>
-        <table>${nutrientRows(p)}</table>
-      </div>
-      <div>
-        <div class="card">
-          <h2>Round trip</h2>
-          <div class="stat">${rtt.toFixed(0)}<small>ms</small></div>
-          <p class="sub" style="margin:.35rem 0 0;font-size:.8125rem">
-            ${p.cached
-              ? "Served from cache — the latencies below are from the original fetch, not this request."
-              : "Fresh fetch. Repeat the same GTIN to see the cache respond."}</p>
-        </div>
-        <div class="card" style="margin-bottom:0">
-          <h2>Sources</h2>
-          <div class="badges">${badges}</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Upstream latency${p.cached ? " · from the original fetch" : ""}</h2>
-      <div class="lat">${latencyBars(p)}</div>
-    </div>
-
-    <details>
-      <summary>Raw JSON</summary>
-      <pre>${esc(JSON.stringify(p, null, 2))}</pre>
-    </details>`;
-}
-
-function renderError(status, body, rtt) {
-  const detail = typeof body?.detail === "string"
-    ? body.detail
-    : "Malformed GTIN — must be 8, 12, 13, or 14 digits.";
-  $("out").innerHTML = `
-    <div class="card err">
-      <h2>Response</h2>
-      <p><span class="code">${status}</span> — ${esc(detail)}</p>
-      <p class="sub" style="margin:.35rem 0 0;font-size:.8125rem">Round trip ${rtt.toFixed(0)} ms</p>
-      <details><summary>Raw JSON</summary><pre>${esc(JSON.stringify(body, null, 2))}</pre></details>
-    </div>`;
-}
-
-async function lookup() {
-  const gtin = $("gtin").value.trim();
-  if (!gtin) return;
-  $("go").disabled = true;
-  $("out").innerHTML = `<div class="card"><p class="sub" style="margin:0">Looking up ${esc(gtin)}…</p></div>`;
-  const t0 = performance.now();
-  const fresh = $("fresh").checked ? "?fresh=true" : "";
-  try {
-    const res = await fetch(`/api/v1/lookup/${encodeURIComponent(gtin)}${fresh}`);
-    const rtt = performance.now() - t0;
-    const body = await res.json();
-    res.ok ? render(body, rtt) : renderError(res.status, body, rtt);
-  } catch (e) {
-    $("out").innerHTML = `<div class="card err"><p><span class="code">Network error</span> — ${esc(e.message)}</p></div>`;
-  } finally {
-    $("go").disabled = false;
-  }
-}
-
-$("form").addEventListener("submit", (e) => { e.preventDefault(); lookup(); });
-lookup();
+    const parts = [];
+    if (h.usda_fdc_local) parts.push(`USDA copy ${h.usda_fdc_local.dataset_date || h.usda_fdc_local.dataset || "—"}`);
+    if (h.open_food_facts_local) parts.push(`OFF copy ${h.open_food_facts_local.dataset || "—"}`);
+    el.innerHTML = `<span class="dot ${ok ? "ok" : "bad"}"></span>`
+      + `Status: ${h.status}` + (parts.length ? ` · ${parts.join(" · ")}` : "");
+  }).catch(() => {
+    document.getElementById("health").innerHTML =
+      `<span class="dot bad"></span>Status unavailable`;
+  });
 </script>
 </body>
 </html>

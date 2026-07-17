@@ -142,15 +142,21 @@ def test_cors_preflight_permits_get():
 
 # ── Static UI ─────────────────────────────────────────────────────────
 
-def test_root_serves_the_tester_ui():
+def test_root_serves_the_routing_landing_page():
     resp = client.get("/")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
     assert "Nutrition API" in resp.text
+    # The two lookup types are the choice this page exists to route between.
+    assert "/lookup" in resp.text
+    assert "/search" in resp.text
 
 
-def test_ui_is_also_mounted_under_its_own_path():
-    assert client.get("/ui/").status_code == 200
+def test_lookup_serves_the_barcode_tester_ui():
+    resp = client.get("/lookup")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert "Lookup Tester" in resp.text
 
 
 def test_gpc_browser_is_served():
@@ -160,9 +166,10 @@ def test_gpc_browser_is_served():
     assert "GPC Browser" in resp.text
 
 
-def test_ui_is_excluded_from_the_openapi_schema():
+def test_static_pages_are_excluded_from_the_openapi_schema():
     paths = client.get("/openapi.json").json()["paths"]
-    assert "/" not in paths
+    for page in ("/", "/lookup", "/gpc", "/data", "/search", "/gpc/mappings"):
+        assert page not in paths
 
 
 # ── OpenAPI surface ───────────────────────────────────────────────────

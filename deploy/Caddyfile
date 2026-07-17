@@ -6,8 +6,10 @@
 # proxy independently.
 #
 #   Landing hub    /            Status dashboard  /status
-#   Lookup tester  /ui/         GPC browser       /gpc
-#   API docs       /docs, /redoc, /openapi.json   JSON API   /api/*
+#   Barcode lookup /lookup      Search by name     /search
+#   GPC browser    /gpc         GPC mapping viewer /gpc/mappings
+#   Data browser   /data        API docs   /docs, /redoc, /openapi.json
+#   JSON API       /api/*
 #
 # The routing lives in caddy/site.caddy and is imported by each site block, so
 # the example, the local-test block, and the installed /etc/caddy/Caddyfile all

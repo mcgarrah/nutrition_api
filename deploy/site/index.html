@@ -16,6 +16,7 @@
     --off:  #2a78d6;
     --usda: #1baf7a;
     --gpc:  #b57e00;
+    --search: #2f7d4f;
     --ink:  #3a3a37;
     --good: #008300;
     --bad:  #e34948;
@@ -32,6 +33,7 @@
       --off:  #3987e5;
       --usda: #199e70;
       --gpc:  #d9a53a;
+      --search: #5fbf8a;
       --ink:  #cfcec3;
       --good: #4caf50;
       --bad:  #e66767;
@@ -69,6 +71,24 @@
   .tile.usda { --accent: var(--usda); }
   .tile.gpc  { --accent: var(--gpc); }
 
+  /* The two lookup types -- the primary choice this page exists to make. */
+  .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+  a.choice {
+    display: block; text-decoration: none; color: inherit;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 14px; padding: 1.5rem 1.4rem;
+    border-top: 4px solid var(--accent, var(--text-muted));
+    transition: border-color .12s, transform .12s;
+  }
+  a.choice:hover { transform: translateY(-2px); }
+  a.choice.lookup { --accent: var(--usda); }
+  a.choice.search { --accent: var(--search); }
+  a.choice .icon { font-size: 1.75rem; margin-bottom: .5rem; }
+  a.choice .t { font-weight: 700; font-size: 1.15rem; margin-bottom: .3rem; }
+  a.choice .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .75rem; color: var(--text-muted); font-weight: 400; margin-left: .5rem; }
+  a.choice .d { color: var(--text-secondary); font-size: .875rem; }
+
   .section { margin-top: 1.75rem; font-size: .75rem; text-transform: uppercase;
     letter-spacing: .08em; color: var(--text-muted); font-weight: 700; margin-bottom: .6rem; }
 
@@ -86,15 +106,28 @@
   </p>
   <p class="health" id="health"><span class="dot"></span>checking status…</p>
 
-  <div class="section">Try it</div>
-  <div class="grid">
-    <a class="tile off" href="/ui/">
-      <div class="t">Lookup tester <span class="path">/ui/</span></div>
-      <div class="d">Scan or type a barcode; see the merged product card, per-source provenance, and latency.</div>
+  <div class="choices">
+    <a class="choice lookup" href="/lookup">
+      <div class="icon">🔢</div>
+      <div class="t">Look up by barcode <span class="path">/lookup</span></div>
+      <div class="d">Have a GTIN or UPC? Scan or type it to see the merged product card, per-source provenance, and latency.</div>
     </a>
+    <a class="choice search" href="/search">
+      <div class="icon">🔎</div>
+      <div class="t">Search by name <span class="path">/search</span></div>
+      <div class="d">Don't have a barcode? Search by product name, pick a result, and see its Nutrition Facts label.</div>
+    </a>
+  </div>
+
+  <div class="section">Explore</div>
+  <div class="grid">
     <a class="tile gpc" href="/gpc">
       <div class="t">GPC browser <span class="path">/gpc</span></div>
       <div class="d">Explore the GS1 taxonomy — Segment → Family → Class → Brick → Attributes. Search reaches into attributes.</div>
+    </a>
+    <a class="tile gpc" href="/gpc/mappings">
+      <div class="t">GPC mapping viewer <span class="path">/gpc/mappings</span></div>
+      <div class="d">Every curated FDC-category → GPC mapping, resolved, with live coverage against the local FDC corpus.</div>
     </a>
     <a class="tile" href="/data">
       <div class="t">Data browser <span class="path">/data</span></div>
