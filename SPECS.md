@@ -89,7 +89,9 @@ is the map of what exists and why. All are `GET`, read-only.
 | `/api/v1/version`, `/api/v1/attribution` | Build identity; licence terms per source |
 
 Static UI pages (excluded from the OpenAPI schema): `/` (routing landing
-page), `/lookup`, `/search`, `/gpc`, `/gpc/mappings`, `/data`.
+page), `/lookup`, `/search`, `/data` (four tabs: Data Browser, Data Quality,
+GPC Taxonomy, GPC Mappings -- `/gpc` and `/gpc/mappings` redirect here, see
+PLAN.md item 11).
 
 ## 2. Pydantic Verification Schemas
 Nutritional units are systematically mapped to a standardized baseline measurement of **100g** or **100mL** of product to eliminate arbitrary manufacturer portion definitions and ensure mathematical parity inside data science operations. Units are **ours, not the source's**: sodium is always mg whether USDA sent mg or Open Food Facts sent grams, so a field never changes unit with its provenance.

@@ -134,7 +134,7 @@
 <div class="wrap">
   <header>
     <h1><span class="g">Product</span> Search</h1>
-    <span class="nav"><a href="/">← Home</a> · <a href="/lookup">Barcode lookup</a> · <a href="/gpc">GPC</a> · <a href="/data">Data Browser</a> · <a href="/data/analytics">Data quality</a></span>
+    <span class="nav" id="nav"></span>
   </header>
   <p class="sub">
     Search products by name (local FDC/OFF copies only — see the Data Browser for what's imported).
@@ -164,7 +164,9 @@
   </div>
 </dialog>
 
+<script src="/nav.js"></script>
 <script>
+if (typeof renderNav === "function") renderNav("/search");
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 const api = p => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)));

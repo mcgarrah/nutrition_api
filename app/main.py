@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from .core import attribution
 from .core import fdc_local
 from .core import off_local
@@ -163,6 +163,13 @@ app.include_router(data_router)
 app.include_router(search_router)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+# The one asset shared by every tool page's nav bar (PLAN.md item 11). In the
+# deployed setup Caddy serves this straight from deploy/site/ as a plain
+# static file, never touching the backend -- this route exists so the
+# documented local-dev workflow (`uvicorn app.main:app --port 8080`, no Caddy
+# in front, see CLAUDE.md) still gets a working nav instead of a 404 that
+# quietly breaks every page's renderNav() call.
+NAV_JS_PATH = Path(__file__).resolve().parent.parent / "deploy" / "site" / "nav.js"
 
 
 @app.get("/", include_in_schema=False)
@@ -171,21 +178,22 @@ async def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/nav.js", include_in_schema=False)
+async def nav_js():
+    return FileResponse(NAV_JS_PATH, media_type="application/javascript")
+
+
 @app.get("/lookup", include_in_schema=False)
 async def lookup_page():
     """Serve the barcode (GTIN/UPC) lookup tester UI."""
     return FileResponse(STATIC_DIR / "lookup.html")
 
 
-@app.get("/gpc", include_in_schema=False)
-async def gpc_browser():
-    """Serve the GPC taxonomy browser UI."""
-    return FileResponse(STATIC_DIR / "gpc.html")
-
-
 @app.get("/data", include_in_schema=False)
 async def data_browser_page():
-    """Serve the read-only data browser UI."""
+    """Serve the data explorer UI: Data Browser, Data Quality, GPC Taxonomy,
+    and GPC Mappings as tabs of one page (PLAN.md item 11). ?tab= picks the
+    initial tab; the four former standalone routes below redirect here."""
     return FileResponse(STATIC_DIR / "data.html")
 
 
@@ -195,16 +203,22 @@ async def search_page():
     return FileResponse(STATIC_DIR / "search.html")
 
 
+# Former standalone pages, now tabs of /data (PLAN.md item 11) -- redirected
+# rather than removed outright so an existing bookmark or link still lands
+# on the right tab instead of 404ing.
+@app.get("/gpc", include_in_schema=False)
+async def gpc_browser():
+    return RedirectResponse("/data?tab=taxonomy")
+
+
 @app.get("/gpc/mappings", include_in_schema=False)
 async def gpc_mappings_page():
-    """Serve the curated FDC-category -> GPC mapping viewer UI."""
-    return FileResponse(STATIC_DIR / "gpc_mappings.html")
+    return RedirectResponse("/data?tab=mappings")
 
 
 @app.get("/data/analytics", include_in_schema=False)
 async def data_analytics_page():
-    """Serve the data quality & coverage dashboard UI."""
-    return FileResponse(STATIC_DIR / "data_analytics.html")
+    return RedirectResponse("/data?tab=quality")
 
 
 @app.get("/api/v1/health", tags=["Operations"], summary="Health check")

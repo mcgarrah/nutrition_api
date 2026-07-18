@@ -691,11 +691,30 @@ before committing to a design.
 
 ## 11. Consolidate the ad-hoc explorer/debug pages into one coherent set
 
-**Status:** design decided with the user 2026-07-19; not yet implemented.
-Flagged 2026-07-19: these pages were added one at a time, each to support
-whatever was being developed at the time, never designed as a set — the
-user's framing is that this is a debugging/dev feature that was "just
-thrown together," and it reads that way to someone landing on the site new.
+**Status:** shipped 2026-07-19. Flagged the same day: these pages were added
+one at a time, each to support whatever was being developed at the time,
+never designed as a set — the user's framing is that this is a debugging/
+dev feature that was "just thrown together," and it read that way to
+someone landing on the site new.
+
+**What shipped, against the decided design below:** `/gpc`, `/gpc/mappings`,
+and `/data/analytics` are now tabs of one page at `/data` (Data Browser,
+Data Quality, GPC Taxonomy, GPC Mappings — `?tab=` picks the initial one,
+`history.replaceState` keeps the URL in sync with clicks), with the three
+former routes redirecting there for backward compatibility. Every panel's
+own ids were namespaced (`db-`/`dq-`/`gt-`/`gm-` prefixes) and its script
+wrapped in an IIFE so the four merged pages' identically-named globals
+(`$`, `esc`, `api`, `state`, `init`) can't collide; each panel's first fetch
+is lazy (fires on that tab's first activation, not on page load), so
+visiting one tool doesn't silently also pay for the other three's queries.
+Shared nav shipped as a small `nav.js` (`deploy/site/`, plus a FastAPI
+`/nav.js` fallback route for the documented no-Caddy local-dev workflow),
+replacing the hand-written, inconsistent `<span class="nav">` line each
+page carried before. `/status` stayed out, per decision 1 below. The home
+page's "More tools" grid (both `app/static/index.html` and the actually-
+live `deploy/site/index.html` — a duplication found and fixed along the
+way, not in the original design) regrouped into "Explore the data" (one
+tile now) and "Operate."
 
 ### The problem, measured, not just felt
 
