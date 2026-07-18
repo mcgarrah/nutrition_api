@@ -8,7 +8,8 @@
 #   Landing hub    /            Status dashboard  /status
 #   Barcode lookup /lookup      Search by name     /search
 #   GPC browser    /gpc         GPC mapping viewer /gpc/mappings
-#   Data browser   /data        API docs   /docs, /redoc, /openapi.json
+#   Data browser   /data        Data quality dashboard /data/analytics
+#   API docs   /docs, /redoc, /openapi.json
 #   JSON API       /api/*
 #
 # The routing lives in caddy/site.caddy and is imported by each site block, so

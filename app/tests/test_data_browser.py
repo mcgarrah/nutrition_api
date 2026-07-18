@@ -119,6 +119,101 @@ def test_coverage_reports_non_null_percentages(fixture_store):
     assert pct["note"] == 50.0                    # 2 of 4 non-null
 
 
+# ── numeric_columns / histogram ─────────────────────────────────────────
+
+def test_numeric_columns_finds_the_real_and_integer_typed_ones(fixture_store):
+    # id (INTEGER) and qty (REAL) are numeric; name/note (TEXT) are not.
+    assert db.numeric_columns("demo", "items") == ["id", "qty"]
+
+
+def test_numeric_columns_of_an_unknown_table_is_none(fixture_store):
+    assert db.numeric_columns("demo", "nonexistent") is None
+
+
+def test_numeric_columns_is_sqlite_only(monkeypatch):
+    monkeypatch.setattr(db, "_STORES", dict(store=db._STORES["store"]))
+    assert db.numeric_columns("store", "off/product") is None
+
+
+def test_histogram_buckets_sum_to_the_non_null_count(fixture_store):
+    # qty: 100.0, None, 40.0, 0.0 -- 3 non-null of 4 rows.
+    h = db.histogram("demo", "items", "qty", bins=4)
+    assert h["non_null"] == 3
+    assert h["total"] == 4
+    assert h["min"] == 0.0
+    assert h["max"] == 100.0
+    assert sum(b["count"] for b in h["buckets"]) + h["below_range"] + h["above_range"] == 3
+
+
+def test_histogram_of_a_column_with_a_single_distinct_value(fixture_store):
+    """Every non-null value identical -- one bucket, not a divide-by-zero on
+    an empty (max - min) range."""
+    conn = sqlite3.connect(fixture_store.path)
+    conn.execute("UPDATE items SET qty = 5.0 WHERE qty IS NOT NULL")
+    conn.commit()
+    conn.close()
+    db._cache.clear()  # force a re-read; the mtime may not have ticked
+
+    h = db.histogram("demo", "items", "qty", bins=10)
+    assert h["min"] == h["max"] == 5.0
+    assert len(h["buckets"]) == 1
+    assert h["buckets"][0]["count"] == 3
+
+
+def test_histogram_of_no_non_null_values_returns_empty_buckets(fixture_store):
+    conn = sqlite3.connect(fixture_store.path)
+    conn.execute("CREATE TABLE empty_nums (v REAL)")
+    conn.executemany("INSERT INTO empty_nums VALUES (?)", [(None,), (None,)])
+    conn.commit()
+    conn.close()
+    db._cache.clear()
+
+    h = db.histogram("demo", "empty_nums", "v", bins=5)
+    assert h["non_null"] == 0
+    assert h["buckets"] == []
+
+
+def test_histogram_of_an_unknown_column_is_none(fixture_store):
+    assert db.histogram("demo", "items", "nonexistent", bins=5) is None
+
+
+def test_histogram_bins_are_clamped_to_a_sane_range(fixture_store):
+    assert db.histogram("demo", "items", "qty", bins=0)["buckets"]  # clamped to >= 1
+    assert len(db.histogram("demo", "items", "qty", bins=9999)["buckets"]) <= 50
+
+
+# ── /api/v1/data/{store}/numeric-columns and /histogram routes ─────────
+
+def test_numeric_columns_route_returns_the_column_list(fixture_store):
+    body = client.get("/api/v1/data/demo/numeric-columns", params={"table": "items"}).json()
+    assert body["columns"] == ["id", "qty"]
+
+
+def test_numeric_columns_route_404s_on_an_unknown_table(fixture_store):
+    resp = client.get("/api/v1/data/demo/numeric-columns", params={"table": "nope"})
+    assert resp.status_code == 404
+
+
+def test_histogram_route_returns_buckets(fixture_store):
+    params = {"table": "items", "column": "qty", "bins": 4}
+    body = client.get("/api/v1/data/demo/histogram", params=params).json()
+    assert body["non_null"] == 3
+    assert len(body["buckets"]) == 4
+
+
+def test_histogram_route_404s_on_an_unknown_column(fixture_store):
+    params = {"table": "items", "column": "nope"}
+    resp = client.get("/api/v1/data/demo/histogram", params=params)
+    assert resp.status_code == 404
+
+
+def test_histogram_route_rejects_a_bins_value_outside_the_bounds(fixture_store):
+    too_few = {"table": "items", "column": "qty", "bins": 0}
+    too_many = {"table": "items", "column": "qty", "bins": 51}
+    assert client.get("/api/v1/data/demo/histogram", params=too_few).status_code == 422
+    assert client.get("/api/v1/data/demo/histogram", params=too_many).status_code == 422
+
+
 # ── The response store (file adapter) ─────────────────────────────────
 
 def test_the_response_store_is_browsable_as_namespaces(monkeypatch):

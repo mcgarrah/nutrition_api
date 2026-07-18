@@ -191,6 +191,122 @@ def _row_count(s, conn, table):
                    lambda: conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0])
 
 
+_NUMERIC_TYPES = ("REAL", "INTEGER", "NUM", "FLOAT", "DOUBLE")
+
+
+def _sqlite_numeric_columns(s, table):
+    def compute():
+        conn = s._conn()
+        try:
+            if table not in _tables(conn):
+                return None
+            return [c["name"] for c in _columns(conn, table)
+                    if any(t in (c["type"] or "").upper() for t in _NUMERIC_TYPES)]
+        finally:
+            conn.close()
+    if not s.path.exists():
+        return None
+    return _cached((s.id, table, "numeric_columns"), s.path.stat().st_mtime, compute)
+
+
+def _percentile(conn, table, column, p):
+    """The value at the p-th percentile (0-100) of a numeric column, via the
+    standard offset-into-sorted-order trick -- SQLite has no PERCENTILE_CONT.
+    One sort per call; only ever called twice per histogram (p1, p99), not
+    once per bucket.
+    """
+    n = conn.execute(
+        f'SELECT COUNT("{column}") FROM "{table}" WHERE "{column}" IS NOT NULL'
+    ).fetchone()[0]
+    if n == 0:
+        return None
+    offset = max(0, min(n - 1, round(n * p / 100)))
+    row = conn.execute(
+        f'SELECT "{column}" FROM "{table}" WHERE "{column}" IS NOT NULL '
+        f'ORDER BY "{column}" LIMIT 1 OFFSET ?',
+        (offset,),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _sqlite_histogram(s, table, column, bins):
+    def compute():
+        conn = s._conn()
+        try:
+            if table not in _tables(conn):
+                return None
+            names = [c["name"] for c in _columns(conn, table)]
+            if column not in names:
+                return None
+            true_min, true_max, non_null = conn.execute(
+                f'SELECT MIN("{column}"), MAX("{column}"), COUNT("{column}") FROM "{table}"'
+            ).fetchone()
+            total = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+            if true_min is None or non_null == 0:
+                return {"min": None, "max": None, "non_null": 0, "total": total,
+                        "below_range": 0, "above_range": 0, "buckets": []}
+            if true_min == true_max:
+                # A single distinct value: one bucket, not a divide-by-zero.
+                return {"min": true_min, "max": true_max, "non_null": non_null,
+                        "total": total, "below_range": 0, "above_range": 0,
+                        "buckets": [{"lo": true_min, "hi": true_max, "count": non_null}]}
+
+            # Bin the 1st-99th percentile range, not the true min-max. A
+            # single garbage value (a raw mirror can carry one -- e.g. a
+            # calories_kcal in the 10^16 range that app/core/nutrients.py's
+            # physical-max check would reject at lookup time, but which is
+            # still sitting in the unfiltered local copy) would otherwise
+            # stretch equal-width bins across a range 99.9% of real values
+            # never come near, collapsing the actual distribution into one
+            # bucket. below_range/above_range count what got clipped, so an
+            # outlier is reported, not hidden.
+            lo = _percentile(conn, table, column, 1)
+            hi = _percentile(conn, table, column, 99)
+            if lo == hi:
+                lo, hi = true_min, true_max
+
+            width = (hi - lo) / bins
+            bounds = [
+                (lo + i * width, hi if i == bins - 1 else lo + (i + 1) * width)
+                for i in range(bins)
+            ]
+            # One pass, one SUM(CASE...) per bucket rather than `bins` separate
+            # queries -- the same "single scan over N expressions" shape as
+            # _sqlite_coverage's per-column COUNT. The last bucket's upper
+            # bound is inclusive (<=) so the maximum in-range value is
+            # counted; every other bucket is a half-open [lo, hi) so no value
+            # is double-counted at a boundary. Boundaries are bound
+            # parameters, not interpolated into the SQL text, the same
+            # discipline this module applies everywhere else -- computed
+            # internally here, not user input, but no reason for an exception.
+            exprs = [
+                'SUM(CASE WHEN "{c}" < ? THEN 1 ELSE 0 END)'.format(c=column),
+                'SUM(CASE WHEN "{c}" > ? THEN 1 ELSE 0 END)'.format(c=column),
+            ]
+            params = [lo, hi]
+            for i, (b_lo, b_hi) in enumerate(bounds):
+                op = "<=" if i == bins - 1 else "<"
+                exprs.append(
+                    f'SUM(CASE WHEN "{column}" >= ? AND "{column}" {op} ? THEN 1 ELSE 0 END)')
+                params.extend([b_lo, b_hi])
+            row = conn.execute(
+                f'SELECT {", ".join(exprs)} FROM "{table}" WHERE "{column}" IS NOT NULL',
+                params,
+            ).fetchone()
+            below_range, above_range, *counts = row
+            buckets = [{"lo": b_lo, "hi": b_hi, "count": counts[i] or 0}
+                       for i, (b_lo, b_hi) in enumerate(bounds)]
+            return {"min": true_min, "max": true_max, "non_null": non_null,
+                    "total": total, "below_range": below_range or 0,
+                    "above_range": above_range or 0, "buckets": buckets}
+        finally:
+            conn.close()
+    if not s.path.exists():
+        return None
+    bins = max(1, min(int(bins), 50))
+    return _cached((s.id, table, column, bins, "histogram"), s.path.stat().st_mtime, compute)
+
+
 def _sqlite_coverage(s, table):
     def compute():
         conn = s._conn()
@@ -398,6 +514,33 @@ def coverage(store_id, table):
         return None
     fn = _sqlite_coverage if s.kind == "sqlite" else _filestore_coverage
     return fn(s, table)
+
+
+def numeric_columns(store_id, table):
+    """Column names in `table` worth histogramming (REAL/INTEGER-typed).
+
+    SQLite-only -- the response store's file-backed "tables" are already a
+    fixed four columns (key/fetched_at/schema_version/payload), none numeric.
+    """
+    s = get_store(store_id)
+    if not s or s.kind != "sqlite" or not s.available():
+        return None
+    return _sqlite_numeric_columns(s, table)
+
+
+def histogram(store_id, table, column, bins=20):
+    """Bucketed value distribution for one numeric column.
+
+    Not just non-null coverage (see `coverage`) -- a column that's 95%
+    populated but every value clustered at one boundary (e.g. a nutrient
+    capped at the physical-max sanity bound in app/core/nutrients.py) reads
+    identically to a healthy column under a pure null-rate check. SQLite-only,
+    same reasoning as `numeric_columns`.
+    """
+    s = get_store(store_id)
+    if not s or s.kind != "sqlite" or not s.available():
+        return None
+    return _sqlite_histogram(s, table, column, bins)
 
 
 def record(store_id, table, key):

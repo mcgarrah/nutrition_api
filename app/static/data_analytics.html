@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nutrition API — Data Quality Dashboard</title>
+<style>
+  :root {
+    --surface-0: #f2f2f0; --surface-1: #fcfcfb; --surface-2: #e9e9e5;
+    --border: #dedddA; --text-primary: #0b0b0b; --text-secondary: #52514e;
+    --text-muted: #78776f; --qa: #0f7a6c; --qa-soft: #dcf0ec;
+    --fdc: #2a78d6; --fdc-soft: #dbe9fb; --off: #b57e00; --off-soft: #f3e6c8;
+    --good: #1a8a3e; --bad: #c8322f; --bad-soft: #f8dedd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-0: #101010; --surface-1: #1a1a19; --surface-2: #242320;
+      --border: #35342f; --text-primary: #fff; --text-secondary: #c3c2b7;
+      --text-muted: #8f8e84; --qa: #4fc9b8; --qa-soft: #17302c;
+      --fdc: #6ba7ea; --fdc-soft: #1e2c3d; --off: #d9a53a; --off-soft: #3a2f16;
+      --good: #58c877; --bad: #ef6b68; --bad-soft: #3a2220;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 1.75rem 1rem 4rem; background: var(--surface-0);
+    color: var(--text-primary); font: 14.5px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; margin-bottom: .3rem; }
+  h1 { font-size: 1.35rem; margin: 0; letter-spacing: -.01em; }
+  h1 .g { color: var(--qa); }
+  .nav { margin-left: auto; font-size: .8125rem; } .nav a { color: var(--text-secondary); }
+  .sub { color: var(--text-secondary); font-size: .8125rem; margin: 0 0 1.25rem; max-width: 68ch; }
+  a { color: var(--fdc); }
+
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1rem 1.15rem; margin-bottom: 1rem;
+  }
+  .card h2 {
+    font-size: .75rem; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--text-muted); margin: 0 0 .8rem; font-weight: 700;
+    display: flex; align-items: center; gap: .5rem;
+  }
+  .card p.note { font-size: .8125rem; color: var(--text-secondary); margin: -.3rem 0 .8rem; }
+  .muted { color: var(--text-muted); }
+  .loading { color: var(--text-muted); font-size: .875rem; padding: .5rem 0; }
+
+  /* top stat tiles */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: .8rem .9rem; }
+  .tile .v { font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  .tile .l { font-size: .75rem; color: var(--text-muted); }
+
+  /* source cards */
+  .sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .8rem; }
+  .source { border: 1px solid var(--border); border-radius: 10px; padding: .8rem .9rem; background: var(--surface-0); }
+  .source h3 { margin: 0 0 .5rem; font-size: .9375rem; display: flex; align-items: center; gap: .4rem; }
+  .source .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .source .dot.ok { background: var(--good); } .source .dot.bad { background: var(--bad); }
+  .source dl { margin: 0; font-size: .8125rem; }
+  .source dl div { display: flex; justify-content: space-between; gap: .5rem; padding: .15rem 0; border-bottom: 1px dashed var(--border); }
+  .source dl div:last-child { border-bottom: 0; }
+  .source dt { color: var(--text-muted); } .source dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+
+  /* gpc matching gauges */
+  .gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+  .gauge .top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: .3rem; }
+  .gauge .name { font-size: .875rem; font-weight: 600; }
+  .gauge .pct { font-size: 1.1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .gauge .track { height: 10px; border-radius: 5px; background: var(--surface-2); overflow: hidden; }
+  .gauge .fill { height: 100%; border-radius: 5px; background: var(--qa); }
+  .gauge .sub { font-size: .75rem; color: var(--text-muted); margin-top: .3rem; }
+
+  /* nutrient coverage comparison */
+  .cov-head { display: grid; grid-template-columns: 150px 1fr 42px 1fr 42px; gap: .3rem .7rem; font-size: .625rem;
+    text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); padding: 0 0 .35rem; }
+  .cov-row { display: grid; grid-template-columns: 150px 1fr 42px 1fr 42px; gap: .3rem .7rem; align-items: center; padding: .2rem 0; }
+  .cov-row .fname { font-size: .8125rem; font-family: ui-monospace, Menlo, monospace; }
+  .cov-row .track { height: 9px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+  .cov-row .fill.fdc { height: 100%; background: var(--fdc); }
+  .cov-row .fill.off { height: 100%; background: var(--off); }
+  .cov-row .p { text-align: right; font-size: .75rem; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+  .legend { display: flex; gap: 1rem; font-size: .75rem; color: var(--text-secondary); margin-top: .6rem; }
+  .legend span { display: inline-flex; align-items: center; gap: .35rem; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  /* distribution explorer */
+  .dist-toolbar { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; margin-bottom: .8rem; }
+  select { padding: .4rem .6rem; font-size: .8125rem; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-primary); font: inherit; }
+  .dist-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 720px) { .dist-grid { grid-template-columns: 1fr; } }
+  .hist-card h4 { margin: 0 0 .3rem; font-size: .8125rem; display: flex; align-items: center; gap: .4rem; }
+  .hist-card .stat-line { font-size: .75rem; color: var(--text-muted); margin-bottom: .5rem; font-variant-numeric: tabular-nums; }
+  .hist-bars { display: flex; align-items: flex-end; gap: 2px; height: 120px; border-bottom: 1px solid var(--border); }
+  .hist-bars .bar { flex: 1; background: var(--qa); border-radius: 2px 2px 0 0; min-height: 1px; }
+  .hist-bars .bar.fdc { background: var(--fdc); } .hist-bars .bar.off-src { background: var(--off); }
+  .hist-axis { display: flex; justify-content: space-between; font-size: .6875rem; color: var(--text-muted); margin-top: .25rem; font-variant-numeric: tabular-nums; }
+  .clip-note { font-size: .6875rem; color: var(--bad); margin-top: .3rem; }
+
+  footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: .75rem; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="g">Data Quality</span> Dashboard</h1>
+    <span class="nav"><a href="/">← Home</a> · <a href="/lookup">Barcode lookup</a> · <a href="/search">Search</a> · <a href="/gpc/mappings">GPC mappings</a> · <a href="/data">Data Browser</a> · <a href="/status">Status</a></span>
+  </header>
+  <p class="sub">
+    Not operational health (see <a href="/status">/status</a> for that) — how good is the data itself: dataset
+    freshness, per-field completeness, value distributions, and GPC category-matching coverage, for a data engineer
+    or analyst deciding what's usable. Read-only, computed live. See PLAN.md item 6.
+  </p>
+
+  <div class="tiles" id="tiles"><p class="loading">Loading…</p></div>
+
+  <div class="card">
+    <h2>Data sources</h2>
+    <div class="sources" id="sources"><p class="loading">Loading…</p></div>
+  </div>
+
+  <div class="card">
+    <h2>GPC category-matching coverage</h2>
+    <p class="note">Two separate measurements, not one combined figure — they cover different things. See
+      <a href="/gpc/mappings">/gpc/mappings</a> for the full curated-entry lists.</p>
+    <div class="gauges" id="gauges"><p class="loading">Loading…</p></div>
+  </div>
+
+  <div class="card">
+    <h2>Nutrient field coverage — FDC vs. OFF</h2>
+    <p class="note">Non-null % per nutrient in each local mirror — which fields are usable as ML features, and
+      which source is the better one for a given nutrient.</p>
+    <div id="nutrientCoverage"><p class="loading">Loading…</p></div>
+    <div class="legend">
+      <span><span class="swatch" style="background:var(--fdc)"></span>USDA FDC</span>
+      <span><span class="swatch" style="background:var(--off)"></span>Open Food Facts</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Value distributions</h2>
+    <p class="note">Binned over the 1st–99th percentile range so a single garbage outlier can't collapse the
+      histogram — clipped counts are reported below each chart, not hidden. Computed on request (a few seconds
+      the first time for a column, then cached).</p>
+    <div class="dist-toolbar">
+      <label for="storeSel" class="muted" style="font-size:.8125rem">Source</label>
+      <select id="storeSel">
+        <option value="fdc">USDA FDC (foods)</option>
+        <option value="off">Open Food Facts (products)</option>
+      </select>
+      <label for="colSel" class="muted" style="font-size:.8125rem">Column</label>
+      <select id="colSel"></select>
+    </div>
+    <div class="dist-grid" id="distGrid">
+      <p class="muted">Pick a column above to load its distribution for both sources.</p>
+    </div>
+  </div>
+
+  <footer>Read-only, computed live from the local FDC/OFF/GPC bulk copies. Full-corpus scans (coverage, distributions) are cached by the source file's own mtime — the first request after a rebuild is slow, everything after is fast.</footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const api = p => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)));
+const fmtNum = n => typeof n === "number" ? n.toLocaleString() : (n ?? "—");
+const fmtPct = n => typeof n === "number" ? n.toFixed(1) + "%" : "—";
+
+function fillClass(pct) {
+  if (pct == null) return "";
+  if (pct === 0) return "dead";
+  if (pct >= 99.5) return "full";
+  return "";
+}
+
+function renderTiles(a) {
+  const fdc = a.sources.fdc, off = a.sources.off, gpc = a.sources.gpc;
+  const fdcCov = a.gpc_matching.fdc_curated, revCov = a.gpc_matching.reviewed;
+  const tiles = [
+    { v: fmtNum(fdc.barcodes), l: "FDC barcodes" },
+    { v: fmtNum(off.products), l: "OFF products" },
+    { v: fmtNum(gpc.bricks), l: "GPC bricks" },
+    { v: fdcCov ? fmtPct(fdcCov.coverage_pct) : "—", l: "FDC categories curated" },
+    { v: revCov ? fmtPct(revCov.coverage_pct) : "—", l: "OFF tags reviewed" },
+  ];
+  $("tiles").innerHTML = tiles.map(t => `<div class="tile"><div class="v">${t.v}</div><div class="l">${t.l}</div></div>`).join("");
+}
+
+function sourceCard(label, s, extra) {
+  if (!s || s.status !== "ok") {
+    return `<div class="source"><h3><span class="dot bad"></span>${label}</h3>
+      <p class="muted" style="font-size:.8125rem">${s ? esc(s.detail || s.status) : "unavailable"}</p></div>`;
+  }
+  const rows = extra.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("");
+  return `<div class="source"><h3><span class="dot ok"></span>${label}</h3><dl>${rows}</dl></div>`;
+}
+
+function renderSources(a) {
+  const { fdc, off, gpc } = a.sources;
+  $("sources").innerHTML = [
+    sourceCard("USDA FDC", fdc, [
+      ["dataset", fdc.dataset], ["barcodes", fmtNum(fdc.barcodes)],
+      ["source date", (fdc.source_modified || "").slice(0, 10)],
+      ["imported", (fdc.imported_at || "").slice(0, 10)], ["size", fdc.size_mb + " MB"],
+    ]),
+    sourceCard("Open Food Facts", off, [
+      ["dataset", off.dataset], ["products", fmtNum(off.products)],
+      ["source date", (off.source_modified || "").slice(0, 10)],
+      ["imported", (off.imported_at || "").slice(0, 10)], ["size", off.size_mb + " MB"],
+    ]),
+    sourceCard("GS1 GPC", gpc, [
+      ["version", gpc.version], ["bricks", fmtNum(gpc.bricks)], ["classes", fmtNum(gpc.classes)],
+      ["families", fmtNum(gpc.families)], ["imported", (gpc.imported_at || "").slice(0, 10)],
+    ]),
+  ].join("");
+}
+
+function gauge(name, cov, pctLabel, denomLabel, unit) {
+  if (!cov) {
+    return `<div class="gauge"><div class="top"><span class="name">${esc(name)}</span></div>
+      <p class="muted" style="font-size:.8125rem">Local copy not available.</p></div>`;
+  }
+  return `
+    <div class="gauge">
+      <div class="top"><span class="name">${esc(name)}</span><span class="pct">${fmtPct(cov.coverage_pct)}</span></div>
+      <div class="track"><div class="fill" style="width:${cov.coverage_pct}%"></div></div>
+      <div class="sub">${fmtNum(pctLabel(cov))} of ${fmtNum(denomLabel(cov))} ${esc(unit)}</div>
+    </div>`;
+}
+
+function renderGauges(a) {
+  const fdcCov = a.gpc_matching.fdc_curated, revCov = a.gpc_matching.reviewed;
+  $("gauges").innerHTML =
+    gauge("fdc_curated — FDC categories", fdcCov,
+          c => c.covered_foods, c => c.total_categorized_foods, "categorized foods") +
+    gauge("reviewed — OFF tags", revCov,
+          c => c.covered_occurrences, c => c.total_tag_occurrences, "tag occurrences");
+}
+
+function renderNutrientCoverage(a) {
+  const rows = a.nutrient_coverage.map(f => `
+    <div class="cov-row">
+      <span class="fname">${esc(f.field)}</span>
+      <div class="track"><div class="fill fdc ${fillClass(f.fdc_pct)}" style="width:${f.fdc_pct ?? 0}%"></div></div>
+      <span class="p">${fmtPct(f.fdc_pct)}</span>
+      <div class="track"><div class="fill off ${fillClass(f.off_pct)}" style="width:${f.off_pct ?? 0}%"></div></div>
+      <span class="p">${fmtPct(f.off_pct)}</span>
+    </div>`).join("");
+  $("nutrientCoverage").innerHTML = `
+    <div class="cov-head"><span>Field</span><span>FDC</span><span></span><span>OFF</span><span></span></div>
+    ${rows}`;
+}
+
+// ── Value distribution explorer ─────────────────────────────────────
+
+function histogramHtml(label, cls, h) {
+  if (!h || !h.buckets.length) {
+    return `<div class="hist-card"><h4>${esc(label)}</h4><p class="muted" style="font-size:.8125rem">No numeric data.</p></div>`;
+  }
+  const maxCount = Math.max(...h.buckets.map(b => b.count), 1);
+  const bars = h.buckets.map(b =>
+    `<div class="bar ${cls}" style="height:${Math.max(1, b.count / maxCount * 100)}%" title="[${b.lo.toFixed(2)}, ${b.hi.toFixed(2)}) -> ${fmtNum(b.count)}"></div>`
+  ).join("");
+  const clipped = (h.below_range || 0) + (h.above_range || 0);
+  return `
+    <div class="hist-card">
+      <h4>${esc(label)}</h4>
+      <div class="stat-line">min ${fmtNum(h.min)} · max ${fmtNum(h.max)} · ${fmtNum(h.non_null)} of ${fmtNum(h.total)} non-null</div>
+      <div class="hist-bars">${bars}</div>
+      <div class="hist-axis"><span>${h.buckets[0].lo.toFixed(1)}</span><span>${h.buckets[h.buckets.length - 1].hi.toFixed(1)}</span></div>
+      ${clipped ? `<div class="clip-note">${fmtNum(h.below_range)} below · ${fmtNum(h.above_range)} above the 1st–99th percentile range shown (not lost, just off this chart)</div>` : ""}
+    </div>`;
+}
+
+async function loadColumnsFor(store) {
+  const table = store === "fdc" ? "foods" : "products";
+  const d = await api(`/api/v1/data/${store}/numeric-columns?table=${table}`);
+  return d.columns;
+}
+
+async function populateColumnSelect() {
+  const store = $("storeSel").value;
+  const cols = await loadColumnsFor(store);
+  const preferred = "calories_kcal";
+  $("colSel").innerHTML = cols.map(c => `<option value="${esc(c)}" ${c === preferred ? "selected" : ""}>${esc(c)}</option>`).join("");
+  await loadDistribution();
+}
+
+async function loadDistribution() {
+  const column = $("colSel").value;
+  if (!column) return;
+  $("distGrid").innerHTML = `<p class="loading">Loading distribution for "${esc(column)}"…</p>`;
+  const [fdcHist, offHist] = await Promise.all([
+    api(`/api/v1/data/fdc/histogram?table=foods&column=${encodeURIComponent(column)}&bins=16`).catch(() => null),
+    api(`/api/v1/data/off/histogram?table=products&column=${encodeURIComponent(column)}&bins=16`).catch(() => null),
+  ]);
+  $("distGrid").innerHTML =
+    histogramHtml(`USDA FDC — ${column}`, "fdc", fdcHist) +
+    histogramHtml(`Open Food Facts — ${column}`, "off-src", offHist);
+}
+
+async function init() {
+  const a = await api("/api/v1/data/analytics");
+  renderTiles(a);
+  renderSources(a);
+  renderGauges(a);
+  renderNutrientCoverage(a);
+
+  $("storeSel").addEventListener("change", populateColumnSelect);
+  $("colSel").addEventListener("change", loadDistribution);
+  await populateColumnSelect();
+}
+
+init().catch(e => {
+  $("tiles").innerHTML = `<p class="muted">Failed to load: ${esc(e.message)}</p>`;
+});
+</script>
+</body>
+</html>

@@ -94,6 +94,7 @@ proxies the application and API paths to the backend on `127.0.0.1:8080`:
 | `/search` | search by product name (backend) |
 | `/gpc`, `/gpc/mappings` | GPC browser, GPC mapping viewer (backend) |
 | `/data` | data browser (backend) |
+| `/data/analytics` | data quality & coverage dashboard (backend) |
 | `/docs`, `/redoc`, `/openapi.json` | API docs (backend) |
 | `/api/*` | JSON API (backend) |
 

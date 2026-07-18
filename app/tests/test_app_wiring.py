@@ -166,9 +166,17 @@ def test_gpc_browser_is_served():
     assert "GPC Browser" in resp.text
 
 
+def test_data_analytics_dashboard_is_served():
+    resp = client.get("/data/analytics")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert "Data Quality Dashboard" in resp.text
+
+
 def test_static_pages_are_excluded_from_the_openapi_schema():
     paths = client.get("/openapi.json").json()["paths"]
-    for page in ("/", "/lookup", "/gpc", "/data", "/search", "/gpc/mappings"):
+    for page in ("/", "/lookup", "/gpc", "/data", "/search", "/gpc/mappings",
+                 "/data/analytics"):
         assert page not in paths
 
 
