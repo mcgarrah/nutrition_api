@@ -67,7 +67,8 @@ RELEASE_REPO = os.environ.get("OFF_RELEASE_REPO", "mcgarrah/nutrition_api")
 RELEASE_ASSET = "off.sqlite3.xz"
 
 NUTRIENT_FIELDS = [spec.field for spec in NUTRIENTS]
-SCHEMA_VERSION = "1"
+# 2: added products_fts (name search moved off a leading-wildcard LIKE scan).
+SCHEMA_VERSION = "2"
 BATCH = 20_000
 
 # The text columns we keep, mapped from OFF's CSV names. The *_tags columns
@@ -214,6 +215,20 @@ def build(gz_path: Path, out_path: Path, dataset: str) -> dict:
     served = db.execute("SELECT COUNT(*) FROM products").fetchone()[0]
     _step(f"{total:,} rows read, {served:,} usable products kept "
           f"({total - kept:,} skipped, {kept - served:,} deduped)")
+
+    # An FTS5 index over product_name, for GET /api/v1/search — same rationale
+    # as build_fdc_db.py's foods_fts: `products` is WITHOUT ROWID with a TEXT
+    # key, so this is a standalone FTS5 table (not "external content"), joined
+    # back to `products` by gtin14 at query time. gtin14 is UNINDEXED: carried
+    # through for the join, not searched itself.
+    db.execute("""CREATE VIRTUAL TABLE products_fts USING fts5(
+        gtin14 UNINDEXED, product_name,
+        tokenize = 'unicode61 remove_diacritics 2'
+    )""")
+    db.execute("""INSERT INTO products_fts (gtin14, product_name)
+        SELECT gtin14, product_name FROM products WHERE product_name IS NOT NULL""")
+    db.commit()
+    _step("built products_fts (name search index)")
 
     # The source file's own mtime is the export's publish time (download() stamps
     # it from Last-Modified), so recording it pins the build to an exact upstream

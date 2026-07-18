@@ -174,3 +174,30 @@ def test_build_warns_about_a_genuinely_missing_column(tmp_path, caplog):
         bod.build(gz, tmp_path / "off.sqlite3", "off-2026-07-14")
 
     assert any("allergens" in r.message for r in caplog.records)
+
+
+# ── products_fts (name search index) ───────────────────────────────────
+
+def test_build_creates_a_searchable_fts_index(tmp_path):
+    gz = tmp_path / "export.csv.gz"
+    _tiny_export(gz, MODIFIED)
+    out = tmp_path / "off.sqlite3"
+
+    bod.build(gz, out, "off-2026-07-14")
+
+    row = sqlite3.connect(out).execute(
+        "SELECT gtin14 FROM products_fts WHERE products_fts MATCH ?", ('"nutel"*',)
+    ).fetchone()
+    assert row == ("03017620422003",)
+
+
+def test_schema_version_reflects_the_fts_index_addition(tmp_path):
+    gz = tmp_path / "export.csv.gz"
+    _tiny_export(gz, MODIFIED)
+    out = tmp_path / "off.sqlite3"
+
+    bod.build(gz, out, "off-2026-07-14")
+
+    meta = dict(sqlite3.connect(out).execute(
+        "SELECT key, value FROM off_metadata").fetchall())
+    assert meta["schema_version"] == "2"

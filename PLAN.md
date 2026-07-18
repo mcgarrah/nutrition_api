@@ -206,20 +206,36 @@ network call. Guarded by a regression test
 (`test_search_route_is_sync_so_fastapi_runs_it_in_the_threadpool`) that fails
 loudly if the route ever goes back to `async def`.
 
-**(b) Leading-wildcard `LIKE` can never use an index.** Both mirrors are
-scanned with `LIKE '%q%'`, which is a full-table scan by construction.
-SQLite **FTS5** is the right tool: add an FTS5 virtual table over
-(gtin14, product_name / description) to each mirror at build time
-(`scripts/build_fdc_db.py` / `build_off_db.py`), query it with prefix
-matching, keep the `LIKE` path as fallback for mirrors built before the
-schema change. Costs to check before committing: FTS index size on the
-1.2 GB OFF database (likely a few hundred MB — affects the published `.xz`
-release assets and first-startup expansion time), and whether the
-tokenizer's word-splitting changes result quality for hyphenated/accented
-product names (OFF is multilingual). Success looks like: warm search
-< 50 ms, cold search bounded by index size rather than table size, and the
-existing `app/tests/test_search.py` suite passing unchanged against an
-FTS-built fixture.
+**(b) ~~Leading-wildcard `LIKE` can never use an index~~ — FIXED 2026-07-18.**
+Both mirrors were scanned with `LIKE '%q%'`, a full-table scan by
+construction. `scripts/build_fdc_db.py` / `build_off_db.py` now build an
+FTS5 virtual table (`foods_fts` / `products_fts`, schema_version bumped to
+`"2"`) over (`gtin14` UNINDEXED, `description`/`product_name`,
+`unicode61 remove_diacritics 2` tokenizer) alongside the real table.
+`app/core/search.py` queries FTS5 first — each query word becomes a quoted,
+prefix-matched token (`"peanut"*`), ANDed together, ordered by FTS5's `rank`
+— and falls back to the old `LIKE` scan when a mirror predates the schema
+change (checked via `sqlite_master`, not a version number, so an unrefreshed
+mirror degrades gracefully rather than erroring).
+
+Measured against a live copy of the real 1.2 GB OFF mirror, not just the
+unit-test fixtures: building the index took **8.7s** and added **~100 MB**
+(1.2 GB → 1.3 GB — well under the "few hundred MB" estimate). Query latency:
+**9–98 ms** warm (`"organic milk"` 9ms, `"peanut butter"` 24ms, the single
+common word `"chocolate"` 98ms — worst case is a single very-frequent word,
+since `ORDER BY rank` has to score every match before the `LIMIT`), against
+the prior ~17s cold / 0.65s warm `LIKE` scan. Test coverage: new unit tests
+for `_fts_match_expr` and the FTS query path in `test_search.py`, and for
+the two build scripts' new virtual table in `test_fdc_bulk_import.py` /
+`test_build_off_db.py`. Full suite: 804 passed.
+
+Not yet done: the **already-built, currently-deployed** `data/fdc.sqlite3`
+and `data/off.sqlite3` predate this change and have no FTS table — they will
+correctly fall back to the `LIKE` path (slow but not broken) until the next
+`build_fdc_db.py` / `build_off_db.py --auto-update` rebuild republishes them.
+Tokenizer behavior on OFF's non-English/accented product names was not
+separately audited — `remove_diacritics 2` should handle the common case,
+but this wasn't stress-tested against real multilingual rows.
 
 ## 3. Scheduled refresh of the local bulk mirrors
 

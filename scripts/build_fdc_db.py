@@ -68,7 +68,8 @@ DB_PATH = DATA_DIR / "fdc.sqlite3"
 ARCHIVE_PATH = DATA_DIR / "fdc.sqlite3.xz"
 
 NUTRIENT_FIELDS = [spec.field for spec in NUTRIENTS]
-SCHEMA_VERSION = "1"
+# 2: added foods_fts (name search moved off a leading-wildcard LIKE scan).
+SCHEMA_VERSION = "2"
 BATCH = 50_000
 
 # The columns we take from each CSV. Everything else in the bulk dataset —
@@ -341,6 +342,26 @@ def _build_served_table(db) -> tuple[int, int]:
     return served, filled
 
 
+def _build_fts_table(db) -> None:
+    """An FTS5 index over description, for GET /api/v1/search.
+
+    A standalone table, not an FTS5 "external content" table: `foods` is
+    WITHOUT ROWID with a TEXT primary key, and external-content FTS5 needs an
+    INTEGER rowid to link back to. Duplicating the (short) description text
+    into the index is cheap next to the win — a leading-wildcard `LIKE '%q%'`
+    is a full-table scan by construction; FTS5 lets a query use the index.
+    `gtin14` is UNINDEXED: carried through for the join back to `foods`, not
+    searched itself. `unicode61 remove_diacritics 2` casefolds and strips
+    accents, so a search does not need to match them exactly.
+    """
+    db.execute("""CREATE VIRTUAL TABLE foods_fts USING fts5(
+        gtin14 UNINDEXED, description,
+        tokenize = 'unicode61 remove_diacritics 2'
+    )""")
+    db.execute("""INSERT INTO foods_fts (gtin14, description)
+        SELECT gtin14, description FROM foods WHERE description IS NOT NULL""")
+
+
 def build(zip_path: Path, out_path: Path, dataset: str) -> dict:
     """Build the database at `out_path` from the bulk zip. Returns statistics."""
     started = time.time()
@@ -378,6 +399,10 @@ def build(zip_path: Path, out_path: Path, dataset: str) -> dict:
     _step(f"collapsed to {served:,} distinct barcodes "
           f"({branded - served:,} superseded revisions folded in, "
           f"{filled:,} nutrient gaps filled from earlier ones)")
+
+    _build_fts_table(db)
+    db.commit()
+    _step("built foods_fts (name search index)")
 
     # The zip's own mtime is the release's publish time (download() stamps it
     # from Last-Modified), pinning the build to an exact upstream release.

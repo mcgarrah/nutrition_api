@@ -19,9 +19,17 @@ local copy's name text matched, not that no upstream has it. The existing
 GTIN lookup still falls through to the live APIs for a barcode a caller
 already has.
 
+Querying prefers each mirror's FTS5 index (foods_fts / products_fts,
+scripts/build_fdc_db.py / build_off_db.py) over a `LIKE '%q%'` scan: a
+leading wildcard can never use an index, so LIKE is a full-table scan by
+construction — measured at ~17s cold over the 1.2 GB OFF mirror (PLAN.md
+item 2). FTS5 falls back to LIKE automatically for a mirror built before the
+FTS table existed, so an unrefreshed database still works, just slower.
+
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
+import re
 import sqlite3
 
 from . import fdc_local
@@ -30,17 +38,53 @@ from . import off_local
 DEFAULT_RESULTS = 20
 MAX_RESULTS = 50
 
+_WORD = re.compile(r"\w+", re.UNICODE)
+
+
+def _fts_match_expr(query: str) -> str | None:
+    """Turn free text into an FTS5 MATCH expression: a prefix match per word.
+
+    Each word becomes a quoted phrase token immediately followed by `*`
+    (`"peanut"*`), which FTS5 treats as a literal prefix search — quoting
+    neutralizes any FTS5 query-syntax characters the word might otherwise be
+    read as. Words are ANDed together (FTS5's implicit default), so "peanut
+    butter" requires both, in either order, anywhere in the field.
+
+    Returns None if the query has no word characters at all (e.g. "!!!") —
+    not a blank string, which search_products() already rejects earlier.
+    """
+    words = _WORD.findall(query.lower())
+    if not words:
+        return None
+    return " ".join(f'"{w}"*' for w in words)
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+    ).fetchone()
+    return row is not None
+
 
 def _search_fdc(query: str, limit: int) -> list[dict]:
     if not fdc_local.is_available():
         return []
     conn = sqlite3.connect(f"file:{fdc_local.DB_PATH}?mode=ro", uri=True)
     try:
-        rows = conn.execute(
-            "SELECT gtin14, description, brand_owner, brand_name "
-            "FROM foods WHERE description LIKE ? LIMIT ?",
-            (f"%{query}%", limit),
-        ).fetchall()
+        match = _fts_match_expr(query)
+        if match is not None and _table_exists(conn, "foods_fts"):
+            rows = conn.execute(
+                "SELECT f.gtin14, f.description, f.brand_owner, f.brand_name "
+                "FROM foods_fts JOIN foods AS f USING (gtin14) "
+                "WHERE foods_fts MATCH ? ORDER BY rank LIMIT ?",
+                (match, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT gtin14, description, brand_owner, brand_name "
+                "FROM foods WHERE description LIKE ? LIMIT ?",
+                (f"%{query}%", limit),
+            ).fetchall()
     finally:
         conn.close()
     return [
@@ -57,11 +101,20 @@ def _search_off(query: str, limit: int) -> list[dict]:
         return []
     conn = sqlite3.connect(f"file:{off_local.DB_PATH}?mode=ro", uri=True)
     try:
-        rows = conn.execute(
-            "SELECT gtin14, product_name, brands, image_url "
-            "FROM products WHERE product_name LIKE ? LIMIT ?",
-            (f"%{query}%", limit),
-        ).fetchall()
+        match = _fts_match_expr(query)
+        if match is not None and _table_exists(conn, "products_fts"):
+            rows = conn.execute(
+                "SELECT p.gtin14, p.product_name, p.brands, p.image_url "
+                "FROM products_fts JOIN products AS p USING (gtin14) "
+                "WHERE products_fts MATCH ? ORDER BY rank LIMIT ?",
+                (match, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT gtin14, product_name, brands, image_url "
+                "FROM products WHERE product_name LIKE ? LIMIT ?",
+                (f"%{query}%", limit),
+            ).fetchall()
     finally:
         conn.close()
     return [
