@@ -1,0 +1,15 @@
+[Unit]
+Description=Weekly response-store prune (PLAN.md item 8)
+
+[Timer]
+# Weekly is plenty -- records only become prunable after
+# STORE_PRUNE_AFTER_DAYS (default 90), so a week's slack in when the sweep
+# runs changes nothing about what gets kept.
+OnCalendar=weekly
+# Catch up if the box was off at the scheduled time, rather than silently
+# skipping a whole week.
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

@@ -53,6 +53,16 @@ STORE_ENABLED = os.environ.get("RESPONSE_STORE_ENABLED", "1") not in ("0", "fals
 # — so this is measured in days, unlike the in-memory cache's minutes.
 STORE_TTL_DAYS = float(os.environ.get("RESPONSE_STORE_TTL_DAYS", "30"))
 
+# How long a record may sit unpruned after it stops being servable. A
+# multiple of STORE_TTL_DAYS, not the TTL itself: a record just past the
+# serving TTL is still a legitimate, recently-useful one that get() simply
+# treats as stale and lets the caller re-fetch/re-put -- deleting it that
+# early would erase the very re-fetch-avoidance this store exists for. Only
+# a record nobody has re-fetched across several TTL cycles is genuinely
+# unused. See PLAN.md item 8.
+STORE_PRUNE_AFTER_DAYS = float(
+    os.environ.get("RESPONSE_STORE_PRUNE_AFTER_DAYS", str(STORE_TTL_DAYS * 3)))
+
 # The record format. Bump when the envelope changes, so an importer reading an
 # older corpus knows what it is looking at rather than guessing.
 SCHEMA_VERSION = 1
@@ -187,3 +197,76 @@ def stats() -> dict:
         "ttl_days": STORE_TTL_DAYS,
         "records": counts,
     }
+
+
+def prune(older_than_days: float | None = None, dry_run: bool = False) -> dict:
+    """Delete every record older than `older_than_days` (default
+    STORE_PRUNE_AFTER_DAYS), plus any record whose `fetched_at` can't be
+    trusted at all -- unreadable JSON, or a naive timestamp with no offset,
+    the same two cases `get()` already refuses to serve. A record `get()`
+    will never serve again is worth zero, whatever its age.
+
+    Not called from the request path -- this is for a periodic job (a
+    systemd timer via scripts/prune_response_store.py) to call, the same
+    "administrative sweep, not inline logic" split `import_store_to_
+    sqlite.py` already uses for the corpus-export side of this store.
+
+    `dry_run=True` reports what would be removed without touching disk --
+    the same shape of safety valve `build_off_db.py --check` gives before a
+    real rebuild.
+
+    Returns {"scanned", "removed", "bytes_freed", "errors"} -- a summary a
+    caller can log or alert on, not just a side effect.
+    """
+    threshold = STORE_PRUNE_AFTER_DAYS if older_than_days is None else older_than_days
+    cutoff = utcnow() - timedelta(days=threshold)
+    result = {"scanned": 0, "removed": 0, "bytes_freed": 0, "errors": 0}
+
+    if not STORE_DIR.exists():
+        return result
+
+    for path in STORE_DIR.rglob("*.json"):
+        result["scanned"] += 1
+        prunable = False
+        try:
+            record = json.loads(path.read_text())
+            when = datetime.fromisoformat(record.get("fetched_at", ""))
+            prunable = when.tzinfo is None or when < cutoff
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
+            logger.warning("Pruning unreadable store record %s: %s", path, e)
+            prunable = True
+
+        if not prunable:
+            continue
+
+        try:
+            size = path.stat().st_size
+            if not dry_run:
+                path.unlink()
+            result["removed"] += 1
+            result["bytes_freed"] += size
+        except OSError as e:
+            logger.warning("Could not prune %s: %s", path, e)
+            result["errors"] += 1
+
+    if not dry_run:
+        _prune_empty_dirs(STORE_DIR)
+
+    return result
+
+
+def _prune_empty_dirs(root: Path) -> None:
+    """Remove the now-empty two-level shard directories prune() leaves
+    behind, bottom-up, without touching `root` itself. Cosmetic (an empty
+    directory costs nothing on disk), but data/responses/ is something a
+    person browses (via the Data Browser) and a script walks
+    (iter_records/stats' rglob), and both read easier without thousands of
+    dead leaf directories accumulating forever.
+    """
+    for path in sorted(root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if path == root or not path.is_dir():
+            continue
+        try:
+            path.rmdir()  # only succeeds if already empty
+        except OSError:
+            pass
