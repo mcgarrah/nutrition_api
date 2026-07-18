@@ -1,0 +1,23 @@
+[Unit]
+Description=Prune the Nutrition API response store (PLAN.md item 8)
+Documentation=https://github.com/mcgarrah/nutrition_api
+
+[Service]
+Type=oneshot
+User=mcgarrah
+Group=mcgarrah
+WorkingDirectory=/opt/nutrition_api
+
+ExecStart=/opt/nutrition_api/.venv/bin/python3 scripts/prune_response_store.py
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nutrition-api-prune
+
+# Same sandboxing as nutrition-api.service, minimal since this only deletes
+# files under data/ -- no network, no listening socket.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/nutrition_api/data

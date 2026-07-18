@@ -78,6 +78,35 @@ If you don't need LAN/tailnet access to the raw backend, bind uvicorn to
 `127.0.0.1` in `ExecStart` instead and skip the firewall rules — simpler, and
 nothing but Caddy can ever reach port 8080 at all.
 
+### Response store pruning (PLAN.md item 8)
+
+`data/responses/` (the on-disk cache of upstream responses, see `app/core/
+store.py`) has a serving TTL but nothing that ever deleted an aged-out file —
+the directory could only grow. `nutrition-api-prune.timer` runs
+`scripts/prune_response_store.py` weekly, removing anything past
+`RESPONSE_STORE_PRUNE_AFTER_DAYS` (default: 3x the serving TTL, 90 days) or
+with an unreadable/untrustworthy timestamp.
+
+```bash
+sudo install -m 644 deploy/nutrition-api-prune.service /etc/systemd/system/
+sudo install -m 644 deploy/nutrition-api-prune.timer /etc/systemd/system/
+sudo systemd-analyze verify /etc/systemd/system/nutrition-api-prune.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now nutrition-api-prune.timer
+```
+
+```bash
+sudo systemctl list-timers nutrition-api-prune.timer   # next scheduled run
+sudo systemctl start nutrition-api-prune.service        # run it right now
+sudo journalctl -u nutrition-api-prune -f                # follow its logs
+```
+
+Preview what a run would remove without deleting anything:
+
+```bash
+cd /opt/nutrition_api && .venv/bin/python3 scripts/prune_response_store.py --dry-run
+```
+
 ## Caddy (public front — TLS + landing page)
 
 `Caddyfile` puts a [Caddy](https://caddyserver.com/) reverse proxy in front of
@@ -92,9 +121,8 @@ proxies the application and API paths to the backend on `127.0.0.1:8080`:
 | `/caddy-health` | Caddy itself (proxy liveness) |
 | `/lookup` | barcode (GTIN/UPC) lookup tester (backend) |
 | `/search` | search by product name (backend) |
-| `/gpc`, `/gpc/mappings` | GPC browser, GPC mapping viewer (backend) |
-| `/data` | data browser (backend) |
-| `/data/analytics` | data quality & coverage dashboard (backend) |
+| `/data` | the data explorer (backend) — four tabs on one page: Data Browser, Data Quality, GPC Taxonomy, GPC Mappings (PLAN.md item 11) |
+| `/gpc`, `/gpc/mappings`, `/data/analytics` | redirect into the right `/data` tab (backend) — kept working for old links, not separate pages any more |
 | `/docs`, `/redoc`, `/openapi.json` | API docs (backend) |
 | `/api/*` | JSON API (backend) |
 

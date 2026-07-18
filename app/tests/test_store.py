@@ -122,6 +122,124 @@ def test_a_naive_timestamp_is_refused():
     assert store.get(store.OFF_PRODUCT, "1") is None
 
 
+# ══ prune() (PLAN.md item 8) ═════════════════════════════════════════
+
+def _age_record(namespace, key, days):
+    path = store.path_for(namespace, key)
+    record = json.loads(path.read_text())
+    record["fetched_at"] = (
+        datetime.now(timezone.utc) - timedelta(days=days)
+    ).isoformat()
+    path.write_text(json.dumps(record))
+
+
+def test_prune_removes_only_records_past_the_prune_age():
+    store.put(store.OFF_PRODUCT, "old", {"a": 1})
+    store.put(store.OFF_PRODUCT, "young", {"a": 1})
+    _age_record(store.OFF_PRODUCT, "old", store.STORE_PRUNE_AFTER_DAYS + 1)
+    _age_record(store.OFF_PRODUCT, "young", store.STORE_PRUNE_AFTER_DAYS - 1)
+
+    result = store.prune()
+
+    assert result["scanned"] == 2
+    assert result["removed"] == 1
+    assert result["errors"] == 0
+    assert result["bytes_freed"] > 0
+    assert store.path_for(store.OFF_PRODUCT, "old").exists() is False
+    assert store.path_for(store.OFF_PRODUCT, "young").exists() is True
+
+
+def test_prune_does_not_remove_a_record_thats_merely_past_the_serving_ttl():
+    """The whole point of a separate prune age: a record just past
+    STORE_TTL_DAYS is stale (get() won't serve it) but still recently
+    useful -- deleting it that early would erase the re-fetch-avoidance
+    the store exists for."""
+    store.put(store.OFF_PRODUCT, "1", {"a": 1})
+    _age_record(store.OFF_PRODUCT, "1", store.STORE_TTL_DAYS + 1)
+    assert store.get(store.OFF_PRODUCT, "1") is None      # stale, not served
+
+    result = store.prune()
+
+    assert result["removed"] == 0                          # but not yet prunable
+    assert store.path_for(store.OFF_PRODUCT, "1").exists()
+
+
+def test_prune_removes_a_record_with_a_naive_timestamp():
+    """get() already refuses to serve this; prune() should not let it sit
+    forever just because its age can't be computed."""
+    store.put(store.OFF_PRODUCT, "1", {"a": 1})
+    path = store.path_for(store.OFF_PRODUCT, "1")
+    record = json.loads(path.read_text())
+    record["fetched_at"] = datetime.now().isoformat()      # no tzinfo
+    path.write_text(json.dumps(record))
+
+    result = store.prune()
+
+    assert result["removed"] == 1
+    assert path.exists() is False
+
+
+def test_prune_removes_an_unreadable_record():
+    path = store.path_for(store.OFF_PRODUCT, "1")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{ not json")
+
+    result = store.prune()
+
+    assert result["removed"] == 1
+    assert result["errors"] == 0
+    assert path.exists() is False
+
+
+def test_prune_honours_an_explicit_older_than_days():
+    store.put(store.OFF_PRODUCT, "1", {"a": 1})
+    _age_record(store.OFF_PRODUCT, "1", 10)
+
+    assert store.prune(older_than_days=20)["removed"] == 0
+    assert store.prune(older_than_days=5)["removed"] == 1
+
+
+def test_dry_run_reports_without_deleting():
+    store.put(store.OFF_PRODUCT, "1", {"a": 1})
+    _age_record(store.OFF_PRODUCT, "1", store.STORE_PRUNE_AFTER_DAYS + 1)
+
+    result = store.prune(dry_run=True)
+
+    assert result["removed"] == 1
+    assert store.path_for(store.OFF_PRODUCT, "1").exists()   # not actually deleted
+
+
+def test_prune_cleans_up_now_empty_shard_directories():
+    store.put(store.OFF_PRODUCT, "1", {"a": 1})
+    _age_record(store.OFF_PRODUCT, "1", store.STORE_PRUNE_AFTER_DAYS + 1)
+    leaf = store.path_for(store.OFF_PRODUCT, "1").parent
+
+    store.prune()
+
+    assert leaf.exists() is False
+    assert store.STORE_DIR.exists()          # the root itself is left alone
+
+
+def test_prune_on_an_empty_or_missing_store_is_a_noop(tmp_path, monkeypatch):
+    monkeypatch.setattr(store, "STORE_DIR", tmp_path / "does-not-exist")
+
+    assert store.prune() == {"scanned": 0, "removed": 0, "bytes_freed": 0, "errors": 0}
+
+
+def test_prune_itself_has_no_store_enabled_gate(monkeypatch):
+    """store.prune() deliberately does not check STORE_ENABLED -- an operator
+    running it explicitly (or the script) should get an honest answer about
+    what's actually sitting on disk, not a silent no-op just because reads/
+    writes are currently turned off. scripts/prune_response_store.py is
+    where that gate lives, one layer up."""
+    store.put(store.OFF_PRODUCT, "1", {"a": 1})
+    _age_record(store.OFF_PRODUCT, "1", store.STORE_PRUNE_AFTER_DAYS + 1)
+
+    monkeypatch.setattr(store, "STORE_ENABLED", False)
+
+    assert store.prune()["removed"] == 1
+
+
 # ══ Robustness ════════════════════════════════════════════════════════
 
 def test_a_corrupt_record_is_ignored_not_fatal():
