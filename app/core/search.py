@@ -126,22 +126,29 @@ def _search_off(query: str, limit: int) -> list[dict]:
     ]
 
 
-def search_products(query: str, limit: int = DEFAULT_RESULTS) -> list[dict]:
-    """Search both local copies by product name, merged and deduplicated by GTIN.
+def search_products(query: str, limit: int = DEFAULT_RESULTS, sources: str = "both") -> list[dict]:
+    """Search local copies by product name, merged and deduplicated by GTIN.
 
     OFF is queried first and wins a collision: it is the source with real
     product photos and is the more consistent brand field for consumer-facing
     text. A GTIN found only in FDC is still returned rather than dropped —
     half a result is better than a missing one, and the popup that opens on
     a click resolves the rest through the normal merged lookup anyway.
+
+    `sources` scopes the search to one mirror ("fdc" or "off") or both
+    (default) -- an excluded mirror's query is skipped entirely, not just
+    filtered out of the merged result afterward.
     """
     query = query.strip()
     if not query:
         return []
     limit = max(1, min(limit, MAX_RESULTS))
 
-    merged: dict[str, dict] = {r["gtin"]: r for r in _search_off(query, limit)}
-    for r in _search_fdc(query, limit):
-        merged.setdefault(r["gtin"], r)
+    merged: dict[str, dict] = (
+        {r["gtin"]: r for r in _search_off(query, limit)} if sources in ("both", "off") else {}
+    )
+    if sources in ("both", "fdc"):
+        for r in _search_fdc(query, limit):
+            merged.setdefault(r["gtin"], r)
 
     return list(merged.values())[:limit]

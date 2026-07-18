@@ -39,6 +39,15 @@ def search_by_name(
         search.DEFAULT_RESULTS, ge=1, le=search.MAX_RESULTS,
         description="Maximum results to return",
     ),
+    sources: str = Query(
+        "both",
+        pattern="^(both|fdc|off)$",
+        description=(
+            "Scope the search to one local mirror: both (default), fdc "
+            "(USDA FoodData Central only), or off (Open Food Facts only). "
+            "An excluded mirror is not queried at all."
+        ),
+    ),
 ):
     """Search the local FDC and OFF bulk copies by product name.
 
@@ -51,7 +60,7 @@ def search_by_name(
     not that no upstream has it. Local copies are only as fresh as their last
     import, and this endpoint does not fall through to a live search.
     """
-    results = search.search_products(q, limit)
+    results = search.search_products(q, limit, sources)
     return SearchResponse(
         query=q,
         results=[SearchResult(**r) for r in results],

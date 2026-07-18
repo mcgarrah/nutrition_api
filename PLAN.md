@@ -86,37 +86,6 @@ hand while building each table (`hierarchy_for_brick`/`hierarchy_for_class`
 against the real `gpc.sqlite3`), just automated and run on every taxonomy
 refresh instead of once at curation time.
 
-## 10. Advanced filters for `/search` and `/lookup` (collapsed by default)
-
-**Status:** not started, exploration only. Requested 2026-07-19.
-
-Both query forms are a single field today. `/search` (`app/static/search.html`)
-is just a text input submitting to `GET /api/v1/search?q=...&limit=...`;
-`search_products()` always queries *both* local mirrors and merges
-(`app/core/search.py:129-147`) with no way to scope to one. `/lookup`
-(`app/static/lookup.html`) is a barcode field against
-`GET /api/v1/lookup/{gtin}`, whose only extra parameter is `fresh` (bypass
-every cache and force a live call) — nothing today lets a caller scope
-*which* sources participate, only whether cached results are trusted.
-
-Idea: a hidden "Advanced" disclosure under each form (`<details>/<summary>`,
-closed by default so the common one-field case is unchanged), opening to
-offer a **source scope** — "Both (default)" / "USDA FDC only" / "Open Food
-Facts only" — plus whatever other typical advanced options prove worth
-adding once this gets designed (candidates to weigh, not commitments: a
-"local mirrors only, never fall through to a live upstream" toggle for
-`/lookup`, the inverse of `fresh`; exposing the `limit` param `/search`'s
-API already has but the UI doesn't; a brand/category filter, which
-`search.py` has no column support for yet).
-
-Not sketched yet: the API shape (a new query param threaded through
-`search_products()`/`orchestrator.lookup()` to skip the excluded source's
-local and upstream calls entirely, not just filter results after the
-fact — a real latency win for the source skipped, not just a UI
-convenience), and how `orchestrator.lookup()`'s current source-fanout
-structure would need to change to make a source actually skippable. Explore
-before committing to a design.
-
 # Longer term
 
 Real, decided work — not a vague idea — but not being picked up right now.
@@ -860,3 +829,45 @@ Resolved directly with the user, 2026-07-19:
 - **Slow-load indicator** (follow-up, same day): `showLoading()`, declared
   in the page's shared (unwrapped) tab-controller script so all four
   panels can call it, wired into each panel's slow-path entry point.
+
+## 10. ~~Advanced filters for `/search` and `/lookup`~~ — DONE 2026-07-19
+
+**Status:** shipped 2026-07-19.
+
+**What shipped:** a source-scope filter for both endpoints — `sources=both`
+(default) / `fdc` / `off` — plus `/search`'s UI exposing its already-
+existing `limit` param. Both pages gained a closed-by-default
+`<details>` "Advanced" disclosure (`.adv`/`.adv-row`, styled with each
+page's own existing tokens) so the common one-field case is unchanged.
+
+**API**: `orchestrator.lookup(gtin, fresh=False, sources="both")` and
+`search.search_products(query, limit=..., sources="both")`. An excluded
+source is skipped entirely — no local-mirror read, no live-API call, not
+filtered out of a merged result afterward — so a `sources=off` lookup also
+skips the GPC `fdc_curated` tier (which needs FDC's own category) and a
+`sources=fdc` lookup skips the `reviewed`/`off_fuzzy` tiers (which need
+OFF's tags), same as if that source had genuinely returned nothing.
+
+**A caching bug caught before it shipped:** the in-memory lookup cache is
+keyed only on GTIN, not on `sources` — a naive implementation would have
+let a `sources=fdc` lookup's partial (FDC-only) result get cached and then
+silently served to a later *unscoped* request for the same GTIN, quietly
+dropping the OFF/GPC data that caller expected. Fixed by only reading from
+or writing to the cache when `sources == "both"`; a scoped lookup always
+re-fetches, exactly like `fresh=True` already forces, but without needing
+`fresh` to also mean "and don't populate the cache for other callers."
+Regression test (`test_a_scoped_lookup_is_never_cached_nor_reads_the_
+cache`) exercises both directions.
+
+**Deliberately not built this round**, per the item's own original
+"candidates to weigh, not commitments" list:
+- A "local mirrors only, never fall through to a live upstream" toggle for
+  `/lookup` — the inverse of `fresh`.
+- A brand/category filter for `/search` — `search.py` has no column
+  support for it yet.
+
+Verified with Playwright against the real local mirrors: the Advanced
+panel is closed by default on both pages; `sources=fdc`/`sources=off`
+correctly change the outgoing request and the rendered result (source
+badges on `/lookup`, source labels on `/search`); `/search`'s `limit`
+field is honored end to end.

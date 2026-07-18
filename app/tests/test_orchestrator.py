@@ -116,3 +116,48 @@ async def test_empty_result_is_not_cached(monkeypatch):
     await orchestrator.lookup("00000000000000")
 
     assert calls["off"] == 2  # misses are retried, not cached
+
+
+# ── sources= scoping (PLAN.md item 10) ───────────────────────────────────
+
+async def test_sources_off_skips_the_usda_fetch_entirely(monkeypatch, off_product):
+    calls = _patch_sources(monkeypatch, off_data=off_product, usda_data="should never be seen")
+
+    product = await orchestrator.lookup("04963406021372", sources="off")
+
+    assert calls["usda"] == 0  # never awaited, not just filtered out after
+    assert calls["off"] == 1
+    assert product.data_sources == ["OpenFoodFacts"]
+    assert "USDA_FDC" not in product.upstream_latency_ms
+    assert "OpenFoodFacts" in product.upstream_latency_ms
+
+
+async def test_sources_fdc_skips_the_off_fetch_entirely(monkeypatch, usda_food):
+    calls = _patch_sources(monkeypatch, usda_data=usda_food)
+
+    product = await orchestrator.lookup("04963406021372", sources="fdc")
+
+    assert calls["off"] == 0  # never awaited, not just filtered out after
+    assert calls["usda"] == 1
+    assert product.data_sources == ["USDA_FDC"]
+    assert "OpenFoodFacts" not in product.upstream_latency_ms
+    assert "USDA_FDC" in product.upstream_latency_ms
+
+
+async def test_a_scoped_lookup_is_never_cached_nor_reads_the_cache(
+        monkeypatch, off_product, usda_food):
+    calls = _patch_sources(monkeypatch, off_data=off_product, usda_data=usda_food)
+
+    # Two identical scoped requests must each genuinely re-fetch -- a scoped
+    # result must never satisfy a later request for the same GTIN, whether
+    # scoped the same way or not.
+    await orchestrator.lookup("04963406021372", sources="fdc")
+    await orchestrator.lookup("04963406021372", sources="fdc")
+    assert calls["usda"] == 2
+
+    # And a scoped lookup must not have populated the shared cache with a
+    # partial (FDC-only) product that a later unscoped "both" request could
+    # silently receive in place of the real merged one.
+    both = await orchestrator.lookup("04963406021372")
+    assert set(both.data_sources) == {"OpenFoodFacts", "USDA_FDC"}
+    assert calls["off"] == 1  # the "both" call is the first real OFF fetch

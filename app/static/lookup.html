@@ -68,10 +68,21 @@
   button:disabled { opacity: .55; cursor: progress; }
 
   .fresh {
-    display: flex; align-items: center; gap: .45rem; margin-bottom: 1rem;
+    display: flex; align-items: center; gap: .45rem; margin-bottom: .5rem;
     font-size: .8125rem; color: var(--text-secondary); cursor: pointer;
   }
   .fresh input { accent-color: var(--src-off); cursor: pointer; }
+
+  /* Advanced disclosure -- closed by default, so the common one-field case
+     is unchanged (PLAN.md item 10). */
+  .adv { margin-bottom: 1.25rem; font-size: .8125rem; }
+  .adv summary { cursor: pointer; color: var(--text-secondary); user-select: none; }
+  .adv summary:hover { color: var(--text-primary); }
+  .adv-row { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; margin-top: .6rem; }
+  .adv-row label { color: var(--text-secondary); }
+  .adv-row select {
+    padding: .35rem .5rem; font-size: .8125rem; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-primary); font: inherit; }
 
   .samples { display: flex; flex-wrap: wrap; gap: .375rem; margin-bottom: 1.75rem; }
   .chip {
@@ -174,6 +185,18 @@
     <input type="checkbox" id="fresh">
     Skip cache — query the live upstream APIs (slower; ignores the local copies)
   </label>
+
+  <details class="adv">
+    <summary>Advanced</summary>
+    <div class="adv-row">
+      <label for="advSources">Source</label>
+      <select id="advSources">
+        <option value="both" selected>Both (default)</option>
+        <option value="fdc">USDA FDC only</option>
+        <option value="off">Open Food Facts only</option>
+      </select>
+    </div>
+  </details>
 
   <div class="samples" id="samples"></div>
 
@@ -376,9 +399,13 @@ async function lookup() {
   $("go").disabled = true;
   $("out").innerHTML = `<div class="card"><p class="sub" style="margin:0">Looking up ${esc(gtin)}…</p></div>`;
   const t0 = performance.now();
-  const fresh = $("fresh").checked ? "?fresh=true" : "";
+  const params = new URLSearchParams();
+  if ($("fresh").checked) params.set("fresh", "true");
+  const sources = $("advSources").value;
+  if (sources !== "both") params.set("sources", sources);
+  const qs = params.toString();
   try {
-    const res = await fetch(`/api/v1/lookup/${encodeURIComponent(gtin)}${fresh}`);
+    const res = await fetch(`/api/v1/lookup/${encodeURIComponent(gtin)}${qs ? "?" + qs : ""}`);
     const rtt = performance.now() - t0;
     const body = await res.json();
     res.ok ? render(body, rtt) : renderError(res.status, body, rtt);

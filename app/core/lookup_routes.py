@@ -36,6 +36,18 @@ async def lookup_product(
             "have. The result refreshes the caches for subsequent requests."
         ),
     ),
+    sources: str = Query(
+        "both",
+        pattern="^(both|fdc|off)$",
+        description=(
+            "Scope which upstreams participate: both (default), fdc "
+            "(USDA FoodData Central only), or off (Open Food Facts only). "
+            "An excluded source is skipped entirely — no local-mirror read, "
+            "no live-API call, no GPC matching that depends on it — not "
+            "merely filtered out afterward. Only a `both` lookup uses the "
+            "in-memory cache; a scoped lookup always re-fetches."
+        ),
+    ),
 ):
     """Look up a food product by its GTIN/UPC barcode.
 
@@ -51,7 +63,7 @@ async def lookup_product(
       local bulk copy (with its dataset date) or the live API
     - The `upstream_latency_ms` field shows per-source response times
     """
-    product = await orchestrator.lookup(gtin, fresh=fresh)
+    product = await orchestrator.lookup(gtin, fresh=fresh, sources=sources)
 
     if not product.data_sources:
         raise HTTPException(

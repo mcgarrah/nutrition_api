@@ -91,7 +91,7 @@ def test_fresh_query_param_is_forwarded_to_the_orchestrator(monkeypatch):
     """?fresh=true must reach orchestrator.lookup as fresh=True."""
     seen = {}
 
-    async def fake_lookup(gtin, fresh=False):
+    async def fake_lookup(gtin, fresh=False, sources="both"):
         seen["fresh"] = fresh
         return CanonicalProduct(gtin=gtin, data_sources=["USDA_FDC"])
 
@@ -102,3 +102,29 @@ def test_fresh_query_param_is_forwarded_to_the_orchestrator(monkeypatch):
 
     client.get("/api/v1/lookup/028400642255")
     assert seen["fresh"] is False
+
+
+def test_sources_query_param_is_forwarded_to_the_orchestrator(monkeypatch):
+    """?sources=fdc must reach orchestrator.lookup as sources="fdc"; the
+    default (param omitted) must arrive as "both"."""
+    seen = {}
+
+    async def fake_lookup(gtin, fresh=False, sources="both"):
+        seen["sources"] = sources
+        return CanonicalProduct(gtin=gtin, data_sources=["USDA_FDC"])
+
+    monkeypatch.setattr(orchestrator, "lookup", fake_lookup)
+
+    client.get("/api/v1/lookup/028400642255?sources=fdc")
+    assert seen["sources"] == "fdc"
+
+    client.get("/api/v1/lookup/028400642255?sources=off")
+    assert seen["sources"] == "off"
+
+    client.get("/api/v1/lookup/028400642255")
+    assert seen["sources"] == "both"
+
+
+def test_sources_query_param_rejects_an_unknown_value():
+    resp = client.get("/api/v1/lookup/028400642255?sources=bogus")
+    assert resp.status_code == 422

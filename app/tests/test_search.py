@@ -258,6 +258,32 @@ def test_missing_local_copies_degrade_to_no_results(tmp_path, monkeypatch):
     assert search.search_products("tomatoes") == []
 
 
+# ── sources= scoping (PLAN.md item 10) ────────────────────────────────
+
+def test_sources_fdc_excludes_a_match_that_only_off_has(local_dbs):
+    """"coca-cola" only matches in the OFF fixture -- sources="fdc" must
+    return nothing, not silently fall through to OFF."""
+    assert search.search_products("coca-cola", sources="fdc") == []
+    assert search.search_products("coca-cola", sources="both") != []
+
+
+def test_sources_off_excludes_a_match_that_only_fdc_has(local_dbs):
+    """"raisin bran" only matches in the FDC fixture -- sources="off" must
+    return nothing."""
+    assert search.search_products("raisin bran", sources="off") == []
+    assert search.search_products("raisin bran", sources="both") != []
+
+
+def test_sources_fdc_still_returns_a_barcode_present_in_both(local_dbs):
+    """00072940755050 is in both fixtures; scoped to fdc it must come back
+    under FDC's own name/source, not OFF's (which sources="both" prefers)."""
+    results = search.search_products("tomatoes", sources="fdc")
+
+    assert len(results) == 1
+    assert results[0]["source"] == "USDA_FDC"
+    assert results[0]["product_name"] == "Italian Diced Tomatoes"
+
+
 # ── GET /api/v1/search ───────────────────────────────────────────────
 
 def test_route_returns_the_query_and_results(local_dbs):
@@ -282,5 +308,19 @@ def test_route_honours_the_limit_param(local_dbs):
 
 def test_route_rejects_a_limit_above_the_max(local_dbs):
     resp = client.get("/api/v1/search", params={"q": "a", "limit": search.MAX_RESULTS + 1})
+
+    assert resp.status_code == 422
+
+
+def test_route_honours_the_sources_param(local_dbs):
+    body = client.get("/api/v1/search", params={"q": "coca-cola", "sources": "fdc"}).json()
+    assert body["results"] == []
+
+    body = client.get("/api/v1/search", params={"q": "coca-cola", "sources": "both"}).json()
+    assert len(body["results"]) == 1
+
+
+def test_route_rejects_an_unknown_sources_value(local_dbs):
+    resp = client.get("/api/v1/search", params={"q": "a", "sources": "bogus"})
 
     assert resp.status_code == 422
