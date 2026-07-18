@@ -11,16 +11,24 @@ Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
 import re
+import sqlite3
 
+import pytest
+
+import app.database as database
 from app.core.gpc_match import (
     FDC_CATEGORY_TO_BRICK,
     FDC_CATEGORY_TO_CLASS,
+    _meaningful_words,
+    _fts_match_expr,
     curated_brick_for_fdc_category,
     curated_class_for_fdc_category,
     curated_hierarchy_for_fdc_category,
+    fuzzy_hierarchy_for_off_categories,
     hierarchy_for_brick,
     hierarchy_for_class,
 )
+from .conftest import GPC_ROWS, GPC_SCHEMA
 
 _BRICK_CODE = re.compile(r"^\d{8}$")
 _CLASS_CODE = re.compile(r"^\d{8}$")
@@ -205,3 +213,122 @@ async def test_combined_resolver_of_none_returns_empty(gpc_db):
     from app.database import get_db
     db = await get_db()
     assert await curated_hierarchy_for_fdc_category(db, None) == []
+
+
+# ── _meaningful_words ────────────────────────────────────────────────
+
+def test_meaningful_words_strips_the_language_prefix():
+    assert _meaningful_words("en:cola-drinks") == ["cola"]  # "drinks" is a stopword
+
+
+def test_meaningful_words_lowercases():
+    assert _meaningful_words("en:COLA") == ["cola"]
+
+
+def test_meaningful_words_splits_on_hyphens():
+    assert _meaningful_words("en:carbonated-soft-drinks") == ["carbonated", "soft"]
+
+
+def test_meaningful_words_drops_stopwords():
+    """"beverages" is the documented worst offender (see ARCH.md) -- a
+    literal substring of the brick "Alcoholic Beverages Variety Packs"."""
+    assert _meaningful_words("en:beverages") == []
+    assert _meaningful_words("en:food") == []
+    assert _meaningful_words("en:plant-based-foods-and-beverages") == ["plant"]
+
+
+def test_meaningful_words_drops_short_words():
+    assert _meaningful_words("en:a-to-go") == []
+
+
+def test_meaningful_words_handles_no_language_prefix():
+    assert _meaningful_words("Lemonade") == ["lemonade"]
+
+
+def test_meaningful_words_of_pure_stopwords_is_empty():
+    assert _meaningful_words("en:food-and-beverages") == []
+
+
+# ── _fts_match_expr ──────────────────────────────────────────────────
+
+def test_fts_match_expr_ors_quoted_prefixed_words():
+    assert _fts_match_expr(["cola", "soft"]) == '"cola"* OR "soft"*'
+
+
+def test_fts_match_expr_of_one_word():
+    assert _fts_match_expr(["lemonade"]) == '"lemonade"*'
+
+
+# ── fuzzy_hierarchy_for_off_categories (FTS5 path) ──────────────────────
+
+@pytest.fixture
+def gpc_db_with_fts(tmp_path, monkeypatch):
+    """Same fixture taxonomy as `gpc_db`, plus bricks_fts populated -- as a
+    real scripts/import_gpc_xml.py build now produces -- so these tests
+    exercise the FTS5 query path rather than the LIKE fallback that plain
+    `gpc_db` (no bricks_fts table) exercises."""
+    db_path = tmp_path / "gpc_fixture_fts.sqlite3"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(GPC_SCHEMA)
+    conn.executescript("""CREATE VIRTUAL TABLE bricks_fts USING fts5(
+        brick_code UNINDEXED, description,
+        tokenize = 'unicode61 remove_diacritics 2'
+    )""")
+    for sql, rows in GPC_ROWS:
+        conn.executemany(sql, rows)
+    conn.execute("INSERT INTO bricks_fts (brick_code, description) "
+                 "SELECT brick_code, description FROM bricks")
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(database, "DB_PATH", db_path)
+    monkeypatch.setattr(database, "_db", None)
+    yield db_path
+
+    import asyncio
+    conn = database._db
+    if conn is not None:
+        asyncio.run(conn.close())
+    database._db = None
+
+
+async def test_fuzzy_matches_the_narrowest_tag_first(gpc_db_with_fts):
+    from app.database import get_db
+    db = await get_db()
+    hierarchy = await fuzzy_hierarchy_for_off_categories(
+        db, ["en:nonexistent-thing", "en:lemonade"])
+    assert hierarchy[-1] == "Lemonade"
+
+
+async def test_fuzzy_word_boundary_does_not_bleed_into_an_unrelated_brick(gpc_db_with_fts):
+    """Regression for the documented failure mode: FTS5's prefix match
+    requires the query to be a PREFIX of an indexed token, not a substring
+    anywhere in it. "ola" is a mid-word substring of "Cola" -- under the old
+    `LIKE '%ola%'` it would have matched; under FTS5 it must not, since no
+    token in "Cola Drinks" *starts with* "ola"."""
+    from app.database import get_db
+    db = await get_db()
+    hierarchy = await fuzzy_hierarchy_for_off_categories(db, ["en:ola"])
+    assert hierarchy == []
+
+
+async def test_fuzzy_returns_empty_for_no_tags(gpc_db_with_fts):
+    from app.database import get_db
+    db = await get_db()
+    assert await fuzzy_hierarchy_for_off_categories(db, []) == []
+
+
+async def test_fuzzy_returns_empty_when_every_tag_is_pure_stopwords(gpc_db_with_fts):
+    from app.database import get_db
+    db = await get_db()
+    assert await fuzzy_hierarchy_for_off_categories(db, ["en:food", "en:beverages"]) == []
+
+
+async def test_fuzzy_falls_back_to_like_when_bricks_fts_is_absent(gpc_db):
+    """gpc_db (from conftest) has no bricks_fts table -- a database built
+    before this schema change. The matcher must still work, just via the
+    LIKE fallback."""
+    from app.database import get_db
+    db = await get_db()
+    hierarchy = await fuzzy_hierarchy_for_off_categories(db, ["en:cola-drinks"])
+    assert hierarchy[-1] == "Cola Drinks"

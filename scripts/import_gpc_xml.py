@@ -97,6 +97,17 @@ CREATE TABLE IF NOT EXISTS gpc_metadata (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- FTS5 index over brick descriptions, for the OFF fuzzy category matcher
+-- (app/core/gpc_match.py, fuzzy_hierarchy_for_off_categories). A standalone
+-- table, not FTS5 "external content": bricks' primary key is TEXT
+-- (brick_code), and external-content FTS5 needs an INTEGER rowid to link
+-- back to. brick_code is UNINDEXED -- carried through for the join, not
+-- itself searched.
+CREATE VIRTUAL TABLE IF NOT EXISTS bricks_fts USING fts5(
+    brick_code UNINDEXED, description,
+    tokenize = 'unicode61 remove_diacritics 2'
+);
 """
 
 
@@ -394,6 +405,9 @@ def import_food_gpc(xml_path: str, db_path: Path) -> dict:
                                 (at_code, av_code),
                             )
                             counts["attribute_type_values"] += 1
+
+    conn.execute("""INSERT INTO bricks_fts (brick_code, description)
+        SELECT brick_code, description FROM bricks""")
 
     # Store metadata
     import datetime

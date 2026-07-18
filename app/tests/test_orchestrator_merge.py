@@ -213,15 +213,39 @@ async def test_gpc_matching_is_case_insensitive_via_like(gpc_db):
     assert hierarchy[-1] == "Cola Drinks"
 
 
-async def test_gpc_uses_first_tag_that_matches(gpc_db):
-    """Unmatched tags are skipped, not fatal."""
+async def test_gpc_tries_the_most_specific_tag_first(gpc_db):
+    """OFF orders tags broad -> narrow; the matcher must try narrow -> broad,
+    so a specific tag near the end of the list is not shadowed by a broad
+    one near the front. 'en:lemonade' (narrower) is tried before
+    'en:nonexistent-thing', and matches immediately."""
     hierarchy, _ = await _fetch_gpc_categories(["en:nonexistent-thing", "en:lemonade"])
     assert hierarchy[-1] == "Lemonade"
 
 
-async def test_gpc_only_considers_the_first_three_tags(gpc_db):
-    """OFF products carry long tag lists; we cap the scan."""
+async def test_gpc_falls_through_to_an_earlier_tag_when_the_narrowest_has_no_match(gpc_db):
+    """The narrowest tag is tried first, but an unmatched one must not be
+    fatal -- the next-most-specific tag still gets a chance."""
+    hierarchy, _ = await _fetch_gpc_categories(["en:cola-drinks", "en:nonexistent-thing"])
+    assert hierarchy[-1] == "Cola Drinks"
+
+
+async def test_gpc_considers_more_than_the_old_three_tag_cap(gpc_db):
+    """Regression: the old matcher took OFF's first three tags -- the
+    broadest, least specific ones -- so a specific tag past that point was
+    silently unreachable. 'en:cola-drinks' is the fourth tag here and must
+    still be found."""
     tags = ["en:junk1", "en:junk2", "en:junk3", "en:cola-drinks"]
+    hierarchy, _ = await _fetch_gpc_categories(tags)
+    assert hierarchy[-1] == "Cola Drinks"
+
+
+async def test_gpc_stops_trying_tags_past_the_max(gpc_db):
+    """_MAX_TAGS_TRIED bounds the scan to the narrowest N tags -- a matching
+    tag broader (earlier) than that cutoff is still not found, the same
+    shape of limit the old code had (a fixed cap), just larger and applied
+    from the narrow end instead of the broad one."""
+    from app.core.gpc_match import _MAX_TAGS_TRIED
+    tags = ["en:cola-drinks"] + [f"en:junk{i}" for i in range(_MAX_TAGS_TRIED)]
     hierarchy, _ = await _fetch_gpc_categories(tags)
     assert hierarchy == []
 
