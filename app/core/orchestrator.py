@@ -165,44 +165,21 @@ async def _fetch_usda(barcode: str, fresh: bool = False):
 
 
 async def _fetch_gpc_categories(off_categories: list[str]) -> tuple[list[str], float]:
-    """Try to map OFF category tags to GPC hierarchy via search.
+    """Try to map OFF category tags to GPC hierarchy via gpc_match's fuzzy
+    matcher (FTS5 + stopword filtering + most-specific-tag-first).
 
-    This is a best-effort mapping — OFF categories are informal tags,
-    not GPC codes. We search the GPC bricks for matching terms.
-    Returns (category_list, latency_ms).
+    This is a best-effort mapping — OFF categories are informal tags, not
+    GPC codes. Returns (category_list, latency_ms).
     """
     start = time.monotonic()
     hierarchy = []
-    if not off_categories:
-        return hierarchy, (time.monotonic() - start) * 1000
-
-    try:
-        db = await get_db()
-        # Use the first few OFF category tags as search terms
-        for tag in off_categories[:3]:
-            # OFF tags look like "en:beverages" — extract the label
-            label = tag.split(":")[-1].replace("-", " ") if ":" in tag else tag
-            rows = await db.execute_fetchall(
-                """SELECT b.brick_code, b.description, b.class_code,
-                          c.description AS cls_desc, c.family_code,
-                          f.description AS fam_desc, f.segment_code,
-                          s.description AS seg_desc
-                   FROM bricks b
-                   LEFT JOIN classes c ON b.class_code = c.class_code
-                   LEFT JOIN families f ON c.family_code = f.family_code
-                   LEFT JOIN segments s ON f.segment_code = s.segment_code
-                   WHERE b.description LIKE ?
-                   LIMIT 1""",
-                [f"%{label}%"],
-            )
-            if rows:
-                r = rows[0]
-                parts = [p for p in [r[7], r[5], r[3], r[1]] if p]
-                if parts:
-                    hierarchy = parts
-                    break
-    except Exception as e:
-        logger.warning("GPC category lookup failed: %s", e)
+    if off_categories:
+        try:
+            db = await get_db()
+            hierarchy = await gpc_match.fuzzy_hierarchy_for_off_categories(
+                db, off_categories)
+        except Exception as e:
+            logger.warning("GPC category lookup failed: %s", e)
 
     elapsed = (time.monotonic() - start) * 1000
     return hierarchy, elapsed

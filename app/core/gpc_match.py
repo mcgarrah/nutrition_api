@@ -47,6 +47,7 @@ today's fuzzy matcher choosing an unrelated category outright.
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
+import re
 import sqlite3
 
 # FDC branded_food_category (exact string, as FDC publishes it) -> GPC
@@ -657,6 +658,125 @@ async def curated_hierarchy_for_fdc_category(db, category: str | None) -> list[s
     if cls:
         return await hierarchy_for_class(db, cls)
 
+    return []
+
+
+# ── Fuzzy matching, for Open Food Facts' informal category tags ────────
+#
+# OFF's tags have no closed vocabulary to curate (see this module's
+# docstring), so the honest response is a smarter *matcher*, not a lookup
+# table pretending to be one. This is the promoted version of the prototype
+# from the original investigation (ARCH.md, "GPC Category Matching"), which
+# measured the substring-LIKE matcher this replaces at ~69% false positives
+# on raw hits and reached ~87% recall with three fixes: try the most
+# specific tag first (OFF orders tags broad -> narrow; the old code took the
+# first three -- the broadest, least specific ones), match whole words
+# rather than substrings, and filter out generic words no single hit should
+# be trusted on alone.
+
+_WORD = re.compile(r"[a-z]+")
+
+# Words real OFF category tags carry that are too broad, or too purely
+# grammatical, to trust as the sole signal for a match. "beverages" is the
+# documented case: a literal substring of the brick "Alcoholic Beverages
+# Variety Packs", and that one collision misclassified 110,000+ unrelated
+# products under the old matcher, plain pasta among them. "food"/"products"/
+# "drinks" are the same shape of problem. The connectors ("and", "based",
+# "with", ...) come from compound OFF tags like
+# "plant-based-foods-and-beverages" and carry no category signal at all.
+# Built from real frequency data across ~200k OFF products' category tags,
+# not guessed.
+_STOPWORDS = frozenset({
+    "and", "based", "their", "its", "with", "from", "for", "the",
+    "food", "foods", "beverage", "beverages", "product", "products",
+    "drink", "drinks",
+})
+
+# How many of an OFF product's tags to try, narrowest first, before giving
+# up. Generous rather than tight -- an FTS5 query against ~900 bricks costs
+# microseconds, so there is no real cost to trying more tags, unlike the old
+# per-tag query-the-whole-table-with-LIKE approach this replaces.
+_MAX_TAGS_TRIED = 8
+
+
+def _meaningful_words(tag: str) -> list[str]:
+    """The words in one OFF category tag worth searching bricks for.
+
+    Tags look like "en:carbonated-drinks" -- the language prefix is
+    stripped, the rest is split on non-letters and lowercased, and words
+    under 3 letters or in _STOPWORDS are dropped.
+    """
+    label = tag.split(":", 1)[-1] if ":" in tag else tag
+    words = _WORD.findall(label.lower())
+    return [w for w in words if len(w) > 2 and w not in _STOPWORDS]
+
+
+def _fts_match_expr(words: list[str]) -> str:
+    """OR the words together, each a quoted, prefix-matched token.
+
+    OR, not FTS5's implicit AND: a tag's words rarely all appear verbatim in
+    a brick's short, standardized description, so requiring all of them
+    would under-match. Quoting neutralizes any FTS5 query-syntax characters
+    a word might otherwise be read as (moot here, since _WORD already
+    restricts words to plain letters, but cheap insurance).  ORDER BY rank
+    at the call site does the job the original prototype's manual "prefer
+    the least common word" step did by hand -- FTS5's bm25 ranking already
+    favours whichever brick a query's words distinguish most sharply.
+    """
+    return " OR ".join(f'"{w}"*' for w in words)
+
+
+async def _bricks_fts_exists(db) -> bool:
+    row = await db.execute_fetchall(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'bricks_fts'"
+    )
+    return bool(row)
+
+
+async def _best_brick_for_words(db, words: list[str]) -> str | None:
+    """The brick_code FTS5 ranks highest for these words, or None.
+
+    Falls back to the old substring scan for a gpc.sqlite3 built before
+    bricks_fts existed (checked via sqlite_master, not a schema version, so
+    an unrefreshed database degrades gracefully instead of erroring) -- still
+    an improvement over the pre-2026-07-18 matcher even on the fallback path,
+    since the stopword filtering and most-specific-tag-first ordering apply
+    either way; only the word-boundary and ranking parts are unavailable.
+    """
+    if await _bricks_fts_exists(db):
+        rows = await db.execute_fetchall(
+            "SELECT brick_code FROM bricks_fts WHERE bricks_fts MATCH ? "
+            "ORDER BY rank LIMIT 1",
+            [_fts_match_expr(words)],
+        )
+        return rows[0][0] if rows else None
+
+    like_clause = " OR ".join("description LIKE ?" for _ in words)
+    rows = await db.execute_fetchall(
+        f"SELECT brick_code FROM bricks WHERE {like_clause} LIMIT 1",
+        [f"%{w}%" for w in words],
+    )
+    return rows[0][0] if rows else None
+
+
+async def fuzzy_hierarchy_for_off_categories(db, off_categories: list[str]) -> list[str]:
+    """Best-effort GPC hierarchy from Open Food Facts' informal category tags.
+
+    Tries each tag narrowest-first (OFF orders tags broad -> narrow), and
+    returns the first hierarchy a tag's meaningful words find a brick for.
+    This is the `off_fuzzy` path -- real matches, not verified case by case,
+    which is why CanonicalProduct.category_hierarchy_source grades it below
+    `fdc_curated` rather than treating the two as equally trustworthy.
+    """
+    for tag in reversed(off_categories[-_MAX_TAGS_TRIED:]):
+        words = _meaningful_words(tag)
+        if not words:
+            continue
+        brick = await _best_brick_for_words(db, words)
+        if brick:
+            hierarchy = await hierarchy_for_brick(db, brick)
+            if hierarchy:
+                return hierarchy
     return []
 
 

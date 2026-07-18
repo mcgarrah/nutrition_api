@@ -260,27 +260,52 @@ build logs/failures surface (the `/status` dashboard already shows dataset
 dates, so staleness is at least *visible* today); and whether to prune old
 dated OFF downloads (they are deliberately kept side-by-side today).
 
-## 4. Upgrade the OFF fuzzy GPC matcher to the word-boundary prototype
+## 4. ~~Upgrade the OFF fuzzy GPC matcher to the word-boundary prototype~~ — DONE 2026-07-18
 
-**Status:** not started; the prototype's findings are written up in ARCH.md
-("GPC Category Matching") but the shipped code still uses the old matcher.
+Promoted into `app/core/gpc_match.py` as `fuzzy_hierarchy_for_off_categories`,
+replacing `orchestrator._fetch_gpc_categories`'s inline substring-`LIKE`
+query. Full detail and real-corpus measurements are in ARCH.md, "GPC
+Category Matching" — summary here:
 
-`orchestrator._fetch_gpc_categories` still resolves OFF tags with substring
-`LIKE '%tag%'` against brick descriptions — the exact mechanism the ARCH.md
-investigation measured at **~69% noise** on raw hits (the `en:beverages` →
-"Alcoholic Beverages Variety Packs" failure class). The corrected prototype
-from that investigation — in-memory word index over brick descriptions,
-most-specific-tag-first (OFF orders tags broad → narrow, so iterate
-*backwards*), stopword filtering, prefer-the-least-common-word — reached
-~87% recall with far better precision, and was never promoted into the
-codebase. This item is that promotion: port the prototype into
-`gpc_match.py` beside the curated tables, keep the `off_fuzzy` confidence
-label (the polysemy ceiling — `beans`, `spring` — is documented and real,
-so it stays a hint, not ground truth), and measure before/after noise on a
-sampled corpus the way the original investigation did. The prototype code
-itself was session-scratch and is **not** checked in — it will need
-rebuilding from ARCH.md's description, which is detailed enough to
-reconstruct from.
+- Built on an FTS5 index over brick descriptions (`bricks_fts`, added to
+  `scripts/import_gpc_xml.py`'s schema, same technique as item 2's product
+  search) rather than a hand-rolled word index — `ORDER BY rank` (bm25)
+  does the "prefer the least common word" job the original prototype did by
+  hand, and word-boundary matching comes from FTS5 directly rather than
+  needing to be built.
+- Tags are tried narrowest-first (`reversed`, capped at `_MAX_TAGS_TRIED =
+  8`), fixing the wrong-order bug (old code took the first three — the
+  broadest — tags).
+- A stopword list (`beverages`, `food`, `products`, `drinks`, plus
+  grammatical connectors) built from real frequency counts across ~200k
+  OFF products' category tags, not guessed.
+- Falls back to a (still stopword-filtered, still narrowest-first) `LIKE`
+  scan for a `gpc.sqlite3` built before `bricks_fts` existed, checked via
+  `sqlite_master` — the same graceful-degradation pattern as item 2.
+
+**Measured against the real corpus** (random 2,000-product sample of
+`data/off.sqlite3`): old matcher 53.1% match rate, of which **18.6% were
+literally the documented `Alcoholic Beverages Variety Packs` bug**; new
+matcher 93.0% match rate, and a direct check of five real
+`en:beverages`-tagged pasta products confirms none produce that wrong
+answer any more. **Not measured**: a new overall precision/noise figure to
+replace the original 69% — that required the original investigation's
+manual case-by-case audit, not repeated here, so treat the higher recall as
+real but the precision improvement as plausible-and-partially-verified
+rather than fully quantified. The polysemy ceiling (`beans`, `spring`) is
+unchanged, as expected — it was never a matching-mechanism problem.
+
+Test coverage: unit tests for `_meaningful_words`/`_fts_match_expr`, an FTS
+fixture (`gpc_db_with_fts`) exercising the real query path including a
+regression test that `"ola"` (substring of "Cola" but not a token prefix)
+does *not* match — the exact class of bug FTS5's prefix matching (vs. the
+old substring `LIKE`) rules out — plus the LIKE-fallback path via the
+existing `gpc_db` fixture. Full suite: 821 passed.
+
+**Left for later, not blocking:** a real manual precision audit at the
+scale of the original investigation (item 5, the `reviewed` tier, is
+designed to absorb exactly this kind of review effort once it exists,
+rather than repeating a one-off audit here).
 
 ## 5. `reviewed` tier for fuzzy GPC matches
 
