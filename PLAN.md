@@ -382,3 +382,146 @@ review — the security question that ruled it out this round would need a
 real answer first (an API key? Caddy-level LAN/tailnet-only gating for just
 that route, mirroring how debug endpoints were handled during the earlier
 security-hardening pass?).
+
+## 6. Data quality & coverage dashboard
+
+**Status:** not started. Added 2026-07-18, following a review of what already
+exists vs. what's missing.
+
+**The audience is a data engineer or data analyst, not an operator.**
+`/status` already answers "is the service up" (Caddy, backend, upstream
+reachability). This is a different question: "how good is the data we're
+actually producing, and where are the gaps" — the thing someone would check
+before building an ML feature set on top of this API, or before trusting a
+bulk export of it for analysis.
+
+**Most of the underlying capability already exists, scattered.** Before
+designing anything new, worth being clear about what this item is and is
+not building:
+
+- `GET /api/v1/gpc/mappings` already reports `fdc_curated` and `reviewed`
+  coverage (coverage %, curated entry counts, ranked uncovered
+  categories/tags) — see items 4 and 5. This is the GPC-matching piece the
+  dashboard needs; it's a consumer of that endpoint, not a reimplementation.
+- `GET /api/v1/data/{store}/coverage?table=...` already computes per-column
+  non-null percentage for any table in any store (`data_browser._sqlite_
+  coverage`, mtime-cached) — nutrient field sparsity, dead columns (OFF's
+  `allergens` column is a documented 0%), all already queryable. The
+  existing `/data` browser UI already surfaces this, but one store/table at
+  a time — there's no view that shows all of them together.
+- What's genuinely **not** built yet, and is the real new work here:
+  1. **A single aggregated view.** Pull the above into one page/endpoint
+     instead of requiring someone to click through 4 stores × N tables one
+     at a time. Mechanically simple — fan out to the existing functions,
+     no new analysis logic.
+  2. **Value distributions, not just null-rates.** Non-null coverage
+     doesn't catch a column that's 95% populated but suspiciously clustered
+     at a single value (e.g. nutrient values bunched at exactly the
+     physical-max cutoff `app/core/nutrients.py` enforces, which would mean
+     values are being capped rather than reported — worth knowing before
+     using a field as an ML input). A histogram/percentile summary per
+     numeric column, computed the same cached-by-mtime way as
+     `_sqlite_coverage`.
+  3. **Cross-source agreement.** For GTINs present in *both* `fdc.sqlite3`
+     and `off.sqlite3`, how often do they agree on a given nutrient within
+     some tolerance? Touched on manually this session while verifying the
+     USDA-ingredients-precedence fix (found real disagreement cases) — this
+     item is making that a systematic, queryable statistic instead of a
+     one-off manual spot check.
+  4. **Upstream vs. mirrored ("external repositories").** Each local mirror
+     is a *filtered subset* of what the upstream actually publishes — OFF's
+     ~4.5M-row export becomes ~2.24M kept rows (needs barcode + name + a
+     usable nutrient), FDC's 2.0M branded records collapse to 442,095
+     barcodes. The exclusion counts already get logged during
+     `build_off_db.py`/`build_fdc_db.py` runs (`_step()` messages) but
+     aren't persisted or queryable afterward — this item means recording
+     them (in the mirror's own `*_metadata` table, alongside `dataset`/
+     `source_modified`, the same place dataset provenance already lives)
+     so "what fraction of upstream did we actually keep, and why" survives
+     past the build's own log output.
+
+**Shape:** a new `GET /api/v1/data/analytics` (or similar) endpoint as the
+primary deliverable — JSON first, since the stated audience (a data
+engineer scripting against this) wants machine-readable output, not just a
+page to read. A thin HTML view on top (`/data/analytics` or extending
+`/data` with a new tab), consistent with every other page in this app being
+a view over its own JSON API, not the other way around.
+
+**Open questions before starting:** whether per-column distributions need
+their own cache table (a full percentile computation over 2.24M rows per
+numeric column, repeated across dozens of nutrient columns, may not be as
+cheap as the existing single-pass null-count query — needs measuring against
+the real `off.sqlite3`/`fdc.sqlite3` before committing to "compute on
+request, cache by mtime" vs. "compute once at build time, store the
+summary"); and how much of "external repositories" should also mean the
+*sibling code packages* (`usda-fdc`, `gs1-gpc`, `nutrimetrics`, ...) rather
+than just the upstream *data* sources — this item assumes data sources, but
+worth confirming before designing the exact scope.
+
+## 7. Automated dependency vulnerability scanning in CI
+
+**Status:** not started. Found during a platform review, 2026-07-18.
+
+`pip-audit` was run once, by hand, during the earlier security-hardening
+session (PR #38) — it is not part of `.github/workflows/ci.yml`, which
+currently runs flake8, pytest, the node static-page tests, and a Docker
+build, nothing dependency-scanning shaped. A CVE disclosed in `fastapi`,
+`pydantic`, or any other pinned dependency *after* that one-time check would
+never be caught. No Dependabot config either (`.github/dependabot.yml`
+doesn't exist).
+
+Sketch: add a `pip-audit` step to the existing `test` job (fails the build
+on a known vulnerability, same bar as flake8/pytest already failing it) or
+a separate scheduled job (weekly, since a new CVE can appear without any
+code change here to trigger CI) — worth deciding which before starting,
+since a PR-blocking scan and a scheduled advisory scan serve different
+purposes and this codebase doesn't need to choose only one. A minimal
+`dependabot.yml` (pip + github-actions ecosystems) covers the "keep
+versions current" half separately from the "block on known-bad" half.
+
+## 8. Response store retention
+
+**Status:** not started. Found during a platform review, 2026-07-18.
+
+`app/core/store.py` has `get`/`put` and a `TTL_DAYS` (default 30) that
+governs whether a record is still fresh enough to *serve* without
+re-fetching — but nothing ever deletes a record past that age. Checked: no
+`remove`/`prune`/`cleanup` function exists anywhere in the module. A record
+for a barcode nobody looks up again simply stays on disk forever; the
+directory can only grow. Small today (76 KB, 27 files on the reference
+LXC), but this is a store with no ceiling on a service meant to run
+long-term, and `data/` is the one path `nutrition-api.service`'s systemd
+sandboxing grants write access to (`ReadWritePaths`) — worth bounding
+before it's a real disk-exhaustion question instead of a hypothetical one.
+
+Sketch: a `prune(older_than_days=STORE_TTL_DAYS * N)` function (a multiple
+of the serving TTL, not the TTL itself — a record just past 30 days but
+still occasionally re-served-stale-then-refreshed is different from one
+untouched for 6 months) run from a systemd timer, the same mechanism item 3
+already proposes for the mirror rebuilds — a natural place to fold this in
+rather than standing up a second scheduling mechanism.
+
+## 9. Curated GPC code staleness check
+
+**Status:** not started. Found during a platform review, 2026-07-18.
+
+`FDC_CATEGORY_TO_BRICK`/`_CLASS` and `OFF_TAG_TO_BRICK`/`_CLASS` hard-code
+GPC brick/class codes verified against one specific GS1 taxonomy version at
+curation time. `scripts/import_gpc_xml.py` auto-updates the taxonomy when
+GS1 publishes a newer one — if GS1 ever retires or renumbers a code between
+versions, the corresponding curated entry doesn't error, it just silently
+starts resolving to an empty hierarchy (`hierarchy_for_brick`/
+`hierarchy_for_class` return `[]` for an unknown code, by design, so an
+unresolved *lookup* code degrades gracefully — but an unresolved *curated*
+code degrading the same way is a regression nobody would notice, since it
+looks identical to "no curated entry exists for this category/tag" rather
+than "a curated entry broke"). No check anywhere currently confirms every
+curated code still resolves against the *current* live taxonomy.
+
+Sketch: a small script (or a step folded into `import_gpc_xml.py --auto-
+update`, right after a successful rebuild) that resolves every code in all
+four curated tables against the freshly-imported database and logs/alerts
+on any that come back empty — the same verification method already used by
+hand while building each table (`hierarchy_for_brick`/`hierarchy_for_class`
+against the real `gpc.sqlite3`), just automated and run on every taxonomy
+refresh instead of once at curation time.
