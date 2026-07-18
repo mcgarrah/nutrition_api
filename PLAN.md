@@ -688,3 +688,114 @@ fact — a real latency win for the source skipped, not just a UI
 convenience), and how `orchestrator.lookup()`'s current source-fanout
 structure would need to change to make a source actually skippable. Explore
 before committing to a design.
+
+## 11. Consolidate the ad-hoc explorer/debug pages into one coherent set
+
+**Status:** not started — planning only, for review before any code changes.
+Flagged 2026-07-19: these pages were added one at a time, each to support
+whatever was being developed at the time, never designed as a set — the
+user's framing is that this is a debugging/dev feature that was "just
+thrown together," and it reads that way to someone landing on the site new.
+
+### The problem, measured, not just felt
+
+Eight pages make up the browser-facing surface today:
+
+| Page | Route | Purpose |
+|---|---|---|
+| Home | `/` | Entry point: barcode lookup vs. name search, plus a "More tools" grid |
+| Barcode lookup | `/lookup` | Look up one GTIN, see the merged Nutrition Facts card |
+| Name search | `/search` | Search local FDC/OFF copies by name, then lookup (item 2) |
+| GPC taxonomy browser | `/gpc` | Browse Segment → Family → Class → Brick → Attributes |
+| GPC mapping viewer | `/gpc/mappings` | Curated FDC/OFF-category → GPC-code mappings, resolved, with coverage (items 4/5) |
+| Data Browser | `/data` | Raw schema/rows/column-coverage over the 4 local stores |
+| Data Quality Dashboard | `/data/analytics` | Aggregated coverage, value distributions, cross-source agreement (item 6) |
+| Status | `/status` | Caddy/backend/upstream health |
+
+Each page hand-writes its own `<span class="nav">...</span>` footer-nav line
+— copy-pasted per file, not a shared component — and the six that share the
+pattern (`/lookup` uses a slightly different inline format) each link a
+*different* subset of the others, in different order, with different labels
+for the same target. Checked line by line, not estimated:
+
+- **`/gpc` is labelled three different ways** across the pages that link it
+  at all: "GPC taxonomy" (`data.html`, `gpc_mappings.html`), "GPC"
+  (`search.html`), "GPC browser" (`lookup.html`) — and `data_analytics.html`
+  doesn't link it at all.
+- **`/data` (Data Browser) is missing from `gpc.html` and `lookup.html`'s
+  nav entirely.**
+- **`/status` appears in only 2 of 6** navs (`data.html`,
+  `data_analytics.html`); `/docs` appears in only 1 (`gpc.html`, plus
+  `lookup.html`'s own differently-formatted footer).
+- **`/data/analytics`, the newest and most substantial page (item 6),
+  is missing from `index.html`'s "More tools" grid entirely** — reachable
+  only by already being on another explorer page, or by typing the URL.
+- `deploy/site/status.html` is the structural odd one out: it's a
+  Caddy-served static file under `deploy/site/`, on a completely different
+  deploy path from the other seven, which are all `app/static/*.html`
+  served through `main.py` `FileResponse` routes — despite matching the same
+  CSS custom-property design language (`--surface-0`, `--accent`, etc.),
+  it's maintained and shipped separately.
+
+None of this is a functional bug — every page still works, every link that
+exists still resolves — it's discoverability and coherence: there is no
+single place that tells a newcomer "here are the N things you can do here,"
+grouped by what they're for.
+
+### Sketch: two separable questions, not one
+
+**1. Shared navigation, not per-page copies.** Whatever the final page
+inventory is, the nav should be written once and included everywhere.
+Options, roughly in order of how much they disturb the current no-build-step
+static-file setup:
+  - A small vanilla-JS include: one `nav.js` exporting a `{href, label,
+    group}` array, injected into a placeholder element on page load. No new
+    dependency, fits every page's existing "plain HTML + inline `<script>`"
+    style exactly.
+  - Move page-serving to Jinja2 templates with a real `{% include %}` base
+    layout. Bigger change — FastAPI pulls in Jinja2 transitively via
+    Starlette already, but no route in `main.py` uses it today, they're all
+    `FileResponse` over static files — but it's the more idiomatic FastAPI
+    pattern, and would let `deploy/site/status.html` join the same served
+    set instead of living under a separate Caddy static path.
+
+**2. Whether/how to group or merge the tools themselves** — the actual
+"easier to consume" ask, separate from just fixing broken nav links.
+Candidates to weigh, not decided:
+  - Group `index.html`'s flat "More tools" grid into labelled sections
+    matching the audiences already implicit in the pages: **use the API**
+    (`/lookup`, `/search`), **explore the data** (`/gpc`, `/gpc/mappings`,
+    `/data`, `/data/analytics` — four lenses on the same four local stores,
+    currently four unrelated-looking pages), **operate it** (`/status`,
+    `/docs`, `/redoc`).
+  - Whether `/data` (raw browser) and `/data/analytics` (aggregated
+    dashboard) should become two tabs of *one* page rather than two
+    separately-routed ones — they already read the same four local stores;
+    a user moving between "what does this column actually look like" and
+    "how healthy is this column overall" currently has to navigate away and
+    back rather than flip a tab.
+  - Same question for `/gpc` (browse the taxonomy) and `/gpc/mappings`
+    (browse how FDC/OFF categories resolve into it) — related, currently
+    unconnected pages.
+  - Lower-risk alternative to merging pages: leave every route as-is and
+    solve this purely with grouped navigation, possibly via a dedicated
+    `/explore` landing page one level under `/` that hosts a real,
+    sectioned "More tools" view instead of today's flat grid — no page-
+    restructuring risk, worth weighing against the tab-merge idea above
+    before picking either.
+
+### Open questions to resolve before implementation starts
+1. Merge `/data` + `/data/analytics` into one tabbed page, or keep them
+   separate and fix navigation/grouping only?
+2. Same question for `/gpc` + `/gpc/mappings`.
+3. Shared-nav mechanism: small vanilla-JS include, or a move to Jinja2
+   templates (bigger change, but lets `status.html` join the same system
+   instead of living in `deploy/site/` under Caddy's separate static path)?
+4. Does `/status` belong in this consolidation at all, given it already
+   serves a different audience (operator, not data explorer) and lives on a
+   different deploy path today?
+
+Deliberately scoped as a planning item, not a design — next step is
+resolving the four questions above (with the user), then a follow-up pass
+sketches the concrete page/route/nav-component shape before any code
+changes.
