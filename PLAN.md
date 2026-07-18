@@ -187,9 +187,12 @@ flowchart LR
   block (current working `*.ts.net` setup) running alongside this, or replace
   it outright once the custom domain is verified working.
 
-## 2. Name search: stop blocking the event loop, then make it fast (FTS5)
+## 2. ~~Name search: stop blocking the event loop, then make it fast (FTS5)~~ — DONE 2026-07-18
 
-**Status:** (a) fixed 2026-07-18. (b) not started.
+**Status:** (a) and (b) both fixed and deployed — `data/fdc.sqlite3` and
+`data/off.sqlite3` were rebuilt with `foods_fts`/`products_fts` and are live
+on the reference LXC (`nutrition-api.service` restarted), not just merged in
+code.
 
 **(a) ~~The search endpoint blocks the event loop~~ — FIXED.** `search_by_name`
 in `app/core/search_routes.py` was `async def`, but `search.search_products()`
@@ -229,13 +232,13 @@ for `_fts_match_expr` and the FTS query path in `test_search.py`, and for
 the two build scripts' new virtual table in `test_fdc_bulk_import.py` /
 `test_build_off_db.py`. Full suite: 804 passed.
 
-Not yet done: the **already-built, currently-deployed** `data/fdc.sqlite3`
-and `data/off.sqlite3` predate this change and have no FTS table — they will
-correctly fall back to the `LIKE` path (slow but not broken) until the next
-`build_fdc_db.py` / `build_off_db.py --auto-update` rebuild republishes them.
-Tokenizer behavior on OFF's non-English/accented product names was not
-separately audited — `remove_diacritics 2` should handle the common case,
-but this wasn't stress-tested against real multilingual rows.
+Deployed the same day: both mirrors rebuilt (`fdc-2026-04-30` archive
+reuploaded in place; `off-2026-07-17` published as a new release, refreshing
+the data itself too) and the live service restarted. Live search latency on
+the running service measured 25–203ms, matching the synthetic numbers
+above. Tokenizer behavior on OFF's non-English/accented product names was
+not separately audited — `remove_diacritics 2` should handle the common
+case, but this wasn't stress-tested against real multilingual rows.
 
 ## 3. Scheduled refresh of the local bulk mirrors
 
