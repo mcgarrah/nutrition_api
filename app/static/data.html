@@ -571,7 +571,7 @@ function showLoading(el, label) {
     const p = el.querySelector(`p.loading[data-gen="${gen}"]`);
     if (!p) return;
     p.innerHTML = `${msg}<br><span class="loading-note">Still working — a fresh, uncached scan of the ` +
-      `full data can take up to 15s the first time (PLAN.md item 6); everything after is fast.</span>` +
+      `full data can take up to 15s the first time; everything after is fast.</span>` +
       `<span class="loading-bar"><span class="loading-bar-fill"></span></span>`;
   }, 2200);
 }
