@@ -30,7 +30,19 @@
   .sub { color: var(--text-secondary); font-size: .8125rem; margin: 0 0 1.25rem; }
   a { color: var(--fk); }
 
-  form { display: flex; gap: .5rem; margin-bottom: 1.25rem; }
+  form { display: flex; gap: .5rem; margin-bottom: .6rem; }
+
+  /* Advanced disclosure -- closed by default, so the common one-field case
+     is unchanged (PLAN.md item 10). */
+  .adv { margin-bottom: 1.25rem; font-size: .8125rem; }
+  .adv summary { cursor: pointer; color: var(--text-secondary); user-select: none; }
+  .adv summary:hover { color: var(--text-primary); }
+  .adv-row { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; margin-top: .6rem; }
+  .adv-row label { color: var(--text-secondary); }
+  .adv-row select, .adv-row input[type=number] {
+    padding: .35rem .5rem; font-size: .8125rem; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-primary); font: inherit; }
+  .adv-row input[type=number] { width: 4.5rem; }
   input[type=search] {
     flex: 1; padding: .65rem .8rem; font-size: 1rem;
     background: var(--surface-1); color: var(--text-primary);
@@ -146,6 +158,20 @@
     <button type="submit" id="go">Search</button>
   </form>
 
+  <details class="adv">
+    <summary>Advanced</summary>
+    <div class="adv-row">
+      <label for="advSources">Source</label>
+      <select id="advSources">
+        <option value="both" selected>Both (default)</option>
+        <option value="fdc">USDA FDC only</option>
+        <option value="off">Open Food Facts only</option>
+      </select>
+      <label for="advLimit">Results</label>
+      <input type="number" id="advLimit" min="1" max="50" value="25">
+    </div>
+  </details>
+
   <div id="out"><p class="muted">Type a product name to search.</p></div>
 
   <footer>Search is local-DB only — a miss here doesn't mean no upstream has it, only that neither local copy's product name matched.</footer>
@@ -201,6 +227,7 @@ function amt(nv, digits = 1) {
 }
 
 const state = { q: "", results: [] };
+const MAX_RESULTS = 50;
 
 async function search() {
   const q = $("q").value.trim();
@@ -208,8 +235,11 @@ async function search() {
   if (!q) { $("out").innerHTML = `<p class="muted">Type a product name to search.</p>`; return; }
   $("go").disabled = true;
   $("out").innerHTML = `<p class="loading">Searching…</p>`;
+  const sources = $("advSources").value;
+  const limit = Math.min(MAX_RESULTS, Math.max(1, parseInt($("advLimit").value, 10) || 25));
   try {
-    const body = await api(`/api/v1/search?q=${encodeURIComponent(q)}&limit=25`);
+    const body = await api(
+      `/api/v1/search?q=${encodeURIComponent(q)}&limit=${limit}&sources=${sources}`);
     state.results = body.results || [];
     renderResults();
   } catch (e) {

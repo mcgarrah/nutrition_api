@@ -304,7 +304,14 @@ def _apply_nutrients(product: CanonicalProduct, values: dict) -> None:
             setattr(product, spec.field, nutrient)
 
 
-async def lookup(gtin: str, fresh: bool = False) -> CanonicalProduct:
+async def _skip_source():
+    """Stand-in for a source the caller excluded via `sources=` -- no local
+    read, no network call, matching the shape `_fetch_off`/`_fetch_usda`
+    return so `asyncio.gather` doesn't need to special-case it."""
+    return None, 0.0, None
+
+
+async def lookup(gtin: str, fresh: bool = False, sources: str = "both") -> CanonicalProduct:
     """Look up a product by GTIN/UPC and merge data from all sources.
 
     Fires OFF and USDA queries in parallel, then layers the results.
@@ -314,9 +321,19 @@ async def lookup(gtin: str, fresh: bool = False) -> CanonicalProduct:
     `fresh=True` bypasses every cache layer — the in-memory cache, the local
     bulk copies, and the disk store — and queries the live upstream APIs. The
     result still populates the caches, so a forced refresh also updates them.
+
+    `sources` scopes which upstreams participate: "both" (default), "fdc", or
+    "off". A source left out is skipped entirely -- no local-mirror read, no
+    live-API call, not merely filtered out of the response afterward -- so
+    the excluded source's Layer 3 GPC contribution (fdc_curated needs FDC's
+    category, reviewed/off_fuzzy need OFF's tags) is skipped too, same as if
+    that source had returned nothing. Only a "both" lookup reads or writes
+    the shared in-memory cache -- a scoped result must never satisfy, or be
+    satisfied by, a request that wanted every source.
     """
     key = _cache_key(gtin)
-    if not fresh:
+    cacheable = sources == "both"
+    if not fresh and cacheable:
         hit = _lookup_cache.get(key)
         if hit is not None:
             # Deep copy so callers can't mutate the cached entry
@@ -326,15 +343,19 @@ async def lookup(gtin: str, fresh: bool = False) -> CanonicalProduct:
             product.cached = True
             return product
 
-    # Parallel fetch from OFF and USDA
+    # Parallel fetch from OFF and USDA -- an excluded source is never awaited
+    # for real, just stood in for with _skip_source() so the gather shape
+    # stays uniform.
     (off_data, off_ms, off_prov), (usda_data, usda_ms, usda_prov) = await asyncio.gather(
-        _fetch_off(gtin, fresh),
-        _fetch_usda(gtin, fresh),
+        _fetch_off(gtin, fresh) if sources in ("both", "off") else _skip_source(),
+        _fetch_usda(gtin, fresh) if sources in ("both", "fdc") else _skip_source(),
     )
 
     product = CanonicalProduct(gtin=gtin)
-    product.upstream_latency_ms["OpenFoodFacts"] = round(off_ms, 1)
-    product.upstream_latency_ms["USDA_FDC"] = round(usda_ms, 1)
+    if sources in ("both", "off"):
+        product.upstream_latency_ms["OpenFoodFacts"] = round(off_ms, 1)
+    if sources in ("both", "fdc"):
+        product.upstream_latency_ms["USDA_FDC"] = round(usda_ms, 1)
 
     # --- Layer 1: Open Food Facts (name, image, ingredients, provisional nutrition) ---
     if off_data:
@@ -462,7 +483,7 @@ async def lookup(gtin: str, fresh: bool = False) -> CanonicalProduct:
     # accompanies the data it describes rather than living only in the docs.
     product.attribution = attribution.for_sources(product.data_sources)
 
-    if product.data_sources:
+    if product.data_sources and cacheable:
         _lookup_cache[key] = product.model_copy(deep=True)
 
     return product
