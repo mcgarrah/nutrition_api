@@ -557,6 +557,26 @@ often (`trans_fat` 99.2%, `cholesterol` 90.2%, `calories_kcal` 86.9%,
 independently-sourced small values, not an artifact, now that the unit
 mismatch is fixed.
 
+**A hypothesis checked and ruled out for this dataset:** `carbohydrates`
+disagrees on 6,088 of 41,876 matched pairs (85.5% agreement) — a plausible
+suspect is the US/EU labelling split `nutrients.py` already documents
+elsewhere (`_NUTRIENT_SUBSETS`'s comment on why fibre is deliberately not
+checked against carbohydrate as a subset): the US "Total Carbohydrate by
+difference" includes fibre, EU-style labels report carbohydrate net of
+fibre. Tested directly against the live mirrors: only 4.3% of the
+disagreeing pairs fit that signature (`fdc_carbs − off_carbs ≈ off_fiber`),
+and across all 36,503 matched pairs with OFF fibre present, adding OFF's
+fibre back made the gap to FDC's figure *worse* for 61% of pairs and
+better for only 9% (median unadjusted diff is already 0.000). Read: since
+`fdc.sqlite3` is USDA-only (US branded foods), every barcode-matched OFF
+row is describing the same US-labelled package, not an independently
+EU-labelled one — the convention split is real (and correctly why
+`_enforce_subsets` skips fibre) but doesn't apply to this particular
+overlap set, so it isn't the explanation for the carbohydrate
+disagreement here. Not yet investigated: the actual cause (spot-checked
+rows look more like barcode reuse/wrong-product mapping or OCR/crowd-entry
+typos than a systematic offset).
+
 **Left out of the first draft**, an explicit design item in the original
 scope, not an accidental gap:
 - **Upstream-vs-mirrored exclusion counts** (item 4) — persisting what
