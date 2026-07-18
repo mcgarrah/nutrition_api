@@ -26,7 +26,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from build_fdc_db import NUTRIENT_FIELDS, _build_served_table  # noqa: E402
+from build_fdc_db import NUTRIENT_FIELDS, _build_fts_table, _build_served_table  # noqa: E402
 
 
 def staged(revisions):
@@ -179,3 +179,38 @@ def test_a_barcode_yields_exactly_one_row_however_many_revisions_it_has(revision
 
     assert count == 1
     assert served(db, "00009")["calories_kcal"] == float(revisions)
+
+
+# ── _build_fts_table ─────────────────────────────────────────────────
+
+def test_fts_table_is_searchable_by_prefix_after_the_served_table_is_built():
+    db = staged([
+        (1, "00010", "2026-01-01", "Diced Tomatoes", {"calories_kcal": 20.0}),
+        (2, "00011", "2026-01-01", "Raisin Bran Cereal", {"calories_kcal": 300.0}),
+    ])
+    _build_served_table(db)
+
+    _build_fts_table(db)
+
+    row = db.execute(
+        "SELECT gtin14 FROM foods_fts WHERE foods_fts MATCH ?", ('"toma"*',)
+    ).fetchone()
+    assert row == ("00010",)
+
+
+def test_fts_table_gtin_is_not_indexed_as_searchable_text():
+    """gtin14 is UNINDEXED -- present in the row for the join back to foods,
+    but not itself matchable text (searching the barcode's digits as if they
+    were a product-name word would be surprising, and FTS5's default tokenizer
+    would not usefully index them anyway)."""
+    db = staged([
+        (1, "00012", "2026-01-01", "Snack Food", {"calories_kcal": 10.0}),
+    ])
+    _build_served_table(db)
+
+    _build_fts_table(db)
+
+    rows = db.execute(
+        "SELECT gtin14 FROM foods_fts WHERE foods_fts MATCH ?", ('"00012"*',)
+    ).fetchall()
+    assert rows == []
