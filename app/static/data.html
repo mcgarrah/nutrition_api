@@ -3,20 +3,37 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Nutrition API — Data Browser</title>
+<title>Nutrition API — Explore the Data</title>
 <style>
+  /* Shared tokens -- the union of what the four merged pages each defined.
+     Generic ones (surface-*, border, text-*, good, bad, link) were literally
+     identical (or agreed 3-of-4, gpc.html's outlier good/bad were unused
+     dead CSS) across all four source files, so they're defined once here
+     rather than four times. Each tool's own accent stays its own token
+     (--accent/--pk/--fk for Data Browser, --qa/--fdc/--off for Data
+     Quality, --gpc/--brick/--cls for the two GPC panels) -- CSS custom
+     properties don't need scoping to avoid collision, only the class rules
+     that consume them do (see the per-panel #panel-* blocks below). */
   :root {
     --surface-0: #f2f2f0; --surface-1: #fcfcfb; --surface-2: #e9e9e5;
     --border: #dedddA; --text-primary: #0b0b0b; --text-secondary: #52514e;
-    --text-muted: #78776f; --accent: #5b57c9; --accent-soft: #e6e5f7;
-    --pk: #b57e00; --fk: #2a78d6; --good: #1a8a3e; --bad: #c8322f;
+    --text-muted: #78776f; --link: #2a78d6; --good: #1a8a3e; --bad: #c8322f;
+    --accent: #5b57c9; --accent-soft: #e6e5f7; --pk: #b57e00; --fk: #2a78d6;
+    --qa: #0f7a6c; --qa-soft: #dcf0ec; --fdc: #2a78d6; --fdc-soft: #dbe9fb;
+    --off: #b57e00; --off-soft: #f3e6c8; --bad-soft: #f8dedd;
+    --gpc: #b57e00; --gpc-soft: #f3e6c8; --brick: #2a78d6; --brick-soft: #dbe9fb;
+    --cls: #7a4fc9; --cls-soft: #e8e0f8;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --surface-0: #101010; --surface-1: #1a1a19; --surface-2: #242320;
       --border: #35342f; --text-primary: #fff; --text-secondary: #c3c2b7;
-      --text-muted: #8f8e84; --accent: #9b97ec; --accent-soft: #241f3a;
-      --pk: #d9a53a; --fk: #6ba7ea; --good: #58c877; --bad: #ef6b68;
+      --text-muted: #8f8e84; --link: #6ba7ea; --good: #58c877; --bad: #ef6b68;
+      --accent: #9b97ec; --accent-soft: #241f3a; --pk: #d9a53a; --fk: #6ba7ea;
+      --qa: #4fc9b8; --qa-soft: #17302c; --fdc: #6ba7ea; --fdc-soft: #1e2c3d;
+      --off: #d9a53a; --off-soft: #3a2f16; --bad-soft: #3a2220;
+      --gpc: #d9a53a; --gpc-soft: #3a2f16; --brick: #6ba7ea; --brick-soft: #1e2c3d;
+      --cls: #b39bec; --cls-soft: #2b2340;
     }
   }
   * { box-sizing: border-box; }
@@ -27,121 +44,507 @@
   h1 { font-size: 1.35rem; margin: 0; letter-spacing: -.01em; }
   h1 .g { color: var(--accent); }
   .nav { margin-left: auto; font-size: .8125rem; } .nav a { color: var(--text-secondary); }
-  .sub { color: var(--text-secondary); font-size: .8125rem; margin: 0 0 1.1rem; }
-  a { color: var(--fk); }
+  .sub { color: var(--text-secondary); font-size: .8125rem; margin: 0 0 1.1rem; max-width: 68ch; }
+  a { color: var(--link); }
+  .muted { color: var(--text-muted); font-size: .875rem; }
+  .loading { color: var(--text-muted); font-size: .875rem; padding: .5rem 0; }
+  footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: .75rem; color: var(--text-muted); }
 
-  /* store pills */
-  .stores { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1.1rem; }
-  .store {
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1rem 1.15rem; margin-bottom: 1rem;
+  }
+  .card h2 {
+    font-size: .75rem; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--text-muted); margin: 0 0 .8rem; font-weight: 700;
+    display: flex; align-items: center; gap: .5rem;
+  }
+  .card h2 .n {
+    font-variant-numeric: tabular-nums; background: var(--surface-2);
+    color: var(--text-secondary); border-radius: 999px; padding: 0 .5rem;
+    font-size: .6875rem; letter-spacing: 0;
+  }
+  .card p.note { font-size: .8125rem; color: var(--text-secondary); margin: -.3rem 0 .8rem; }
+
+  /* top-level tab strip -- the four tools, one page. Distinct from each
+     panel's own internal sub-tabs (Data Browser's Rows/Coverage), which
+     keep their own .subtabs/.subtab classes below to avoid any ambiguity
+     with these. */
+  .toptabs { display: flex; gap: .3rem; margin-bottom: 1.1rem; border-bottom: 1px solid var(--border);
+    flex-wrap: wrap; }
+  .toptab { padding: .5rem 1rem; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0;
+    background: none; color: var(--text-secondary); cursor: pointer; font: inherit; font-size: .875rem; font-weight: 650;
+    margin-bottom: -1px; }
+  .toptab:hover { color: var(--text-primary); }
+  .toptab.on { color: var(--link); border-color: var(--border); background: var(--surface-1); }
+  .tabpanel { display: none; }
+  .tabpanel.on { display: block; }
+
+  /* ============================= Data Browser (db-, was /data) ============================= */
+  #panel-browser .stores { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1.1rem; }
+  #panel-browser .store {
     display: flex; flex-direction: column; gap: .1rem; text-align: left; cursor: pointer;
     padding: .55rem .8rem; border-radius: 10px; border: 1px solid var(--border);
     background: var(--surface-1); color: inherit; min-width: 130px;
   }
-  .store:hover { border-color: var(--accent); }
-  .store.on { border-color: var(--accent); background: var(--accent-soft); }
-  .store .lbl { font-weight: 650; }
-  .store .meta { font-size: .6875rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-  .store.off-line { opacity: .5; cursor: not-allowed; }
+  #panel-browser .store:hover { border-color: var(--accent); }
+  #panel-browser .store.on { border-color: var(--accent); background: var(--accent-soft); }
+  #panel-browser .store .lbl { font-weight: 650; }
+  #panel-browser .store .meta { font-size: .6875rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  #panel-browser .store.off-line { opacity: .5; cursor: not-allowed; }
 
-  .layout { display: grid; grid-template-columns: 210px 1fr; gap: 1rem; align-items: start; }
-  @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
+  #panel-browser .layout { display: grid; grid-template-columns: 210px 1fr; gap: 1rem; align-items: start; }
+  @media (max-width: 720px) { #panel-browser .layout { grid-template-columns: 1fr; } }
 
-  .side { background: var(--surface-1); border: 1px solid var(--border); border-radius: 11px; padding: .5rem; }
-  .side .item {
+  #panel-browser .side { background: var(--surface-1); border: 1px solid var(--border); border-radius: 11px; padding: .5rem; }
+  #panel-browser .side .item {
     display: flex; align-items: center; gap: .4rem; width: 100%; text-align: left;
     padding: .4rem .55rem; border: 0; background: none; color: inherit; font: inherit;
     border-radius: 7px; cursor: pointer;
   }
-  .side .item:hover { background: var(--surface-2); }
-  .side .item.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-  .side .item .n { margin-left: auto; font-size: .6875rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-  .side .sect { font-size: .625rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); font-weight: 700; padding: .5rem .55rem .3rem; }
+  #panel-browser .side .item:hover { background: var(--surface-2); }
+  #panel-browser .side .item.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  #panel-browser .side .item .n { margin-left: auto; font-size: .6875rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  #panel-browser .side .sect { font-size: .625rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); font-weight: 700; padding: .5rem .55rem .3rem; }
 
-  .main { min-width: 0; }
-  .tabs { display: flex; gap: .3rem; margin-bottom: .7rem; }
-  .tab { padding: .3rem .7rem; border-radius: 999px; border: 1px solid var(--border);
+  #panel-browser .main { min-width: 0; }
+  #panel-browser .subtabs { display: flex; gap: .3rem; margin-bottom: .7rem; }
+  #panel-browser .subtab { padding: .3rem .7rem; border-radius: 999px; border: 1px solid var(--border);
     background: var(--surface-1); color: var(--text-secondary); cursor: pointer; font: inherit; font-size: .8125rem; }
-  .tab.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  #panel-browser .subtab.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 
-  .toolbar { display: flex; gap: .5rem; margin-bottom: .6rem; flex-wrap: wrap; align-items: center; }
-  input[type=text] { flex: 1; min-width: 160px; padding: .45rem .6rem; font-size: .875rem;
+  #panel-browser .toolbar { display: flex; gap: .5rem; margin-bottom: .6rem; flex-wrap: wrap; align-items: center; }
+  #panel-browser input[type=text] { flex: 1; min-width: 160px; padding: .45rem .6rem; font-size: .875rem;
     background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; }
-  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .count { font-size: .8125rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-  .pagesize { display: flex; gap: .35rem; align-items: center; font-size: .8125rem; color: var(--text-secondary); }
-  .pagesize select, .pagesize input[type=number] {
+  #panel-browser input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  #panel-browser .count { font-size: .8125rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  #panel-browser .pagesize { display: flex; gap: .35rem; align-items: center; font-size: .8125rem; color: var(--text-secondary); }
+  #panel-browser .pagesize select, #panel-browser .pagesize input[type=number] {
     padding: .3rem .5rem; font-size: .8125rem; border-radius: 7px; border: 1px solid var(--border);
     background: var(--surface-1); color: inherit; font: inherit; }
-  .pagesize input[type=number] { width: 4.5rem; }
-  .pager { display: flex; gap: .4rem; align-items: center; }
-  .pager button { padding: .3rem .6rem; border-radius: 7px; border: 1px solid var(--border);
+  #panel-browser .pagesize input[type=number] { width: 4.5rem; }
+  #panel-browser .pager { display: flex; gap: .4rem; align-items: center; }
+  #panel-browser .pager button { padding: .3rem .6rem; border-radius: 7px; border: 1px solid var(--border);
     background: var(--surface-1); color: inherit; cursor: pointer; font: inherit; font-size: .8125rem; }
-  .pager button:disabled { opacity: .4; cursor: default; }
+  #panel-browser .pager button:disabled { opacity: .4; cursor: default; }
 
-  .tbl-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
-  table { border-collapse: collapse; width: 100%; font-size: .8125rem; }
-  th, td { padding: .45rem .65rem; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap;
+  #panel-browser .tbl-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+  #panel-browser table { border-collapse: collapse; width: 100%; font-size: .8125rem; }
+  #panel-browser th, #panel-browser td { padding: .45rem .65rem; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap;
     max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
-  thead th { position: sticky; top: 0; background: var(--surface-2); cursor: pointer;
+  #panel-browser thead th { position: sticky; top: 0; background: var(--surface-2); cursor: pointer;
     font-size: .6875rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
-  thead th .arrow { color: var(--accent); }
-  tr:last-child td { border-bottom: 0; }
-  tbody tr:hover { background: var(--surface-2); }
-  td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  td .null { color: var(--text-muted); font-style: italic; }
+  #panel-browser thead th .arrow { color: var(--accent); }
+  #panel-browser tr:last-child td { border-bottom: 0; }
+  #panel-browser tbody tr:hover { background: var(--surface-2); }
+  #panel-browser td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  #panel-browser td .null { color: var(--text-muted); font-style: italic; }
 
-  /* coverage */
-  .cov { display: grid; grid-template-columns: 150px 1fr 60px; gap: .5rem .8rem; align-items: center; }
-  .cov .cname { font-size: .8125rem; font-family: ui-monospace, Menlo, monospace; }
-  .cov .track { height: 12px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
-  .cov .fill { height: 100%; border-radius: 4px; background: var(--accent); }
-  .cov .fill.dead { background: var(--bad); }
-  .cov .fill.full { background: var(--good); }
-  .cov .pct { text-align: right; font-size: .8125rem; font-variant-numeric: tabular-nums; }
-  .cov-note { font-size: .8125rem; color: var(--text-muted); margin: .1rem 0 .8rem; }
+  #panel-browser .cov { display: grid; grid-template-columns: 150px 1fr 60px; gap: .5rem .8rem; align-items: center; }
+  #panel-browser .cov .cname { font-size: .8125rem; font-family: ui-monospace, Menlo, monospace; }
+  #panel-browser .cov .track { height: 12px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+  #panel-browser .cov .fill { height: 100%; border-radius: 4px; background: var(--accent); }
+  #panel-browser .cov .fill.dead { background: var(--bad); }
+  #panel-browser .cov .fill.full { background: var(--good); }
+  #panel-browser .cov .pct { text-align: right; font-size: .8125rem; font-variant-numeric: tabular-nums; }
+  #panel-browser .cov-note { font-size: .8125rem; color: var(--text-muted); margin: .1rem 0 .8rem; }
 
-  /* schema */
-  .schema { display: flex; flex-wrap: wrap; gap: .8rem; }
-  .stable { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); min-width: 240px; flex: 1; }
-  .stable h3 { margin: 0; padding: .5rem .7rem; font-size: .875rem; border-bottom: 1px solid var(--border);
+  #panel-browser .schema { display: flex; flex-wrap: wrap; gap: .8rem; }
+  #panel-browser .stable { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); min-width: 240px; flex: 1; }
+  #panel-browser .stable h3 { margin: 0; padding: .5rem .7rem; font-size: .875rem; border-bottom: 1px solid var(--border);
     display: flex; align-items: baseline; gap: .5rem; }
-  .stable h3 .n { margin-left: auto; font-size: .6875rem; color: var(--text-muted); font-weight: 400; }
-  .stable .col { display: flex; align-items: center; gap: .4rem; padding: .28rem .7rem; font-size: .8125rem;
+  #panel-browser .stable h3 .n { margin-left: auto; font-size: .6875rem; color: var(--text-muted); font-weight: 400; }
+  #panel-browser .stable .col { display: flex; align-items: center; gap: .4rem; padding: .28rem .7rem; font-size: .8125rem;
     border-bottom: 1px solid var(--border); font-family: ui-monospace, Menlo, monospace; }
-  .stable .col:last-child { border-bottom: 0; }
-  .stable .col .ty { margin-left: auto; color: var(--text-muted); font-size: .6875rem; }
-  .badge { font-size: .5625rem; font-weight: 700; padding: .05rem .3rem; border-radius: 3px; letter-spacing: .03em;
+  #panel-browser .stable .col:last-child { border-bottom: 0; }
+  #panel-browser .stable .col .ty { margin-left: auto; color: var(--text-muted); font-size: .6875rem; }
+  #panel-browser .badge { font-size: .5625rem; font-weight: 700; padding: .05rem .3rem; border-radius: 3px; letter-spacing: .03em;
     font-family: ui-sans-serif, system-ui, sans-serif; }
-  .badge.pk { color: var(--pk); border: 1px solid var(--pk); }
-  .badge.fk { color: var(--fk); border: 1px solid var(--fk); }
-  .fkline { font-size: .75rem; color: var(--fk); padding: .28rem .7rem; border-bottom: 1px solid var(--border);
+  #panel-browser .badge.pk { color: var(--pk); border: 1px solid var(--pk); }
+  #panel-browser .badge.fk { color: var(--fk); border: 1px solid var(--fk); }
+  #panel-browser .fkline { font-size: .75rem; color: var(--fk); padding: .28rem .7rem; border-bottom: 1px solid var(--border);
     font-family: ui-monospace, Menlo, monospace; }
-
-  .loading, .muted { color: var(--text-muted); font-size: .875rem; padding: .5rem 0; }
-  pre.rec { white-space: pre-wrap; word-break: break-word; background: var(--surface-2); border: 1px solid var(--border);
+  #panel-browser pre.rec { white-space: pre-wrap; word-break: break-word; background: var(--surface-2); border: 1px solid var(--border);
     border-radius: 8px; padding: .7rem; font-size: .75rem; margin: .3rem 0 0; max-height: 340px; overflow: auto; }
-  footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: .75rem; color: var(--text-muted); }
+
+  /* ============================= Data Quality (dq-, was /data/analytics) ============================= */
+  #panel-quality .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+  #panel-quality .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: .8rem .9rem; }
+  #panel-quality .tile .v { font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  #panel-quality .tile .l { font-size: .75rem; color: var(--text-muted); }
+
+  #panel-quality .sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .8rem; }
+  #panel-quality .source { border: 1px solid var(--border); border-radius: 10px; padding: .8rem .9rem; background: var(--surface-0); }
+  #panel-quality .source h3 { margin: 0 0 .5rem; font-size: .9375rem; display: flex; align-items: center; gap: .4rem; }
+  #panel-quality .source .dot { width: 8px; height: 8px; border-radius: 50%; }
+  #panel-quality .source .dot.ok { background: var(--good); } #panel-quality .source .dot.bad { background: var(--bad); }
+  #panel-quality .source dl { margin: 0; font-size: .8125rem; }
+  #panel-quality .source dl div { display: flex; justify-content: space-between; gap: .5rem; padding: .15rem 0; border-bottom: 1px dashed var(--border); }
+  #panel-quality .source dl div:last-child { border-bottom: 0; }
+  #panel-quality .source dt { color: var(--text-muted); } #panel-quality .source dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+
+  #panel-quality .gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+  #panel-quality .gauge .top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: .3rem; }
+  #panel-quality .gauge .name { font-size: .875rem; font-weight: 600; }
+  #panel-quality .gauge .pct { font-size: 1.1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #panel-quality .gauge .track { height: 10px; border-radius: 5px; background: var(--surface-2); overflow: hidden; }
+  #panel-quality .gauge .fill { height: 100%; border-radius: 5px; background: var(--qa); }
+  #panel-quality .gauge .sub { font-size: .75rem; color: var(--text-muted); margin-top: .3rem; }
+
+  #panel-quality .cov-head { display: grid; grid-template-columns: 150px 1fr 42px 1fr 42px; gap: .3rem .7rem; font-size: .625rem;
+    text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); padding: 0 0 .35rem; }
+  #panel-quality .cov-row { display: grid; grid-template-columns: 150px 1fr 42px 1fr 42px; gap: .3rem .7rem; align-items: center; padding: .2rem 0; }
+  #panel-quality .cov-row .fname { font-size: .8125rem; font-family: ui-monospace, Menlo, monospace; }
+  #panel-quality .cov-row .track { height: 9px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+  #panel-quality .cov-row .fill.fdc { height: 100%; background: var(--fdc); }
+  #panel-quality .cov-row .fill.off { height: 100%; background: var(--off); }
+  #panel-quality .cov-row .p { text-align: right; font-size: .75rem; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+  #panel-quality .legend { display: flex; gap: 1rem; font-size: .75rem; color: var(--text-secondary); margin-top: .6rem; }
+  #panel-quality .legend span { display: inline-flex; align-items: center; gap: .35rem; }
+  #panel-quality .swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  #panel-quality .agree-head { display: grid; grid-template-columns: 150px 1fr 60px 90px; gap: .3rem .7rem; font-size: .625rem;
+    text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); padding: 0 0 .35rem; }
+  #panel-quality .agree-row { display: grid; grid-template-columns: 150px 1fr 60px 90px; gap: .3rem .7rem; align-items: center; padding: .2rem 0; }
+  #panel-quality .agree-row .fname { font-size: .8125rem; font-family: ui-monospace, Menlo, monospace; }
+  #panel-quality .agree-row .track { height: 9px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+  #panel-quality .agree-row .fill { height: 100%; background: var(--qa); }
+  #panel-quality .agree-row .fill.low { background: var(--bad); }
+  #panel-quality .agree-row .p { text-align: right; font-size: .75rem; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+  #panel-quality .agree-row .n { text-align: right; font-size: .6875rem; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+
+  #panel-quality .dist-toolbar { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; margin-bottom: .8rem; }
+  #panel-quality select { padding: .4rem .6rem; font-size: .8125rem; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-primary); font: inherit; }
+  #panel-quality .dist-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 720px) { #panel-quality .dist-grid { grid-template-columns: 1fr; } }
+  #panel-quality .hist-card h4 { margin: 0 0 .3rem; font-size: .8125rem; display: flex; align-items: center; gap: .4rem; }
+  #panel-quality .hist-card .stat-line { font-size: .75rem; color: var(--text-muted); margin-bottom: .5rem; font-variant-numeric: tabular-nums; }
+  #panel-quality .hist-bars { display: flex; align-items: flex-end; gap: 2px; height: 120px; border-bottom: 1px solid var(--border); }
+  #panel-quality .hist-bars .bar { flex: 1; background: var(--qa); border-radius: 2px 2px 0 0; min-height: 1px; }
+  #panel-quality .hist-bars .bar.fdc { background: var(--fdc); } #panel-quality .hist-bars .bar.off-src { background: var(--off); }
+  #panel-quality .hist-axis { display: flex; justify-content: space-between; font-size: .6875rem; color: var(--text-muted); margin-top: .25rem; font-variant-numeric: tabular-nums; }
+  #panel-quality .clip-note { font-size: .6875rem; color: var(--bad); margin-top: .3rem; }
+
+  /* ============================= GPC Taxonomy (gt-, was /gpc) ============================= */
+  #panel-taxonomy form { display: flex; gap: .5rem; margin-bottom: 1rem; }
+  #panel-taxonomy input[type=text] {
+    flex: 1; padding: .625rem .75rem; font-size: 1rem;
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  #panel-taxonomy input[type=text]:focus { outline: 2px solid var(--gpc); outline-offset: 1px; }
+  #panel-taxonomy button {
+    padding: .625rem 1.1rem; font-size: .9375rem; font-weight: 600; cursor: pointer;
+    background: var(--gpc); color: #fff; border: 0; border-radius: 8px;
+  }
+  #panel-taxonomy button:disabled { opacity: .55; cursor: progress; }
+
+  #panel-taxonomy .samples { display: flex; flex-wrap: wrap; gap: .375rem; margin-bottom: 1.5rem; }
+  #panel-taxonomy .chip {
+    font-size: .8125rem; padding: .3rem .7rem; border-radius: 999px; cursor: pointer;
+    background: var(--surface-1); color: var(--text-secondary);
+    border: 1px solid var(--border);
+  }
+  #panel-taxonomy .chip:hover { border-color: var(--gpc); color: var(--gpc); }
+
+  #panel-taxonomy .crumb { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; margin-bottom: 1rem; font-size: .8125rem; }
+  #panel-taxonomy .crumb a, #panel-taxonomy .crumb span { color: var(--text-secondary); }
+  #panel-taxonomy .crumb a { cursor: pointer; text-decoration: none; }
+  #panel-taxonomy .crumb a:hover { color: var(--gpc); }
+  #panel-taxonomy .crumb .sep { color: var(--text-muted); }
+  #panel-taxonomy .crumb .here { color: var(--text-primary); font-weight: 600; }
+
+  #panel-taxonomy .row {
+    display: flex; align-items: center; gap: .6rem; width: 100%;
+    padding: .5rem .1rem; border: 0; border-bottom: 1px solid var(--border);
+    background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  }
+  #panel-taxonomy .row:last-child { border-bottom: 0; }
+  #panel-taxonomy .row:hover { color: var(--gpc); }
+  #panel-taxonomy .row .code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem;
+    color: var(--text-muted); background: var(--surface-2);
+    padding: .1rem .4rem; border-radius: 4px; flex: none; min-width: 5.5rem; text-align: center;
+  }
+  #panel-taxonomy .row .label { flex: 1; }
+  #panel-taxonomy .row .chevron { color: var(--text-muted); flex: none; }
+  #panel-taxonomy .row.leaf { cursor: default; }
+  #panel-taxonomy .row.leaf:hover { color: inherit; }
+
+  #panel-taxonomy .attr { padding: .6rem .1rem; border-bottom: 1px solid var(--border); }
+  #panel-taxonomy .attr:last-child { border-bottom: 0; }
+  #panel-taxonomy .attr .at { font-weight: 600; font-size: .9375rem; margin-bottom: .35rem; }
+  #panel-taxonomy .attr .vals { display: flex; flex-wrap: wrap; gap: .3rem; }
+  #panel-taxonomy .aval {
+    font-size: .8125rem; padding: .15rem .55rem; border-radius: 4px;
+    background: var(--gpc-soft); color: var(--gpc);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  #panel-taxonomy mark { background: var(--gpc-soft); color: var(--gpc); padding: 0 .1em; border-radius: 2px; }
+
+  #panel-taxonomy .ahit { padding: .55rem .1rem; border-bottom: 1px solid var(--border); }
+  #panel-taxonomy .ahit:last-child { border-bottom: 0; }
+  #panel-taxonomy .ahit .top { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
+  #panel-taxonomy .ahit .kind {
+    font-size: .625rem; text-transform: uppercase; letter-spacing: .06em; font-weight: 700;
+    color: var(--gpc); border: 1px solid var(--gpc); border-radius: 999px; padding: 0 .4rem;
+  }
+  #panel-taxonomy .ahit .val { font-weight: 600; }
+  #panel-taxonomy .ahit .type { color: var(--text-muted); font-size: .8125rem; }
+  #panel-taxonomy .ahit .bricks { margin-top: .35rem; display: flex; flex-wrap: wrap; gap: .3rem; }
+  #panel-taxonomy .ahit .brick {
+    font-size: .75rem; padding: .15rem .5rem; border-radius: 4px; cursor: pointer;
+    background: var(--surface-2); color: var(--brick); border: 1px solid var(--border);
+  }
+  #panel-taxonomy .ahit .brick:hover { border-color: var(--brick); }
+
+  /* ============================= GPC Mappings (gm-, was /gpc/mappings) ============================= */
+  #panel-mappings .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; margin-bottom: .9rem; }
+  #panel-mappings .stat .v { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  #panel-mappings .stat .l { font-size: .75rem; color: var(--text-muted); }
+  #panel-mappings .bar { height: 14px; border-radius: 7px; background: var(--surface-2); overflow: hidden; display: flex; }
+  #panel-mappings .bar .brick-seg { background: var(--brick); height: 100%; }
+  #panel-mappings .bar .cls-seg { background: var(--cls); height: 100%; }
+  #panel-mappings .barlabel { display: flex; justify-content: space-between; font-size: .75rem; color: var(--text-muted); margin-top: .4rem; }
+  #panel-mappings .legend { display: flex; gap: 1rem; font-size: .75rem; color: var(--text-secondary); margin-top: .5rem; flex-wrap: wrap; }
+  #panel-mappings .legend span { display: inline-flex; align-items: center; gap: .35rem; }
+  #panel-mappings .swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  #panel-mappings .toolbar { display: flex; gap: .5rem; margin-bottom: .8rem; flex-wrap: wrap; align-items: center; }
+  #panel-mappings input[type=text] {
+    flex: 1; min-width: 180px; padding: .55rem .75rem; font-size: .9375rem;
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  #panel-mappings input[type=text]:focus { outline: 2px solid var(--gpc); outline-offset: 1px; }
+  #panel-mappings .chips { display: flex; gap: .35rem; }
+  #panel-mappings .chip {
+    font-size: .8125rem; padding: .3rem .8rem; border-radius: 999px; cursor: pointer;
+    background: var(--surface-1); color: var(--text-secondary); border: 1px solid var(--border);
+  }
+  #panel-mappings .chip.on { border-color: var(--gpc); color: var(--gpc); background: var(--gpc-soft); }
+
+  #panel-mappings .tbl-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+  #panel-mappings table { border-collapse: collapse; width: 100%; font-size: .8125rem; }
+  #panel-mappings th, #panel-mappings td { padding: .5rem .7rem; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+  #panel-mappings thead th { position: sticky; top: 0; background: var(--surface-2); font-size: .6875rem;
+    text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+  #panel-mappings tr:last-child td { border-bottom: 0; }
+  #panel-mappings tbody tr:hover { background: var(--surface-2); }
+  #panel-mappings td.cat { font-weight: 600; white-space: nowrap; }
+  #panel-mappings td.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem; color: var(--text-muted); white-space: nowrap; }
+  #panel-mappings td.hier { color: var(--text-secondary); }
+  #panel-mappings td.hier .seg { color: var(--text-muted); }
+  #panel-mappings td.hier .arrow { color: var(--text-muted); margin: 0 .25rem; }
+  #panel-mappings td.hier .leaf { color: var(--text-primary); font-weight: 600; }
+  #panel-mappings .level-badge {
+    font-size: .625rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+    padding: .1rem .45rem; border-radius: 4px; white-space: nowrap;
+  }
+  #panel-mappings .level-badge.brick { color: var(--brick); background: var(--brick-soft); }
+  #panel-mappings .level-badge.class { color: var(--cls); background: var(--cls-soft); }
+
+  #panel-mappings .unc td.cat { font-weight: 500; }
+  #panel-mappings .unc td.count { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+  #panel-mappings .unc-toggle {
+    font-size: .8125rem; color: var(--brick); cursor: pointer; background: none; border: 0;
+    padding: 0; font: inherit; margin-top: .3rem;
+  }
+
+  #panel-mappings .section-divider {
+    font-size: 1.05rem; margin: 2rem 0 .35rem; padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+  }
+  #panel-mappings .section-divider .muted { font-size: .8rem; font-weight: 400; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <h1><span class="g">Data</span> Browser</h1>
-    <span class="nav"><a href="/">← Home</a> · <a href="/lookup">Barcode lookup</a> · <a href="/search">Search</a> · <a href="/gpc">GPC taxonomy</a> · <a href="/gpc/mappings">GPC mappings</a> · <a href="/data/analytics">Data quality</a> · <a href="/status">Status</a></span>
+    <h1><span class="g">Explore</span> the Data</h1>
+    <span class="nav" id="nav"></span>
   </header>
-  <p class="sub">Read-only look inside the local data stores — schema, rows, and per-column coverage.</p>
+  <p class="sub">Four tools over the local FDC/OFF/GPC bulk copies and <code>gpc_match.py</code>'s curated tables —
+    read-only, computed live. Not operational health (see <a href="/status">/status</a> for that).</p>
 
-  <div class="stores" id="stores"></div>
-  <div class="layout">
-    <div class="side" id="side"></div>
-    <div class="main" id="main"><p class="loading">Loading…</p></div>
+  <div class="toptabs" id="toptabs">
+    <button class="toptab" data-tab="browser">Data Browser</button>
+    <button class="toptab" data-tab="quality">Data Quality</button>
+    <button class="toptab" data-tab="taxonomy">GPC Taxonomy</button>
+    <button class="toptab" data-tab="mappings">GPC Mappings</button>
   </div>
 
-  <footer>Read-only. Searches scan the text columns; a coverage summary scans the whole table once (cached).</footer>
+  <!-- ============================= Data Browser ============================= -->
+  <div class="tabpanel" id="panel-browser">
+    <p class="sub" style="max-width:none;margin:-.4rem 0 1rem">Schema, rows, and per-column coverage for the local data stores.</p>
+    <div class="stores" id="db-stores"></div>
+    <div class="layout">
+      <div class="side" id="db-side"></div>
+      <div class="main" id="db-main"><p class="loading">Loading…</p></div>
+    </div>
+  </div>
+
+  <!-- ============================= Data Quality ============================= -->
+  <div class="tabpanel" id="panel-quality">
+    <p class="sub" style="max-width:none;margin:-.4rem 0 1rem">Dataset freshness, per-field completeness, value distributions, and GPC category-matching coverage. See PLAN.md item 6.</p>
+
+    <div class="tiles" id="dq-tiles"><p class="loading">Loading…</p></div>
+
+    <div class="card">
+      <h2>Data sources</h2>
+      <div class="sources" id="dq-sources"><p class="loading">Loading…</p></div>
+    </div>
+
+    <div class="card">
+      <h2>GPC category-matching coverage</h2>
+      <p class="note">Two separate measurements, not one combined figure — they cover different things. See the
+        GPC Mappings tab for the full curated-entry lists.</p>
+      <div class="gauges" id="dq-gauges"><p class="loading">Loading…</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Nutrient field coverage — FDC vs. OFF</h2>
+      <p class="note">Non-null % per nutrient in each local mirror — which fields are usable as ML features, and
+        which source is the better one for a given nutrient.</p>
+      <div id="dq-nutrientCoverage"><p class="loading">Loading…</p></div>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--fdc)"></span>USDA FDC</span>
+        <span><span class="swatch" style="background:var(--off)"></span>Open Food Facts</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Cross-source agreement</h2>
+      <p class="note">For GTINs present in <em>both</em> local mirrors, how often FDC and OFF agree on a nutrient
+        value (within <span id="dq-tolLabel">15%</span> of the larger figure). Sorted worst-agreement first — the
+        fields most worth double-checking before trusting either source alone.</p>
+      <div id="dq-crossSource"><p class="loading">Loading…</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Value distributions</h2>
+      <p class="note">Binned over the 1st–99th percentile range so a single garbage outlier can't collapse the
+        histogram — clipped counts are reported below each chart, not hidden. Computed on request (a few seconds
+        the first time for a column, then cached).</p>
+      <div class="dist-toolbar">
+        <label for="dq-storeSel" class="muted" style="font-size:.8125rem">Source</label>
+        <select id="dq-storeSel">
+          <option value="fdc">USDA FDC (foods)</option>
+          <option value="off">Open Food Facts (products)</option>
+        </select>
+        <label for="dq-colSel" class="muted" style="font-size:.8125rem">Column</label>
+        <select id="dq-colSel"></select>
+      </div>
+      <div class="dist-grid" id="dq-distGrid">
+        <p class="muted">Pick a column above to load its distribution for both sources.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================= GPC Taxonomy ============================= -->
+  <div class="tabpanel" id="panel-taxonomy">
+    <p class="sub" style="max-width:none;margin:-.4rem 0 1rem">
+      Browse the GS1 Global Product Classification: Segment → Family → Class → Brick → Attributes.
+      Search reaches into attribute values too — try <em>olive oil</em>.
+    </p>
+
+    <form id="gt-form">
+      <input type="text" id="gt-q" placeholder="Search the taxonomy…" autocomplete="off">
+      <button type="submit" id="gt-go">Search</button>
+    </form>
+    <div class="samples" id="gt-samples"></div>
+
+    <div id="gt-crumb" class="crumb"></div>
+    <div id="gt-out"></div>
+  </div>
+
+  <!-- ============================= GPC Mappings ============================= -->
+  <div class="tabpanel" id="panel-mappings">
+    <p class="sub" style="max-width:none;margin:-.4rem 0 1rem">
+      Every hand-verified entry linking an FDC <code>branded_food_category</code> to a GPC brick or class
+      (<code>app/core/gpc_match.py</code>), and how much of the real local FDC corpus the curated tables reach right now.
+      See ARCH.md, "GPC Category Matching".
+    </p>
+
+    <div id="gm-coverage"><p class="loading">Loading…</p></div>
+
+    <div class="toolbar">
+      <input type="text" id="gm-q" placeholder="Filter by FDC category, GPC code, or hierarchy…" autocomplete="off">
+      <div class="chips" id="gm-levelChips">
+        <button class="chip on" data-level="all">All</button>
+        <button class="chip" data-level="brick">Brick</button>
+        <button class="chip" data-level="class">Class</button>
+      </div>
+    </div>
+
+    <div id="gm-mappings"><p class="loading">Loading mappings…</p></div>
+    <div id="gm-uncoveredWrap"></div>
+
+    <h2 class="section-divider">OFF tag reviews <span class="muted">— the <code>reviewed</code> tier</span></h2>
+    <p class="sub" style="max-width:none;margin:0 0 1rem">
+      Open Food Facts category tags that have been individually hand-verified against a GPC brick or class
+      (<code>OFF_TAG_TO_BRICK</code> / <code>OFF_TAG_TO_CLASS</code> in <code>gpc_match.py</code>), and how much
+      of the real local OFF corpus they reach. Trusted at the same level as the FDC mappings above — a
+      <code>reviewed</code> match is not a best-effort guess, unlike the fuzzy matcher's <code>off_fuzzy</code>
+      fallback. See PLAN.md item 5.
+    </p>
+
+    <div id="gm-offCoverage"><p class="loading">Loading…</p></div>
+
+    <div class="toolbar">
+      <input type="text" id="gm-offQ" placeholder="Filter by OFF tag, GPC code, or hierarchy…" autocomplete="off">
+      <div class="chips" id="gm-offLevelChips">
+        <button class="chip on" data-level="all">All</button>
+        <button class="chip" data-level="brick">Brick</button>
+        <button class="chip" data-level="class">Class</button>
+      </div>
+    </div>
+
+    <div id="gm-offMappings"><p class="loading">Loading mappings…</p></div>
+    <div id="gm-offUncoveredWrap"></div>
+  </div>
+
+  <footer>Read-only, computed live from the local FDC/OFF/GPC bulk copies and <code>gpc_match.py</code>'s curated
+    tables. Full-corpus scans (coverage, distributions) are cached by the source file's own mtime — the first
+    request after a rebuild is slow, everything after is fast.</footer>
 </div>
 
+<script src="/nav.js"></script>
 <script>
-const $ = id => document.getElementById(id);
+if (typeof renderNav === "function") renderNav("/data");
+
+// ── Tab controller ──────────────────────────────────────────────────────
+// All four panels' markup is in the DOM at once (display:none when
+// inactive) -- each panel's own script (below) only runs its first fetch
+// the first time its tab is actually opened (TAB_INIT / STARTED), so
+// visiting just the Data Browser doesn't also silently kick off the Data
+// Quality dashboard's ~11s-cold analytics scan in the background.
+const TABS = ["browser", "quality", "taxonomy", "mappings"];
+const TAB_INIT = {};
+const STARTED = {};
+
+function activateTab(tab, push) {
+  if (!TABS.includes(tab)) tab = "browser";
+  document.querySelectorAll(".toptab").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
+  document.querySelectorAll(".tabpanel").forEach(p => p.classList.toggle("on", p.id === "panel-" + tab));
+  if (!STARTED[tab] && TAB_INIT[tab]) { STARTED[tab] = true; TAB_INIT[tab](); }
+  if (push) {
+    const url = new URL(location.href);
+    if (tab === "browser") url.searchParams.delete("tab"); else url.searchParams.set("tab", tab);
+    history.replaceState(null, "", url);
+  }
+}
+document.getElementById("toptabs").addEventListener("click", e => {
+  const b = e.target.closest(".toptab"); if (!b) return;
+  activateTab(b.dataset.tab, true);
+});
+</script>
+
+<script>
+// ============================= Data Browser panel =============================
+(function () {
+const $ = id => document.getElementById("db-" + id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 const api = p => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)));
 const fmtNum = n => typeof n === "number" ? n.toLocaleString() : n;
@@ -211,13 +614,13 @@ function showSchema() {
       `<div class="fkline">${esc(f.column)} → ${esc(f.references_table)}.${esc(f.references_column)}</div>`).join("");
     return `<div class="stable"><h3>${esc(t.name)}<span class="n">${fmtNum(t.rows)} rows</span></h3>${cols}${fks}</div>`;
   }).join("");
-  $("main").innerHTML = `<div class="tabs"><span class="tab on">Schema</span></div><div class="schema">${cards}</div>`;
+  $("main").innerHTML = `<div class="subtabs"><span class="subtab on">Schema</span></div><div class="schema">${cards}</div>`;
 }
 
 function tableTabs() {
-  return `<div class="tabs">
-    <button class="tab ${state.view === "rows" ? "on" : ""}" data-v="rows">Rows</button>
-    <button class="tab ${state.view === "coverage" ? "on" : ""}" data-v="coverage">Coverage</button>
+  return `<div class="subtabs">
+    <button class="subtab ${state.view === "rows" ? "on" : ""}" data-v="rows">Rows</button>
+    <button class="subtab ${state.view === "coverage" ? "on" : ""}" data-v="coverage">Coverage</button>
   </div>`;
 }
 
@@ -255,21 +658,21 @@ async function renderRows() {
     + `<option value="custom" ${isPreset ? "" : "selected"}>Custom…</option>`;
   $("main").innerHTML = tableTabs() +
     `<div class="toolbar">
-       <input type="text" id="q" placeholder="Search the text columns…" value="${esc(state.q)}">
+       <input type="text" id="db-q" placeholder="Search the text columns…" value="${esc(state.q)}">
        <span class="pagesize">
-         <label for="limit">Show</label>
-         <select id="limit">${limitOptions}</select>
-         <input type="number" id="limitCustom" min="1" max="${MAX_LIMIT}" placeholder="#"
+         <label for="db-limit">Show</label>
+         <select id="db-limit">${limitOptions}</select>
+         <input type="number" id="db-limitCustom" min="1" max="${MAX_LIMIT}" placeholder="#"
            value="${isPreset ? "" : state.limit}" style="${isPreset ? "display:none" : ""}">
        </span>
        <span class="count">${countTxt}</span>
        <span class="pager">
-         <button id="prev" ${d.offset === 0 ? "disabled" : ""}>‹ Prev</button>
-         <button id="next" ${to >= d.matched ? "disabled" : ""}>Next ›</button>
+         <button id="db-prev" ${d.offset === 0 ? "disabled" : ""}>‹ Prev</button>
+         <button id="db-next" ${to >= d.matched ? "disabled" : ""}>Next ›</button>
        </span>
      </div>
      <div class="tbl-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
-     ${isStore ? `<div id="rec"></div>` : ""}`;
+     ${isStore ? `<div id="db-rec"></div>` : ""}`;
   wireTabs();
   $("q").addEventListener("keydown", e => { if (e.key === "Enter") { state.q = $("q").value.trim(); state.offset = 0; render(); } });
   $("prev").addEventListener("click", () => { state.offset = Math.max(0, state.offset - state.limit); render(); });
@@ -322,12 +725,591 @@ async function renderCoverage() {
 }
 
 function wireTabs() {
-  $("main").querySelectorAll(".tab[data-v]").forEach(t => t.addEventListener("click", () => {
+  $("main").querySelectorAll(".subtab[data-v]").forEach(t => t.addEventListener("click", () => {
     state.view = t.dataset.v; state.offset = 0; render();
   }));
 }
 
-init().catch(e => { $("main").innerHTML = `<p class="muted">Failed to load: ${esc(e.message)}</p>`; });
+TAB_INIT.browser = () => init().catch(e => { $("main").innerHTML = `<p class="muted">Failed to load: ${esc(e.message)}</p>`; });
+})();
+</script>
+
+<script>
+// ============================= Data Quality panel =============================
+(function () {
+const $ = id => document.getElementById("dq-" + id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const api = p => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)));
+const fmtNum = n => typeof n === "number" ? n.toLocaleString() : (n ?? "—");
+const fmtPct = n => typeof n === "number" ? n.toFixed(1) + "%" : "—";
+
+function fillClass(pct) {
+  if (pct == null) return "";
+  if (pct === 0) return "dead";
+  if (pct >= 99.5) return "full";
+  return "";
+}
+
+function renderTiles(a) {
+  const fdc = a.sources.fdc, off = a.sources.off, gpc = a.sources.gpc;
+  const fdcCov = a.gpc_matching.fdc_curated, revCov = a.gpc_matching.reviewed;
+  const tiles = [
+    { v: fmtNum(fdc.barcodes), l: "FDC barcodes" },
+    { v: fmtNum(off.products), l: "OFF products" },
+    { v: fmtNum(gpc.bricks), l: "GPC bricks" },
+    { v: fdcCov ? fmtPct(fdcCov.coverage_pct) : "—", l: "FDC categories curated" },
+    { v: revCov ? fmtPct(revCov.coverage_pct) : "—", l: "OFF tags reviewed" },
+  ];
+  $("tiles").innerHTML = tiles.map(t => `<div class="tile"><div class="v">${t.v}</div><div class="l">${t.l}</div></div>`).join("");
+}
+
+function sourceCard(label, s, extra) {
+  if (!s || s.status !== "ok") {
+    return `<div class="source"><h3><span class="dot bad"></span>${label}</h3>
+      <p class="muted" style="font-size:.8125rem">${s ? esc(s.detail || s.status) : "unavailable"}</p></div>`;
+  }
+  const rows = extra.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("");
+  return `<div class="source"><h3><span class="dot ok"></span>${label}</h3><dl>${rows}</dl></div>`;
+}
+
+function renderSources(a) {
+  const { fdc, off, gpc } = a.sources;
+  $("sources").innerHTML = [
+    sourceCard("USDA FDC", fdc, [
+      ["dataset", fdc.dataset], ["barcodes", fmtNum(fdc.barcodes)],
+      ["source date", (fdc.source_modified || "").slice(0, 10)],
+      ["imported", (fdc.imported_at || "").slice(0, 10)], ["size", fdc.size_mb + " MB"],
+    ]),
+    sourceCard("Open Food Facts", off, [
+      ["dataset", off.dataset], ["products", fmtNum(off.products)],
+      ["source date", (off.source_modified || "").slice(0, 10)],
+      ["imported", (off.imported_at || "").slice(0, 10)], ["size", off.size_mb + " MB"],
+    ]),
+    sourceCard("GS1 GPC", gpc, [
+      ["version", gpc.version], ["bricks", fmtNum(gpc.bricks)], ["classes", fmtNum(gpc.classes)],
+      ["families", fmtNum(gpc.families)], ["imported", (gpc.imported_at || "").slice(0, 10)],
+    ]),
+  ].join("");
+}
+
+function gauge(name, cov, pctLabel, denomLabel, unit) {
+  if (!cov) {
+    return `<div class="gauge"><div class="top"><span class="name">${esc(name)}</span></div>
+      <p class="muted" style="font-size:.8125rem">Local copy not available.</p></div>`;
+  }
+  return `
+    <div class="gauge">
+      <div class="top"><span class="name">${esc(name)}</span><span class="pct">${fmtPct(cov.coverage_pct)}</span></div>
+      <div class="track"><div class="fill" style="width:${cov.coverage_pct}%"></div></div>
+      <div class="sub">${fmtNum(pctLabel(cov))} of ${fmtNum(denomLabel(cov))} ${esc(unit)}</div>
+    </div>`;
+}
+
+function renderGauges(a) {
+  const fdcCov = a.gpc_matching.fdc_curated, revCov = a.gpc_matching.reviewed;
+  $("gauges").innerHTML =
+    gauge("fdc_curated — FDC categories", fdcCov,
+          c => c.covered_foods, c => c.total_categorized_foods, "categorized foods") +
+    gauge("reviewed — OFF tags", revCov,
+          c => c.covered_occurrences, c => c.total_tag_occurrences, "tag occurrences");
+}
+
+function renderNutrientCoverage(a) {
+  const rows = a.nutrient_coverage.map(f => `
+    <div class="cov-row">
+      <span class="fname">${esc(f.field)}</span>
+      <div class="track"><div class="fill fdc ${fillClass(f.fdc_pct)}" style="width:${f.fdc_pct ?? 0}%"></div></div>
+      <span class="p">${fmtPct(f.fdc_pct)}</span>
+      <div class="track"><div class="fill off ${fillClass(f.off_pct)}" style="width:${f.off_pct ?? 0}%"></div></div>
+      <span class="p">${fmtPct(f.off_pct)}</span>
+    </div>`).join("");
+  $("nutrientCoverage").innerHTML = `
+    <div class="cov-head"><span>Field</span><span>FDC</span><span></span><span>OFF</span><span></span></div>
+    ${rows}`;
+}
+
+function renderCrossSource(a) {
+  const cs = a.cross_source_agreement;
+  if (!cs) {
+    $("crossSource").innerHTML = `<p class="muted">Both local mirrors are needed to compare them — one is unavailable.</p>`;
+    return;
+  }
+  $("tolLabel").textContent = Math.round(cs.tolerance * 100) + "%";
+  // Only fields with at least one matched pair are worth showing; sorted
+  // worst-agreement-first, since that's the actionable list.
+  const rows = cs.fields
+    .filter(f => f.matched_gtins > 0)
+    .sort((a, b) => a.agree_pct - b.agree_pct);
+  if (!rows.length) {
+    $("crossSource").innerHTML = `<p class="muted">No nutrient has a matched pair in both mirrors.</p>`;
+    return;
+  }
+  const body = rows.map(f => `
+    <div class="agree-row">
+      <span class="fname">${esc(f.field)}</span>
+      <div class="track"><div class="fill ${f.agree_pct < 70 ? "low" : ""}" style="width:${f.agree_pct}%"></div></div>
+      <span class="p">${fmtPct(f.agree_pct)}</span>
+      <span class="n">${fmtNum(f.agree)} / ${fmtNum(f.matched_gtins)} GTINs</span>
+    </div>`).join("");
+  $("crossSource").innerHTML = `
+    <div class="agree-head"><span>Field</span><span>Agreement</span><span></span><span>Matched pairs</span></div>
+    ${body}`;
+}
+
+// ── Value distribution explorer ─────────────────────────────────────
+
+function histogramHtml(label, cls, h) {
+  if (!h || !h.buckets.length) {
+    return `<div class="hist-card"><h4>${esc(label)}</h4><p class="muted" style="font-size:.8125rem">No numeric data.</p></div>`;
+  }
+  const maxCount = Math.max(...h.buckets.map(b => b.count), 1);
+  const bars = h.buckets.map(b =>
+    `<div class="bar ${cls}" style="height:${Math.max(1, b.count / maxCount * 100)}%" title="[${b.lo.toFixed(2)}, ${b.hi.toFixed(2)}) -> ${fmtNum(b.count)}"></div>`
+  ).join("");
+  const clipped = (h.below_range || 0) + (h.above_range || 0);
+  return `
+    <div class="hist-card">
+      <h4>${esc(label)}</h4>
+      <div class="stat-line">min ${fmtNum(h.min)} · max ${fmtNum(h.max)} · ${fmtNum(h.non_null)} of ${fmtNum(h.total)} non-null</div>
+      <div class="hist-bars">${bars}</div>
+      <div class="hist-axis"><span>${h.buckets[0].lo.toFixed(1)}</span><span>${h.buckets[h.buckets.length - 1].hi.toFixed(1)}</span></div>
+      ${clipped ? `<div class="clip-note">${fmtNum(h.below_range)} below · ${fmtNum(h.above_range)} above the 1st–99th percentile range shown (not lost, just off this chart)</div>` : ""}
+    </div>`;
+}
+
+async function loadColumnsFor(store) {
+  const table = store === "fdc" ? "foods" : "products";
+  const d = await api(`/api/v1/data/${store}/numeric-columns?table=${table}`);
+  return d.columns;
+}
+
+async function populateColumnSelect() {
+  const store = $("storeSel").value;
+  const cols = await loadColumnsFor(store);
+  const preferred = "calories_kcal";
+  $("colSel").innerHTML = cols.map(c => `<option value="${esc(c)}" ${c === preferred ? "selected" : ""}>${esc(c)}</option>`).join("");
+  await loadDistribution();
+}
+
+async function loadDistribution() {
+  const column = $("colSel").value;
+  if (!column) return;
+  $("distGrid").innerHTML = `<p class="loading">Loading distribution for "${esc(column)}"…</p>`;
+  const [fdcHist, offHist] = await Promise.all([
+    api(`/api/v1/data/fdc/histogram?table=foods&column=${encodeURIComponent(column)}&bins=16`).catch(() => null),
+    api(`/api/v1/data/off/histogram?table=products&column=${encodeURIComponent(column)}&bins=16`).catch(() => null),
+  ]);
+  $("distGrid").innerHTML =
+    histogramHtml(`USDA FDC — ${column}`, "fdc", fdcHist) +
+    histogramHtml(`Open Food Facts — ${column}`, "off-src", offHist);
+}
+
+async function init() {
+  const a = await api("/api/v1/data/analytics");
+  renderTiles(a);
+  renderSources(a);
+  renderGauges(a);
+  renderNutrientCoverage(a);
+  renderCrossSource(a);
+
+  $("storeSel").addEventListener("change", populateColumnSelect);
+  $("colSel").addEventListener("change", loadDistribution);
+  await populateColumnSelect();
+}
+
+TAB_INIT.quality = () => init().catch(e => {
+  $("tiles").innerHTML = `<p class="muted">Failed to load: ${esc(e.message)}</p>`;
+});
+})();
+</script>
+
+<script>
+// ============================= GPC Taxonomy panel =============================
+(function () {
+const $ = id => document.getElementById("gt-" + id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const api = p => fetch(p).then(r => r.json());
+
+let lastQuery = "";
+const hi = (text) => {
+  if (!lastQuery) return esc(text);
+  const i = String(text).toLowerCase().indexOf(lastQuery.toLowerCase());
+  if (i < 0) return esc(text);
+  const t = String(text);
+  return esc(t.slice(0, i)) + "<mark>" + esc(t.slice(i, i + lastQuery.length)) + "</mark>" + esc(t.slice(i + lastQuery.length));
+};
+
+const SAMPLES = [
+  ["olive oil", "🫒 olive oil"],
+  ["caffeine", "☕ caffeine"],
+  ["gluten", "🌾 gluten"],
+  ["chocolate", "🍫 chocolate"],
+  ["organic", "🌱 organic"],
+];
+
+function setCrumb(parts) {
+  // parts: [{label, go} ...]; last is current (no link)
+  $("crumb").innerHTML = parts.map((p, i) => {
+    const last = i === parts.length - 1;
+    const el = last
+      ? `<span class="here">${esc(p.label)}</span>`
+      : `<a data-i="${i}">${esc(p.label)}</a>`;
+    return el + (last ? "" : `<span class="sep">›</span>`);
+  }).join("");
+  $("crumb").querySelectorAll("a[data-i]").forEach(a =>
+    a.onclick = () => parts[+a.dataset.i].go());
+}
+
+function rowList(title, count, items, onClick) {
+  if (!items.length) return "";
+  const rows = items.map(it => `
+    <button class="row" data-code="${esc(it.code)}">
+      <span class="code">${esc(it.code)}</span>
+      <span class="label">${hi(it.label)}</span>
+      <span class="chevron">›</span>
+    </button>`).join("");
+  return `<div class="card" data-kind="${title}"><h2>${title}<span class="n">${count}</span></h2>${rows}</div>`;
+}
+
+async function showSegments() {
+  setCrumb([{ label: "All segments", go: showSegments }]);
+  $("out").innerHTML = `<div class="loading">Loading…</div>`;
+  const body = await api("/api/v1/gpc/segments/");
+  const html = rowList("Segments", body.count,
+    body.results.map(s => ({ code: s.segment_code, label: s.description })));
+  $("out").innerHTML = html;
+  wire($("out"), code => showSegment(code));
+}
+
+async function showSegment(code) {
+  const d = await api(`/api/v1/gpc/segments/${code}`);
+  setCrumb([
+    { label: "All segments", go: showSegments },
+    { label: d.description, go: () => showSegment(code) },
+  ]);
+  $("out").innerHTML = rowList("Families", d.families.length,
+    d.families.map(f => ({ code: f.family_code, label: f.description })));
+  wire($("out"), c => showFamily(c));
+}
+
+async function showFamily(code) {
+  const d = await api(`/api/v1/gpc/families/${code}`);
+  const seg = d.segment_code_details;
+  setCrumb([
+    { label: "All segments", go: showSegments },
+    ...(seg ? [{ label: seg.segment_description, go: () => showSegment(seg.segment_code) }] : []),
+    { label: d.description, go: () => showFamily(code) },
+  ]);
+  $("out").innerHTML = rowList("Classes", d.classes.length,
+    d.classes.map(c => ({ code: c.class_code, label: c.description })));
+  wire($("out"), c => showClass(c));
+}
+
+async function showClass(code) {
+  const d = await api(`/api/v1/gpc/classes/${code}`);
+  const f = d.family_code_details;
+  setCrumb([
+    { label: "All segments", go: showSegments },
+    ...(f ? [
+      { label: f.segment_description, go: () => showSegment(f.segment_code) },
+      { label: f.description, go: () => showFamily(f.family_code) },
+    ] : []),
+    { label: d.description, go: () => showClass(code) },
+  ]);
+  $("out").innerHTML = rowList("Bricks", d.bricks.length,
+    d.bricks.map(b => ({ code: b.brick_code, label: b.description })));
+  wire($("out"), c => showBrick(c));
+}
+
+async function showBrick(code) {
+  const d = await api(`/api/v1/gpc/bricks/${code}`);
+  const c = d.class_code_details;
+  const trail = [{ label: "All segments", go: showSegments }];
+  if (c) trail.push(
+    { label: c.segment_description, go: () => showSegment(c.segment_code) },
+    { label: c.family_description, go: () => showFamily(c.family_code) },
+    { label: c.description, go: () => showClass(c.class_code) },
+  );
+  trail.push({ label: d.description, go: () => showBrick(code) });
+  setCrumb(trail);
+
+  const attrs = d.attributes || [];
+  const inner = attrs.length
+    ? attrs.map(a => `
+        <div class="attr">
+          <div class="at">${esc(a.att_type_text)}</div>
+          <div class="vals">${(a.values || []).map(v =>
+            `<span class="aval">${esc(v.att_value_text)}</span>`).join("")}</div>
+        </div>`).join("")
+    : `<p class="muted">This brick defines no attributes.</p>`;
+  $("out").innerHTML =
+    `<div class="card"><h2>Brick <span class="n">${esc(d.brick_code)}</span></h2>
+       <p style="margin:0 0 .3rem;font-weight:600">${esc(d.description)}</p></div>
+     <div class="card"><h2>Attributes<span class="n">${attrs.length}</span></h2>${inner}</div>`;
+}
+
+function wire(container, onCode) {
+  container.querySelectorAll(".row[data-code]").forEach(r =>
+    r.onclick = () => onCode(r.dataset.code));
+}
+
+async function search() {
+  const q = $("q").value.trim();
+  if (!q) { showSegments(); return; }
+  lastQuery = q;
+  $("go").disabled = true;
+  setCrumb([{ label: "All segments", go: showSegments }, { label: `Search: “${q}”`, go: () => search() }]);
+  $("out").innerHTML = `<div class="loading">Searching…</div>`;
+  try {
+    const b = await api(`/api/v1/gpc/search/?q=${encodeURIComponent(q)}`);
+    const counts = b.counts || {};
+    let html = "";
+
+    // Attributes first — this is where "olive oil" lives.
+    if ((b.attributes || []).length) {
+      const hits = b.attributes.map(a => {
+        const label = a.kind === "value"
+          ? `<span class="val">${hi(a.att_value_text)}</span> <span class="type">in ${esc(a.att_type_text)}</span>`
+          : `<span class="val">${hi(a.att_type_text)}</span>`;
+        const bricks = (a.bricks || []).map(br =>
+          `<span class="brick" data-code="${esc(br.brick_code)}">${esc(br.description)}</span>`).join("");
+        return `<div class="ahit"><div class="top"><span class="kind">${a.kind}</span>${label}</div>
+                  <div class="bricks">${bricks}</div></div>`;
+      }).join("");
+      html += `<div class="card"><h2>Attributes<span class="n">${counts.attributes ?? b.attributes.length}</span></h2>${hits}</div>`;
+    }
+
+    html += rowList("Bricks", counts.bricks ?? 0,
+      (b.bricks || []).map(x => ({ code: x.brick_code, label: x.description })));
+    html += rowList("Classes", counts.classes ?? 0,
+      (b.classes || []).map(x => ({ code: x.class_code, label: x.description })));
+    html += rowList("Families", counts.families ?? 0,
+      (b.families || []).map(x => ({ code: x.family_code, label: x.description })));
+    html += rowList("Segments", counts.segments ?? 0,
+      (b.segments || []).map(x => ({ code: x.segment_code, label: x.description })));
+
+    const total = Object.values(counts).reduce((a, c) => a + c, 0);
+    if (!total) html = `<div class="card"><p class="muted">No matches for “${esc(q)}”.</p></div>`;
+    else if (b.truncated) html += `<p class="muted">Some result lists were capped. Narrow the search to see the rest.</p>`;
+
+    $("out").innerHTML = html;
+    // brick chips inside attribute hits drill into the brick
+    $("out").querySelectorAll(".ahit .brick[data-code]").forEach(el =>
+      el.onclick = () => showBrick(el.dataset.code));
+    // entity rows drill by kind
+    $("out").querySelectorAll(".card[data-kind]").forEach(card => {
+      const kind = card.dataset.kind;
+      const go = { Bricks: showBrick, Classes: showClass, Families: showFamily, Segments: showSegment }[kind];
+      card.querySelectorAll(".row[data-code]").forEach(r => r.onclick = () => go(r.dataset.code));
+    });
+  } finally {
+    $("go").disabled = false;
+  }
+}
+
+TAB_INIT.taxonomy = () => {
+  $("samples").innerHTML = SAMPLES.map(([q, l]) =>
+    `<button type="button" class="chip" data-q="${esc(q)}">${esc(l)}</button>`).join("");
+  $("samples").addEventListener("click", e => {
+    const c = e.target.closest(".chip"); if (!c) return;
+    $("q").value = c.dataset.q; search();
+  });
+  $("form").addEventListener("submit", e => { e.preventDefault(); search(); });
+  showSegments();
+};
+})();
+</script>
+
+<script>
+// ============================= GPC Mappings panel =============================
+(function () {
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const api = p => fetch(p).then(r => r.json());
+const fmtNum = n => typeof n === "number" ? n.toLocaleString() : n;
+
+// Two parallel sections share this exact shape (CuratedMapping / *Coverage
+// from app/gpc/models.py), just different key names for the "what matched"
+// column (FDC category vs. OFF tag) and the count unit (foods vs. tag
+// occurrences) -- one parameterized set of render functions serves both,
+// keyed by DOM id prefix ("" for the FDC section, "off" for OFF tags), with
+// a "gm-" panel prefix baked into elId() so ids can't collide with any
+// other tab on this page.
+function makeSection(prefix, opts) {
+  return {
+    prefix, ...opts,
+    level: "all", q: "", mappings: [], coverage: null, uncoveredOpen: false,
+  };
+}
+
+const sections = {
+  fdc: makeSection("", {
+    coverageTitle: "Coverage of the local FDC corpus",
+    categoryLabel: "FDC category",
+    countLabel: "foods",
+    uncoveredTitle: "Uncovered FDC categories",
+    emptyMsg: "Local FDC bulk copy not available — showing the curated tables without a live coverage number.",
+  }),
+  off: makeSection("off", {
+    coverageTitle: "Coverage of the local OFF corpus (by tag occurrence)",
+    categoryLabel: "OFF tag",
+    // Not "products": a product carrying 5 tags contributes 5 to this
+    // total, one per tag -- see OffTagCoverage's own docstring.
+    countLabel: "tag occurrences",
+    uncoveredTitle: "Uncovered OFF tags",
+    emptyMsg: "Local OFF bulk copy not available — showing the curated tables without a live coverage number.",
+  }),
+};
+
+// Element ids: unprefixed section (FDC) uses the original lowercase-first
+// ids ("gm-coverage", "gm-mappings", ...); the OFF section prefixes them
+// ("gm-offCoverage", "gm-offMappings", ...). One rule covers both.
+function elId(s, suffix) {
+  return "gm-" + s.prefix + (s.prefix === "" ? suffix.charAt(0).toLowerCase() + suffix.slice(1) : suffix);
+}
+
+function renderCoverage(s) {
+  const c = s.coverage;
+  const covEl = $(elId(s, "Coverage"));
+  if (!c) {
+    covEl.innerHTML = `<div class="card"><p class="muted">${s.emptyMsg}</p></div>`;
+    renderUncovered(s, []);
+    return;
+  }
+  // Both shapes normalized to the same four numbers the card needs.
+  const totalN = c.total_categorized_foods ?? c.total_tag_occurrences;
+  const coveredN = c.covered_foods ?? c.covered_occurrences;
+  const distinctN = c.distinct_fdc_categories ?? c.distinct_tags;
+  const uncovered = c.uncovered_categories ?? c.uncovered_tags;
+  const brickPct = totalN ? (coveredN / totalN * 100) : 0;
+
+  covEl.innerHTML = `
+    <div class="card">
+      <h2>${s.coverageTitle}</h2>
+      <div class="stats">
+        <div class="stat"><div class="v">${c.coverage_pct}%</div><div class="l">of ${s.countLabel} covered</div></div>
+        <div class="stat"><div class="v">${fmtNum(coveredN)}</div><div class="l">covered ${s.countLabel}</div></div>
+        <div class="stat"><div class="v">${fmtNum(totalN)}</div><div class="l">total ${s.countLabel}</div></div>
+        <div class="stat"><div class="v">${c.curated_brick_entries + c.curated_class_entries}</div><div class="l">curated entries</div></div>
+        <div class="stat"><div class="v">${distinctN - uncovered.length}</div><div class="l">of ${fmtNum(distinctN)} ${s.categoryLabel.toLowerCase()}s mapped</div></div>
+      </div>
+      <div class="bar"><div class="brick-seg" style="width:${brickPct}%"></div></div>
+      <div class="barlabel"><span>0%</span><span>100%</span></div>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--brick)"></span>${c.curated_brick_entries} brick-level entries</span>
+        <span><span class="swatch" style="background:var(--cls)"></span>${c.curated_class_entries} class-level entries</span>
+        <span><span class="swatch" style="background:var(--bad)"></span>${fmtNum(uncovered.length)} uncovered ${s.categoryLabel.toLowerCase()}s (${fmtNum(totalN - coveredN)} ${s.countLabel})</span>
+      </div>
+    </div>`;
+
+  renderUncovered(s, uncovered);
+}
+
+function renderUncovered(s, uncovered) {
+  const wrapId = elId(s, "UncoveredWrap");
+  if (!uncovered || !uncovered.length) { $(wrapId).innerHTML = ""; return; }
+  const shown = s.uncoveredOpen ? uncovered : uncovered.slice(0, 10);
+  const rows = shown.map(u => {
+    const label = u.category ?? u.tag;
+    const count = u.food_count ?? u.product_count;
+    return `<tr><td class="cat">${esc(label)}</td><td class="count">${fmtNum(count)}</td></tr>`;
+  }).join("");
+  const toggleId = "gm-" + s.prefix + "UncToggle";
+  $(wrapId).innerHTML = `
+    <div class="card unc">
+      <h2>${s.uncoveredTitle}<span class="n">${fmtNum(uncovered.length)}</span></h2>
+      <div class="tbl-wrap"><table><thead><tr><th>${s.categoryLabel}</th><th style="text-align:right">${s.countLabel[0].toUpperCase()}${s.countLabel.slice(1)}</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+      ${uncovered.length > 10
+        ? `<button class="unc-toggle" id="${toggleId}">${s.uncoveredOpen ? "Show fewer ▲" : `Show all ${fmtNum(uncovered.length)} ▼`}</button>`
+        : ""}
+    </div>`;
+  const toggle = $(toggleId);
+  if (toggle) toggle.addEventListener("click", () => { s.uncoveredOpen = !s.uncoveredOpen; renderUncovered(s, uncovered); });
+}
+
+function hierarchyHtml(hierarchy) {
+  if (!hierarchy || !hierarchy.length) return `<span class="muted">unresolved</span>`;
+  return hierarchy.map((h, i) =>
+    `<span class="${i === hierarchy.length - 1 ? "leaf" : "seg"}">${esc(h)}</span>`
+  ).join(`<span class="arrow">›</span>`);
+}
+
+function filteredMappings(s) {
+  let rows = s.mappings;
+  if (s.level !== "all") rows = rows.filter(m => m.level === s.level);
+  if (s.q) {
+    const needle = s.q.toLowerCase();
+    rows = rows.filter(m =>
+      m.category.toLowerCase().includes(needle) ||
+      m.code.toLowerCase().includes(needle) ||
+      (m.hierarchy || []).some(h => h.toLowerCase().includes(needle)));
+  }
+  return rows;
+}
+
+function renderMappings(s) {
+  const rows = filteredMappings(s);
+  const body = rows.map(m => `
+    <tr>
+      <td class="cat">${esc(m.category)}</td>
+      <td><span class="level-badge ${m.level}">${m.level}</span></td>
+      <td class="code">${esc(m.code)}</td>
+      <td class="hier">${hierarchyHtml(m.hierarchy)}</td>
+    </tr>`).join("");
+  $(elId(s, "Mappings")).innerHTML = `
+    <div class="card">
+      <h2>Curated mappings<span class="n">${rows.length}${rows.length !== s.mappings.length ? ` of ${s.mappings.length}` : ""}</span></h2>
+      ${rows.length
+        ? `<div class="tbl-wrap"><table><thead><tr>
+             <th>${s.categoryLabel}</th><th>Level</th><th>GPC code</th><th>Hierarchy</th>
+           </tr></thead><tbody>${body}</tbody></table></div>`
+        : `<p class="muted">No mappings match “${esc(s.q)}”.</p>`}
+    </div>`;
+}
+
+function wireToolbar(s) {
+  const qId = elId(s, "Q");
+  const chipsId = elId(s, "LevelChips");
+  $(qId).addEventListener("input", () => { s.q = $(qId).value.trim(); renderMappings(s); });
+  $(chipsId).addEventListener("click", e => {
+    const c = e.target.closest(".chip"); if (!c) return;
+    s.level = c.dataset.level;
+    $(chipsId).querySelectorAll(".chip").forEach(el => el.classList.toggle("on", el === c));
+    renderMappings(s);
+  });
+}
+
+async function init() {
+  const resp = await api("/api/v1/gpc/mappings");
+
+  sections.fdc.mappings = resp.mappings || [];
+  sections.fdc.coverage = resp.coverage || null;
+  sections.off.mappings = resp.off_tag_mappings || [];
+  sections.off.coverage = resp.off_tag_coverage || null;
+
+  for (const s of Object.values(sections)) {
+    renderCoverage(s);
+    renderMappings(s);
+    wireToolbar(s);
+  }
+}
+
+TAB_INIT.mappings = () => init().catch(e => {
+  $("gm-coverage").innerHTML = "";
+  $("gm-mappings").innerHTML = `<p class="muted">Failed to load: ${esc(e.message)}</p>`;
+  $("gm-offCoverage").innerHTML = "";
+  $("gm-offMappings").innerHTML = "";
+});
+})();
+</script>
+
+<script>
+// Fires last, once every panel above has registered itself in TAB_INIT --
+// calling this any earlier (e.g. inside the tab-controller script) would
+// activate a tab before its own panel script has run, so its TAB_INIT entry
+// wouldn't exist yet and its first fetch would never fire.
+activateTab(new URLSearchParams(location.search).get("tab") || "browser", false);
 </script>
 </body>
 </html>

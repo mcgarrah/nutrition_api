@@ -119,24 +119,21 @@
     </a>
   </div>
 
-  <div class="section">Explore</div>
+  <div class="section">Explore the data</div>
   <div class="grid">
-    <a class="tile gpc" href="/gpc">
-      <div class="t">GPC browser <span class="path">/gpc</span></div>
-      <div class="d">Explore the GS1 taxonomy — Segment → Family → Class → Brick → Attributes. Search reaches into attributes.</div>
-    </a>
-    <a class="tile gpc" href="/gpc/mappings">
-      <div class="t">GPC mapping viewer <span class="path">/gpc/mappings</span></div>
-      <div class="d">Every curated FDC-category → GPC mapping, resolved, with live coverage against the local FDC corpus.</div>
-    </a>
-    <a class="tile" href="/data">
-      <div class="t">Data browser <span class="path">/data</span></div>
-      <div class="d">Look inside the local stores — OFF, FDC, GPC, and the response cache: schema, rows, and column coverage.</div>
+    <a class="tile gpc" href="/data">
+      <div class="t">Data explorer <span class="path">/data</span></div>
+      <div class="d">Four tabs, one page: Data Browser (schema, rows, column coverage), Data Quality (coverage,
+        value distributions, cross-source agreement), GPC Taxonomy, and GPC Mapping Viewer.</div>
     </a>
   </div>
 
-  <div class="section">API</div>
+  <div class="section">Operate</div>
   <div class="grid">
+    <a class="tile" href="/status">
+      <div class="t">Status <span class="path">/status</span></div>
+      <div class="d">Live dashboard — proxy, backend, cached copies, and external APIs at a glance.</div>
+    </a>
     <a class="tile" href="/docs">
       <div class="t">Swagger UI <span class="path">/docs</span></div>
       <div class="d">Interactive API reference — call any endpoint from the browser.</div>
@@ -148,10 +145,6 @@
     <a class="tile usda" href="/api/v1/lookup/049000006346">
       <div class="t">Example lookup <span class="path">/api/v1/lookup/{gtin}</span></div>
       <div class="d">The core endpoint — a merged CanonicalProduct. This link looks up a Coca-Cola can.</div>
-    </a>
-    <a class="tile" href="/status">
-      <div class="t">Status <span class="path">/status</span></div>
-      <div class="d">Live dashboard — proxy, backend, cached copies, and external APIs at a glance.</div>
     </a>
   </div>
 

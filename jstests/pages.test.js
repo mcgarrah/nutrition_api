@@ -21,13 +21,11 @@ const noop = () => {};
 const PAGES = [
   "app/static/index.html",
   "app/static/lookup.html",
-  "app/static/gpc.html",
   "app/static/data.html",
-  "app/static/gpc_mappings.html",
   "app/static/search.html",
-  "app/static/data_analytics.html",
   "deploy/site/index.html",
   "deploy/site/status.html",
+  "deploy/site/nav.js",
 ];
 
 // Pull the inline <script> bodies out of an HTML file (skipping <script src=…>).
@@ -40,8 +38,9 @@ function inlineScripts(html) {
 }
 
 function pageScript(rel) {
-  const html = fs.readFileSync(path.join(ROOT, rel), "utf8");
-  return inlineScripts(html).join("\n;\n");
+  const src = fs.readFileSync(path.join(ROOT, rel), "utf8");
+  if (rel.endsWith(".js")) return src;          // a plain script file, not HTML to extract from
+  return inlineScripts(src).join("\n;\n");
 }
 
 // ── Every page's inline script must parse ─────────────────────────────

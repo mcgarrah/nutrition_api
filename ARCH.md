@@ -111,7 +111,7 @@ Measured against the real corpus, not just the fixture tests: on a random 2,000-
 
 Each tier is tried in order and, on a hit, every remaining tier is skipped entirely — not run in the background and discarded, actually skipped, so a curated or reviewed answer never pays for a query it doesn't need.
 
-**Progress on both curation efforts is browsable, not just documented here.** `/gpc/mappings` (backed by `GET /api/v1/gpc/mappings`) lists every entry in the FDC and OFF-tag curated tables with its resolved GPC hierarchy, a live coverage percentage measured against the local FDC/OFF bulk copies, and the ranked list of categories/tags still uncovered — so the next thing worth curating is visible without reading `gpc_match.py`'s source, and the coverage numbers on screen and in this document are computed the same way.
+**Progress on both curation efforts is browsable, not just documented here.** The GPC Mappings tab of `/data` (backed by `GET /api/v1/gpc/mappings`; `/gpc/mappings` redirects there, see PLAN.md item 11) lists every entry in the FDC and OFF-tag curated tables with its resolved GPC hierarchy, a live coverage percentage measured against the local FDC/OFF bulk copies, and the ranked list of categories/tags still uncovered — so the next thing worth curating is visible without reading `gpc_match.py`'s source, and the coverage numbers on screen and in this document are computed the same way.
 
 ### Curated OFF tags: the `reviewed` tier
 

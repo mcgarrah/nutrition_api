@@ -93,10 +93,11 @@ Then open:
 - `/` — landing page: choose between the two lookup types below
 - `/lookup` — browser-based barcode (GTIN/UPC) lookup tester (product card, per-source contributions, upstream latency, cache round-trip)
 - `/search` — search by product name against the local FDC/OFF copies; pick a result to see its Nutrition Facts label
-- `/gpc` — GPC taxonomy browser (search + drill Segment → Family → Class → Brick → Attributes)
-- `/gpc/mappings` — GPC Mapping Viewer: every curated FDC-category → GPC brick/class entry (`app/core/gpc_match.py`), resolved to its full hierarchy, plus live coverage against the local FDC corpus and the ranked list of categories still uncovered
-- `/data` — read-only Data Browser for the local stores (OFF, FDC, GPC, response cache): schema, rows, and per-column coverage. The response cache's linked `usda/upc` (barcode → fdc_id) and `usda/food` (fdc_id → food) records are shown merged as one `usda` table, not two disconnected ones. Row pages default to 10 records, with a picker (5/10/20/50/custom, capped at 200) next to Prev/Next
-- `/data/analytics` — Data Quality Dashboard: dataset provenance and freshness for FDC/OFF/GPC, per-nutrient FDC-vs-OFF field coverage, GPC category-matching coverage, and on-demand value-distribution histograms (outlier-resistant, binned over the 1st–99th percentile range). For a data engineer or analyst deciding what's usable, not an operational-health view — see `/status` for that. See PLAN.md item 6
+- `/data` — the data explorer: four tabs on one page (PLAN.md item 11). `?tab=` picks the initial one; `/gpc`, `/gpc/mappings`, and `/data/analytics` redirect here for backward compatibility.
+  - **Data Browser** (default) — read-only browser for the local stores (OFF, FDC, GPC, response cache): schema, rows, and per-column coverage. The response cache's linked `usda/upc` (barcode → fdc_id) and `usda/food` (fdc_id → food) records are shown merged as one `usda` table, not two disconnected ones. Row pages default to 10 records, with a picker (5/10/20/50/custom, capped at 200) next to Prev/Next
+  - **Data Quality** (`?tab=quality`) — dataset provenance and freshness for FDC/OFF/GPC, per-nutrient FDC-vs-OFF field coverage, cross-source agreement, and on-demand value-distribution histograms (outlier-resistant, binned over the 1st–99th percentile range). For a data engineer or analyst deciding what's usable, not an operational-health view — see `/status` for that. See PLAN.md item 6
+  - **GPC Taxonomy** (`?tab=taxonomy`) — taxonomy browser (search + drill Segment → Family → Class → Brick → Attributes)
+  - **GPC Mappings** (`?tab=mappings`) — every curated FDC-category → GPC brick/class entry (`app/core/gpc_match.py`), resolved to its full hierarchy, plus live coverage against the local FDC corpus and the ranked list of categories still uncovered
 - `/docs` — Swagger UI, or `/redoc` for reference-style docs
 
 ### Docker

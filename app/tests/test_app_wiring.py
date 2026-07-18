@@ -152,6 +152,15 @@ def test_root_serves_the_routing_landing_page():
     assert "/search" in resp.text
 
 
+def test_nav_js_is_served():
+    """In production Caddy serves this straight from deploy/site/, never
+    touching the backend -- this route is the fallback for the documented
+    local-dev workflow (uvicorn with no Caddy in front, see CLAUDE.md)."""
+    resp = client.get("/nav.js")
+    assert resp.status_code == 200
+    assert "renderNav" in resp.text
+
+
 def test_lookup_serves_the_barcode_tester_ui():
     resp = client.get("/lookup")
     assert resp.status_code == 200
@@ -159,18 +168,27 @@ def test_lookup_serves_the_barcode_tester_ui():
     assert "Lookup Tester" in resp.text
 
 
-def test_gpc_browser_is_served():
-    resp = client.get("/gpc")
+def test_data_explorer_is_served_with_all_four_tabs():
+    """PLAN.md item 11: /gpc, /gpc/mappings, and /data/analytics were
+    consolidated into tabs of /data -- this is the one page a browser
+    actually renders for all four tools now."""
+    resp = client.get("/data")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
-    assert "GPC Browser" in resp.text
+    for tab in ("Data Browser", "Data Quality", "GPC Taxonomy", "GPC Mappings"):
+        assert tab in resp.text
 
 
-def test_data_analytics_dashboard_is_served():
-    resp = client.get("/data/analytics")
-    assert resp.status_code == 200
-    assert "text/html" in resp.headers["content-type"]
-    assert "Data Quality Dashboard" in resp.text
+def test_former_standalone_pages_redirect_into_the_right_data_tab():
+    cases = [
+        ("/gpc", "taxonomy"),
+        ("/gpc/mappings", "mappings"),
+        ("/data/analytics", "quality"),
+    ]
+    for path, tab in cases:
+        resp = client.get(path, follow_redirects=False)
+        assert resp.status_code in (302, 307), path
+        assert resp.headers["location"] == f"/data?tab={tab}", path
 
 
 def test_static_pages_are_excluded_from_the_openapi_schema():
