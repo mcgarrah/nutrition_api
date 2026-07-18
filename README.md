@@ -12,7 +12,7 @@ The API aggregates food product data from multiple sources into a single canonic
 - **USDA FoodData Central** — Lab-quality nutrient data (authoritative for nutrition), served from a local copy of the bulk dataset with the live API as fallback. 36 nutrients are published: the full US Nutrition Facts label panel plus every vitamin and mineral tracked in `app/core/nutrients.py`
 - **Open Food Facts** — Crowdsourced product metadata (images, ingredients, allergens, labels)
 
-A `DataOrchestrator` queries USDA and Open Food Facts concurrently (`asyncio.gather`), then layers the results: OFF provides the base product profile, USDA overrides nutrition, and GS1 GPC supplies the category hierarchy. Reconciled responses are returned as a `CanonicalProduct` with per-100g nutrient baselines, a `data_sources` provenance list, and per-source latency telemetry.
+A `DataOrchestrator` queries USDA and Open Food Facts concurrently (`asyncio.gather`), then layers the results: OFF provides the base product profile, USDA overrides nutrition, name, brand, and ingredients wherever it has data, and GS1 GPC supplies the category hierarchy. OFF's image, allergens, and labels stand untouched — USDA FDC's branded-food data has no equivalent fields to override them with. Reconciled responses are returned as a `CanonicalProduct` with per-100g nutrient baselines, a `data_sources` provenance list, and per-source latency telemetry.
 
 **Robustness (Phase 2):**
 - Every upstream call is capped at a 2.0s timeout

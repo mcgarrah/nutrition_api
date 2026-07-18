@@ -42,7 +42,7 @@ async def test_usda_overrides_off_nutrition(monkeypatch, off_product, usda_food)
     assert product.calories_kcal == 42.0
     assert product.carbohydrates.value == 10.6
     assert product.sodium.unit == "mg"
-    # OFF still contributes media and ingredients context
+    # OFF still contributes media -- USDA FDC has no images to override it with
     assert product.image_url == "https://images.example.org/coke.jpg"
     assert set(product.data_sources) == {"OpenFoodFacts", "USDA_FDC"}
     assert "USDA_FDC" in product.upstream_latency_ms

@@ -4,8 +4,10 @@ Tests for the DataOrchestrator's reconciliation rules and GPC category mapping.
 The merge is the heart of the service, and its rules are the ones a consumer
 actually depends on:
 
-  * USDA is authoritative for nutrition; OFF values are provisional
-  * OFF owns media, ingredients, allergens, labels
+  * USDA FDC is authoritative ahead of OFF for every field both sources can
+    supply: nutrition, product name, brand, and ingredients
+  * OFF owns media, allergens, labels -- fields USDA FDC's branded-food data
+    does not carry at all, so there is nothing for USDA to override
   * GS1 GPC owns taxonomy, with OFF's informal tags as a fallback
   * a missing field must never overwrite a present one
 
@@ -137,15 +139,25 @@ async def test_sodium_from_usda_is_milligrams(monkeypatch, usda_food):
     assert p.sodium.unit == "mg"
 
 
-async def test_usda_ingredients_used_only_when_off_has_none(monkeypatch, usda_food):
+async def test_usda_ingredients_used_when_off_has_none(monkeypatch, usda_food):
     patch_sources(monkeypatch, None, usda_food)
     p = await orchestrator.lookup("1")
     assert p.ingredients_text.startswith("CARBONATED WATER")
 
 
-async def test_off_ingredients_win_over_usda(monkeypatch, off_product, usda_food):
-    """OFF is the ranked source for label text."""
+async def test_usda_ingredients_win_over_off(monkeypatch, off_product, usda_food):
+    """USDA is the ranked source for label text -- authoritative ahead of
+    OFF's crowd-sourced text whenever USDA has an ingredients list."""
     patch_sources(monkeypatch, off_product, usda_food)
+    p = await orchestrator.lookup("1")
+    assert p.ingredients_text == usda_food["ingredients"]
+
+
+async def test_off_ingredients_survive_when_usda_has_none(monkeypatch, off_product):
+    """The gap-filling direction still works: OFF's text is not erased by an
+    absent USDA field, the same rule that protects every other field."""
+    usda = {"description": "COLA", "ingredients": None, "nutrients": []}
+    patch_sources(monkeypatch, off_product, usda)
     p = await orchestrator.lookup("1")
     assert p.ingredients_text == "Carbonated water, high fructose corn syrup"
 
