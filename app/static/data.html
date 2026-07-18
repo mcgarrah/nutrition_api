@@ -48,6 +48,18 @@
   a { color: var(--link); }
   .muted { color: var(--text-muted); font-size: .875rem; }
   .loading { color: var(--text-muted); font-size: .875rem; padding: .5rem 0; }
+  /* Upgraded in place by showLoading() below once a fetch runs past the
+     typical case -- a first request against a freshly-rebuilt or just-
+     restarted local mirror pays a real cold-disk-cache cost (PLAN.md item 6
+     documents up to ~15s for a cold histogram/analytics scan), and a bare
+     "Loading…" past a few seconds reads as a hang, not progress. */
+  .loading-note { display: block; margin-top: .4rem; font-size: .75rem; color: var(--text-muted); max-width: 46ch; }
+  .loading-bar { display: block; margin-top: .6rem; height: 6px; width: 200px; max-width: 100%;
+    border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+  .loading-bar-fill { display: block; height: 100%; width: 35%; border-radius: 3px; background: var(--link);
+    animation: loading-slide 1.1s ease-in-out infinite; }
+  @keyframes loading-slide { 0% { transform: translateX(-120%); } 100% { transform: translateX(380%); } }
+  @media (prefers-reduced-motion: reduce) { .loading-bar-fill { animation: none; width: 100%; } }
   footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: .75rem; color: var(--text-muted); }
 
   .card {
@@ -539,6 +551,30 @@ document.getElementById("toptabs").addEventListener("click", e => {
   const b = e.target.closest(".toptab"); if (!b) return;
   activateTab(b.dataset.tab, true);
 });
+
+// ── Loading state, shared by all four panels ────────────────────────────
+// Declared here (not inside a panel's IIFE) so every panel below can call
+// it directly, same as TAB_INIT/STARTED/activateTab above. Sets the plain
+// message immediately; if the fetch is still running ~2.2s later (past
+// what a cached call ever takes) it upgrades in place to say so explicitly
+// plus an indeterminate progress bar -- honest that it's still working
+// rather than implying a real percentage, which nothing here can measure.
+// `_gen` guards against a stale timer firing after a fast call already
+// replaced this element's content with something else entirely.
+let _loadGen = 0;
+function showLoading(el, label) {
+  if (!el) return;
+  const gen = ++_loadGen;
+  const msg = label || "Loading…";
+  el.innerHTML = `<p class="loading" data-gen="${gen}">${msg}</p>`;
+  setTimeout(() => {
+    const p = el.querySelector(`p.loading[data-gen="${gen}"]`);
+    if (!p) return;
+    p.innerHTML = `${msg}<br><span class="loading-note">Still working — a fresh, uncached scan of the ` +
+      `full data can take up to 15s the first time (PLAN.md item 6); everything after is fast.</span>` +
+      `<span class="loading-bar"><span class="loading-bar-fill"></span></span>`;
+  }, 2200);
+}
 </script>
 
 <script>
@@ -559,6 +595,7 @@ const state = { store: null, schema: [], table: null, view: "rows",
   offset: 0, limit: 10, q: "", sort: "", dir: "asc" };
 
 async function init() {
+  showLoading($("main"), "Loading…");
   const { stores } = await api("/api/v1/data/stores");
   $("stores").innerHTML = stores.map(s => {
     const rows = (s.tables || []).reduce((a, t) => a + t.rows, 0);
@@ -636,7 +673,8 @@ function render() {
 }
 
 async function renderRows() {
-  $("main").innerHTML = tableTabs() + `<p class="loading">Loading rows…</p>`;
+  $("main").innerHTML = tableTabs() + `<div class="loadspot"></div>`;
+  showLoading($("main").querySelector(".loadspot"), "Loading rows…");
   wireTabs();
   const p = new URLSearchParams({ table: state.table, limit: state.limit, offset: state.offset,
     q: state.q, sort: state.sort, dir: state.dir });
@@ -709,7 +747,8 @@ async function renderRows() {
 }
 
 async function renderCoverage() {
-  $("main").innerHTML = tableTabs() + `<p class="loading">Scanning…</p>`;
+  $("main").innerHTML = tableTabs() + `<div class="loadspot"></div>`;
+  showLoading($("main").querySelector(".loadspot"), "Scanning…");
   wireTabs();
   const d = await api(`/api/v1/data/${state.store}/coverage?table=${encodeURIComponent(state.table)}`);
   const rows = d.columns.map(c => {
@@ -894,7 +933,7 @@ async function populateColumnSelect() {
 async function loadDistribution() {
   const column = $("colSel").value;
   if (!column) return;
-  $("distGrid").innerHTML = `<p class="loading">Loading distribution for "${esc(column)}"…</p>`;
+  showLoading($("distGrid"), `Loading distribution for "${esc(column)}"…`);
   const [fdcHist, offHist] = await Promise.all([
     api(`/api/v1/data/fdc/histogram?table=foods&column=${encodeURIComponent(column)}&bins=16`).catch(() => null),
     api(`/api/v1/data/off/histogram?table=products&column=${encodeURIComponent(column)}&bins=16`).catch(() => null),
@@ -905,6 +944,7 @@ async function loadDistribution() {
 }
 
 async function init() {
+  showLoading($("tiles"), "Loading…");
   const a = await api("/api/v1/data/analytics");
   renderTiles(a);
   renderSources(a);
@@ -973,7 +1013,7 @@ function rowList(title, count, items, onClick) {
 
 async function showSegments() {
   setCrumb([{ label: "All segments", go: showSegments }]);
-  $("out").innerHTML = `<div class="loading">Loading…</div>`;
+  showLoading($("out"), "Loading…");
   const body = await api("/api/v1/gpc/segments/");
   const html = rowList("Segments", body.count,
     body.results.map(s => ({ code: s.segment_code, label: s.description })));
@@ -1059,7 +1099,7 @@ async function search() {
   lastQuery = q;
   $("go").disabled = true;
   setCrumb([{ label: "All segments", go: showSegments }, { label: `Search: “${q}”`, go: () => search() }]);
-  $("out").innerHTML = `<div class="loading">Searching…</div>`;
+  showLoading($("out"), "Searching…");
   try {
     const b = await api(`/api/v1/gpc/search/?q=${encodeURIComponent(q)}`);
     const counts = b.counts || {};
@@ -1281,6 +1321,7 @@ function wireToolbar(s) {
 }
 
 async function init() {
+  showLoading($("gm-coverage"), "Loading…");
   const resp = await api("/api/v1/gpc/mappings");
 
   sections.fdc.mappings = resp.mappings || [];
