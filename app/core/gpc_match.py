@@ -846,6 +846,137 @@ OFF_TAG_TO_BRICK: dict[str, str] = {
     "en:salami": "10005781",  # Pork - Prepared/Processed
     "en:cured-sausages": "10005781",
     "en:sausages": "10005836",  # Mixed Species Sausages - Prepared/Processed
+
+    # ── Round 2 (2026-07-18) ──────────────────────────────────────────
+    # Cheese variants -- all the same brick as en:cheeses/en:mozzarella
+    # above. GPC does not split cheese by style/origin/rind the way OFF's
+    # tags do, so a French soft cheese and a British hard cheese resolve to
+    # the identical brick -- correct, not a loss of precision, since no
+    # finer-grained brick exists to lose.
+    "en:cow-cheeses": "10000028",
+    "en:hard-cheeses": "10000028",
+    "en:soft-cheeses": "10000028",
+    "en:soft-cheeses-with-bloomy-rind": "10000028",
+    "en:french-cheeses": "10000028",
+    "en:italian-cheeses": "10000028",
+    "en:goat-cheeses": "10000028",
+    "en:cream-cheeses": "10000028",
+    "en:pasteurized-cheeses": "10000028",
+    "en:stretched-curd-cheeses": "10000028",
+    "en:uncooked-pressed-cheeses": "10000028",
+    "en:sheep-s-milk-cheeses": "10000028",
+
+    "en:breads": "10000165",  # Bread (Shelf Stable) -- same brick as FDC's "Bread"
+    "en:sliced-breads": "10000165",
+    "en:special-breads": "10000165",
+
+    # Biscuits/Cookies (Shelf Stable) -- same brick as FDC's "Cookies & Biscuits"
+    "en:biscuits": "10000161",
+    "en:biscuits-and-crackers": "10000161",
+    "en:shortbread-cookies": "10000161",
+    "en:chocolate-biscuits": "10000161",
+
+    "en:jams": "10000217",  # Jam, Jelly & Fruit Spreads -- same brick FDC uses
+    "en:berry-jams": "10000217",
+
+    # Fruit - Prepared/Processed (Shelf Stable) -- same brick as FDC's "Canned Fruit"
+    "en:compotes": "10000206",
+    "en:apple-compotes": "10000206",
+
+    # Canned/smoked fish -- same brick FDC's "Canned Tuna"/"Canned Seafood"/
+    # "Smoked fish"/"Canned Fish and Meat" all already resolve to.
+    "en:canned-tunas": "10000018",
+    "en:tunas": "10000018",
+    "en:smoked-fishes": "10000018",
+    "en:smoked-salmons": "10000018",
+    "en:salmons": "10000018",
+    "en:canned-fishes": "10000018",
+    "en:sardines": "10000018",
+
+    # Oils Edible - Vegetable or Plant (Shelf Stable) -- the same brick FDC's
+    # own "Cooking Oils and Fats"/"Vegetable & Cooking Oils" resolve to;
+    # verified against real samples (all bottled olive oil, shelf-stable
+    # retail products, not perishable/bulk).
+    "en:vegetable-oils": "10000040",
+    "en:olive-oils": "10000040",
+    "en:extra-virgin-olive-oils": "10000040",
+    "en:virgin-olive-oils": "10000040",
+
+    # Fruit Juice - Ready to Drink (Shelf Stable) -- same brick FDC's "Fruit
+    # & Vegetable Juice, Nectars & Fruit Drinks" resolves to; verified
+    # against real samples (bottled/cartoned juice, shelf-stable).
+    "en:fruit-juices": "10000220",
+    "en:orange-juices": "10000220",
+    "en:apple-juices": "10000220",
+    "en:juices-and-nectars": "10000220",
+    "en:fruit-nectars": "10000220",
+
+    # Ice Cream/Ice Novelties (Frozen) -- same brick FDC's "Ice Cream &
+    # Frozen Yogurt" resolves to. Deliberately the Frozen state, not Shelf
+    # Stable -- real ice cream is frozen by definition.
+    "en:ice-creams": "10000215",
+    "en:ice-creams-and-sorbets": "10000215",
+    "en:ice-cream-tubs": "10000215",
+
+    # Sauces - Cooking (Shelf Stable). Fixes a real fuzzy-matcher bug for
+    # en:tomato-sauces specifically: "tomato" alone prefix-matches the raw
+    # brick "Tomatoes - Oblong", misclassifying a jarred pasta sauce as a
+    # fresh tomato. Verified against real samples (jarred sauces, e.g.
+    # "ORGANIC TOMATO SAUCE ARRABIATA").
+    "en:pasta-sauces": "10000057",
+    "en:tomato-sauces": "10000057",
+
+    # Pies/Pastries - Sweet (Shelf Stable) -- same brick FDC's "Croissants,
+    # Sweet Rolls, Muffins & Other Pastries" resolves to.
+    "en:pastries": "10000247",
+    "en:sweet-pastries-and-pies": "10000247",
+    "en:pies": "10000247",
+    "en:sweet-pies": "10000247",
+
+    "en:cakes": "10000172",  # Cakes - Sweet (Shelf Stable) -- same as FDC's "Cakes, Cupcakes..."
+    "en:chocolate-cakes": "10000172",
+
+    "en:candies": "10000047",  # Sugar Candy -- same brick as FDC's "Candy"
+    "en:gummi-candies": "10000047",
+    "en:bonbons": "10000047",
+
+    "en:chocolates": "10000045",  # same brick as FDC's "Chocolate"
+    "en:dark-chocolates": "10000045",
+    "en:milk-chocolates": "10000045",
+
+    # Beef - Unprepared/Unprocessed. "en:beef" and "en:beef-and-its-products"
+    # both turned out to be raw cuts on inspection (British Beef Braising
+    # Steak, Sirloin Steaks) despite the name suggesting a general/prepared
+    # category -- checked against real samples before picking this brick
+    # over the Prepared/Processed one below, which "en:beef-dishes" alone
+    # actually matches (Beouf Bourguignon, steak pie, ravioli).
+    "en:beef": "10005786",
+    "en:beef-and-its-products": "10005786",
+    "en:beef-dishes": "10005767",  # Beef - Prepared/Processed
+
+    "en:turkeys": "10005784",  # Turkey - Prepared/Processed
+    "en:turkey-and-its-products": "10005784",
+
+    # Pork - Prepared/Processed, same brick as en:salami/en:cured-sausages
+    # above -- traditional cured/dried ham is near-universally pork.
+    "en:cured-hams": "10005781",
+    "en:dried-hams": "10005781",
+    "en:white-hams": "10005781",
+
+    "en:soups": "10000262",  # Soups - Prepared (Shelf Stable), same as FDC's "Other Soups"
+    "en:vegetable-soups": "10000262",
+
+    # Cereal/Muesli Bars -- same brick as FDC's "Snack, Energy & Granola Bars"
+    "en:cereal-bars": "10000287",
+    "en:protein-bars": "10000287",
+    "en:bars": "10000287",
+
+    "en:sugars": "10000043",  # Granulated, Brown & Powdered Sugar -- same brick FDC uses
+    "en:syrups": "10000044",  # Syrups & Molasses -- same brick FDC uses
+    "en:flavoured-syrups": "10000044",
+
+    "en:hummus": "10000200",  # Dips/Hummus/Pate -- same brick FDC's "Dips & Salsa" resolves to
+    "en:dips": "10000200",
 }
 
 # A coarser class, used when confident about the category but not about one
@@ -872,6 +1003,18 @@ OFF_TAG_TO_CLASS: dict[str, str] = {
 #   en:noodles / en:pasta-dishes / en:stuffed-pastas (samples were mixed
 #     between raw pasta and prepared dishes/other cuisines -- not confident
 #     enough to pick one Pasta/Noodles state brick)
+#   en:breakfast-cereals / en:mueslis / en:cereal-flakes / en:flakes /
+#     en:chocolate-cereals (round 2: samples were a genuine mix of
+#     ready-to-eat cold cereal, e.g. "CAP'N CRUNCH", and not-ready-to-eat
+#     cereal that needs cooking, e.g. "Porridge Oats" -- GPC splits this
+#     brick by exactly that state, and the tag alone doesn't disambiguate
+#     which one a given product is)
+#   en:animal-fats / en:vegetable-fats / en:spreadable-fats (round 2: GPC's
+#     Fats Edible bricks split perishable vs. shelf-stable, and real samples
+#     -- beef tallow, butter -- didn't confidently sort into one state
+#     either; butter specifically is also arguably Butter/Butter
+#     Substitutes territory, not Fats Edible, adding a second axis of
+#     ambiguity)
 #   the vast majority of the broad umbrella tags at the head of the
 #   frequency distribution (en:snacks, en:dairies, en:beverages,
 #   en:meats-and-their-products, en:cereals-and-potatoes, ...) -- see this
