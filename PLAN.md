@@ -657,3 +657,34 @@ on any that come back empty — the same verification method already used by
 hand while building each table (`hierarchy_for_brick`/`hierarchy_for_class`
 against the real `gpc.sqlite3`), just automated and run on every taxonomy
 refresh instead of once at curation time.
+
+## 10. Advanced filters for `/search` and `/lookup` (collapsed by default)
+
+**Status:** not started, exploration only. Requested 2026-07-19.
+
+Both query forms are a single field today. `/search` (`app/static/search.html`)
+is just a text input submitting to `GET /api/v1/search?q=...&limit=...`;
+`search_products()` always queries *both* local mirrors and merges
+(`app/core/search.py:129-147`) with no way to scope to one. `/lookup`
+(`app/static/lookup.html`) is a barcode field against
+`GET /api/v1/lookup/{gtin}`, whose only extra parameter is `fresh` (bypass
+every cache and force a live call) — nothing today lets a caller scope
+*which* sources participate, only whether cached results are trusted.
+
+Idea: a hidden "Advanced" disclosure under each form (`<details>/<summary>`,
+closed by default so the common one-field case is unchanged), opening to
+offer a **source scope** — "Both (default)" / "USDA FDC only" / "Open Food
+Facts only" — plus whatever other typical advanced options prove worth
+adding once this gets designed (candidates to weigh, not commitments: a
+"local mirrors only, never fall through to a live upstream" toggle for
+`/lookup`, the inverse of `fresh`; exposing the `limit` param `/search`'s
+API already has but the UI doesn't; a brand/category filter, which
+`search.py` has no column support for yet).
+
+Not sketched yet: the API shape (a new query param threaded through
+`search_products()`/`orchestrator.lookup()` to skip the excluded source's
+local and upstream calls entirely, not just filter results after the
+fact — a real latency win for the source skipped, not just a UI
+convenience), and how `orchestrator.lookup()`'s current source-fanout
+structure would need to change to make a source actually skippable. Explore
+before committing to a design.
