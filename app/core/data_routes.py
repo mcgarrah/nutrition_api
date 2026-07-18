@@ -26,9 +26,11 @@ async def list_stores():
 @router.get("/analytics", summary="Data quality & coverage dashboard summary")
 async def analytics_summary():
     """One aggregated payload for the /data/analytics dashboard: dataset
-    provenance for each local source, per-nutrient FDC-vs-OFF coverage, and
-    GPC category-matching coverage (fdc_curated and reviewed). See
-    app/core/analytics.py and PLAN.md item 6.
+    provenance for each local source, per-nutrient FDC-vs-OFF coverage, GPC
+    category-matching coverage (fdc_curated and reviewed), and cross-source
+    agreement -- for GTINs present in both local mirrors, how often FDC and
+    OFF agree on a nutrient value. See app/core/analytics.py and PLAN.md
+    item 6.
 
     JSON-first: the intended primary consumer is a script or notebook, not
     just the dashboard page built on top of it.

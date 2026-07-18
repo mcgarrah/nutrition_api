@@ -68,7 +68,11 @@ RELEASE_ASSET = "off.sqlite3.xz"
 
 NUTRIENT_FIELDS = [spec.field for spec in NUTRIENTS]
 # 2: added products_fts (name search moved off a leading-wildcard LIKE scan).
-SCHEMA_VERSION = "2"
+# 3: a nutrient value from_off() drops (implausible, or fails a cross-
+#    nutrient consistency check) is now stored NULL instead of the raw
+#    (garbage) value -- the mirror no longer silently carries numbers
+#    already proven impossible.
+SCHEMA_VERSION = "3"
 BATCH = 20_000
 
 # The text columns we keep, mapped from OFF's CSV names. The *_tags columns
@@ -190,7 +194,8 @@ def build(gz_path: Path, out_path: Path, dataset: str) -> dict:
         # and drops the impossible; a product with nothing it can use is skipped.
         raw = {spec.field: cell(row, spec.off_key)
                for spec in NUTRIENTS if cell(row, spec.off_key)}
-        if not from_off(raw):
+        converted = from_off(raw)
+        if not converted:
             continue
 
         try:
@@ -201,7 +206,18 @@ def build(gz_path: Path, out_path: Path, dataset: str) -> dict:
         batch.append((
             gtin14, modified,
             *(cell(row, TEXT_COLUMNS[name_]).strip() or None for name_ in STORED_TEXT),
-            *(_float_or_none(raw.get(field, "")) for field in NUTRIENT_FIELDS),
+            # Store the raw (grams) value only for a field from_off actually
+            # kept -- converted is what decides plausibility (is_physically_
+            # possible, plus the cross-nutrient checks: a component that
+            # exceeds its whole, an energy figure that contradicts the fat/
+            # protein floor). A field from_off dropped must not be stored raw
+            # and silently reappear as if it were trustworthy; NULL is
+            # honest, a number already proven impossible is not. Storing the
+            # *raw* grams value (not the converted mg/µg one) for a field
+            # that survived preserves the existing storage convention --
+            # off_local.py's own from_off() at lookup time is unchanged.
+            *(_float_or_none(raw.get(field, "")) if field in converted else None
+              for field in NUTRIENT_FIELDS),
         ))
         kept += 1
         if len(batch) >= BATCH:

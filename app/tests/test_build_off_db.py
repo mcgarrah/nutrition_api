@@ -117,6 +117,78 @@ def test_build_stores_nutrients_raw_for_conversion_at_lookup(tmp_path):
     assert row == (539.0, 6.3, 0.0428)
 
 
+# ── Physically-impossible values are nulled, not stored raw ────────────
+#
+# from_off() (app/core/nutrients.py) already refuses to convert an
+# impossible value at lookup time -- but until schema_version 3, the build
+# stored the raw figure regardless, so the mirror file itself carried
+# numbers already proven impossible (a real one found on data/off.sqlite3:
+# a calories_kcal of 1.4x10^16). These tests are the regression guard.
+
+def _export_with(tmp_path, name, extra_header, extra_row):
+    """A tiny OFF export with one product, its columns extended by the
+    caller -- lets each test add just the field(s) it's testing."""
+    gz = tmp_path / name
+    header = ["code", "product_name", "last_modified_t",
+              "proteins_100g", "sodium_100g", "categories_tags", "allergens"] + extra_header
+    row = ["9999999999999", "Test Product", "1700000000",
+           "6.3", "0.0428", "", ""] + extra_row
+    lines = ["\t".join(header), "\t".join(row)]
+    with gzip.open(gz, "wt", encoding="utf-8", newline="") as f:
+        f.write("\n".join(lines) + "\n")
+    os.utime(gz, (MODIFIED.timestamp(), MODIFIED.timestamp()))
+    return gz
+
+
+def test_a_physically_impossible_value_is_stored_as_null(tmp_path):
+    """The exact shape of a real bug found on the live mirror: a garbage
+    calories_kcal (a drink-mix-style per-package figure filed as per-100g,
+    per nutrients.py's own documented example) must not survive into the
+    database -- other, plausible fields on the same row are unaffected."""
+    gz = _export_with(
+        tmp_path, "export.csv.gz", ["energy-kcal_100g"], ["151515"])
+    out = tmp_path / "off.sqlite3"
+
+    bod.build(gz, out, "off-2026-07-14")
+
+    row = sqlite3.connect(out).execute(
+        "SELECT calories_kcal, protein, sodium FROM products "
+        "WHERE gtin14 = '09999999999999'").fetchone()
+    assert row == (None, 6.3, 0.0428)
+
+
+def test_a_negative_value_is_stored_as_null(tmp_path):
+    gz = _export_with(
+        tmp_path, "export.csv.gz", ["energy-kcal_100g"], ["-50"])
+    out = tmp_path / "off.sqlite3"
+
+    bod.build(gz, out, "off-2026-07-14")
+
+    row = sqlite3.connect(out).execute(
+        "SELECT calories_kcal FROM products WHERE gtin14 = '09999999999999'"
+    ).fetchone()
+    assert row == (None,)
+
+
+def test_a_value_dropped_by_the_energy_floor_check_is_stored_as_null(tmp_path):
+    """The Nutella-shaped bug nutrients.py's _reconcile_energy exists for:
+    a stated energy far below what the fat alone must contribute. Proves
+    the build-time filter goes through the real from_off() (with its
+    cross-nutrient checks), not a reimplementation of just the range
+    check."""
+    gz = _export_with(
+        tmp_path, "export.csv.gz",
+        ["energy-kcal_100g", "fat_100g"], ["0", "30.9"])
+    out = tmp_path / "off.sqlite3"
+
+    bod.build(gz, out, "off-2026-07-14")
+
+    row = sqlite3.connect(out).execute(
+        "SELECT calories_kcal, fat FROM products WHERE gtin14 = '09999999999999'"
+    ).fetchone()
+    assert row == (None, 30.9)  # energy dropped; fat itself is plausible, kept
+
+
 def test_build_maps_the_allergens_column_not_a_nonexistent_tags_column(tmp_path):
     """Regression: TEXT_COLUMNS mapped "allergens" -> "allergens_tags", a column
     the bulk CSV export does not have (that is the live API's field name for
@@ -191,7 +263,7 @@ def test_build_creates_a_searchable_fts_index(tmp_path):
     assert row == ("03017620422003",)
 
 
-def test_schema_version_reflects_the_fts_index_addition(tmp_path):
+def test_schema_version_reflects_the_current_build_logic(tmp_path):
     gz = tmp_path / "export.csv.gz"
     _tiny_export(gz, MODIFIED)
     out = tmp_path / "off.sqlite3"
@@ -200,4 +272,4 @@ def test_schema_version_reflects_the_fts_index_addition(tmp_path):
 
     meta = dict(sqlite3.connect(out).execute(
         "SELECT key, value FROM off_metadata").fetchall())
-    assert meta["schema_version"] == "2"
+    assert meta["schema_version"] == bod.SCHEMA_VERSION

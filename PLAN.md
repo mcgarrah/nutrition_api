@@ -398,8 +398,10 @@ security-hardening pass?).
 
 ## 6. Data quality & coverage dashboard
 
-**Status:** first draft shipped 2026-07-18 (items 1-2 below). Items 3-4
-deliberately not in this draft — see "Left out of the first draft."
+**Status:** first draft shipped 2026-07-18 (items 1-2 below). Round 2 shipped
+2026-07-18: item 3 (cross-source agreement) plus an OFF outlier fix the first
+draft's own histogram work surfaced. Item 4 still deliberately not in — see
+"Left out."
 
 **The audience is a data engineer or data analyst, not an operator.**
 `/status` already answers "is the service up" (Caddy, backend, upstream
@@ -510,13 +512,73 @@ caching strategy to use is resolved by measurement: request-time + mtime
 cache is fine for an occasionally-visited dashboard, since the cost lands
 once per data refresh, not once per page load.
 
-**Left out of the first draft**, both explicit design items in the original
-scope, not accidental gaps:
-- **Cross-source agreement** (item 3 in the original list) — whether FDC
-  and OFF agree on a nutrient for the same GTIN. Real and wanted, but a
-  materially different kind of computation (a join across both mirrors,
-  not a single-table scan) from everything else here; better as its own
-  follow-up than rushed into this draft.
+**Round 2: the OFF outlier fix.** The 1.4×10¹⁶ `calories_kcal` garbage row
+above wasn't a one-off — measuring `nutrients.is_physically_possible()`
+directly against both raw mirrors showed `fdc.sqlite3` at 0 implausible
+rows across all 36 fields (because `build_fdc_db.py` already calls
+`from_usda()`, the full plausibility/cross-nutrient filter, at build time)
+versus `off.sqlite3` at thousands per field for ~30 of 36 fields (3611 bad
+`calories_kcal` rows, 351 bad `fat`, 240 bad `protein`, ...) — because
+`build_off_db.py` only ever used `from_off()` as a boolean keep-the-row
+gate, then stored the field's *raw*, unfiltered value regardless of
+whether `from_off()` itself had dropped it. Fixed by storing `NULL`
+instead of the raw value for any field `from_off()`'s output doesn't
+contain — reusing its existing plausibility and cross-nutrient checks
+(`_enforce_subsets`, `_reconcile_energy`) rather than duplicating range
+logic, confirmed safe because those two only ever delete keys, never add
+synthetic ones. `off.sqlite3` schema_version bumped 2 → 3; a rebuild
+(`scripts/build_off_db.py`) is required to pick this up.
+
+**Round 2: cross-source agreement**, item 3 from the original list — for
+GTINs present in *both* local mirrors, how often do FDC and OFF agree on a
+nutrient value (within 15% of the larger figure, a documented/adjustable
+choice, not a regulatory tolerance)? Implemented as a single JOIN + `SUM
+(CASE ...)` pass over both mirrors at once (`analytics._cross_source_
+compute()`), the same "one scan, many expressions" shape as the coverage/
+histogram primitives, ~6.6s cold for all 36 fields against the real
+2.24M/442K-row mirrors, then cached by both files' mtimes.
+
+**A real bug this surfaced before it shipped, worth recording:**
+`fdc.sqlite3` stores nutrients in their *published* unit (mg/µg, since
+`build_fdc_db.py` runs `from_usda()` at build time), but `off.sqlite3`
+stores them in OFF's *native* unit — raw grams per 100g for every field,
+including the 26 of 36 that we publish in mg or µg (`from_off()`'s
+gram→mg/µg conversion runs at lookup time, not build time). The first cut
+of `_cross_source_compute()` compared these two columns directly with no
+conversion; live spot-checks showed exact 1000×/1,000,000× ratios on
+"disagreeing" pairs (FDC phosphorus 213.0 vs. OFF 0.213) rather than
+genuine data variance. Fixed with a new public `nutrients.off_raw_to_
+published_scale(field)` helper (1000 for the mg group, 1e6 for the µg
+group, 1 otherwise), applied to OFF's side of the SQL comparison. Real,
+corrected agreement figures against the live mirrors: macros agree most
+often (`trans_fat` 99.2%, `cholesterol` 90.2%, `calories_kcal` 86.9%,
+`protein` 85.1%), micronutrients measurably less (`thiamin` 15.9%,
+`folate` 14.7%) — plausibly real measurement/reporting variance between
+independently-sourced small values, not an artifact, now that the unit
+mismatch is fixed.
+
+**A hypothesis checked and ruled out for this dataset:** `carbohydrates`
+disagrees on 6,088 of 41,876 matched pairs (85.5% agreement) — a plausible
+suspect is the US/EU labelling split `nutrients.py` already documents
+elsewhere (`_NUTRIENT_SUBSETS`'s comment on why fibre is deliberately not
+checked against carbohydrate as a subset): the US "Total Carbohydrate by
+difference" includes fibre, EU-style labels report carbohydrate net of
+fibre. Tested directly against the live mirrors: only 4.3% of the
+disagreeing pairs fit that signature (`fdc_carbs − off_carbs ≈ off_fiber`),
+and across all 36,503 matched pairs with OFF fibre present, adding OFF's
+fibre back made the gap to FDC's figure *worse* for 61% of pairs and
+better for only 9% (median unadjusted diff is already 0.000). Read: since
+`fdc.sqlite3` is USDA-only (US branded foods), every barcode-matched OFF
+row is describing the same US-labelled package, not an independently
+EU-labelled one — the convention split is real (and correctly why
+`_enforce_subsets` skips fibre) but doesn't apply to this particular
+overlap set, so it isn't the explanation for the carbohydrate
+disagreement here. Not yet investigated: the actual cause (spot-checked
+rows look more like barcode reuse/wrong-product mapping or OCR/crowd-entry
+typos than a systematic offset).
+
+**Left out of the first draft**, an explicit design item in the original
+scope, not an accidental gap:
 - **Upstream-vs-mirrored exclusion counts** (item 4) — persisting what
   `build_off_db.py`/`build_fdc_db.py` already log at build time
   (`_step()` messages) into the mirrors' own metadata tables. Needs
