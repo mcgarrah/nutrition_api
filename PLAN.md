@@ -398,8 +398,8 @@ security-hardening pass?).
 
 ## 6. Data quality & coverage dashboard
 
-**Status:** not started. Added 2026-07-18, following a review of what already
-exists vs. what's missing.
+**Status:** first draft shipped 2026-07-18 (items 1-2 below). Items 3-4
+deliberately not in this draft — see "Left out of the first draft."
 
 **The audience is a data engineer or data analyst, not an operator.**
 `/status` already answers "is the service up" (Caddy, backend, upstream
@@ -453,23 +453,80 @@ not building:
      so "what fraction of upstream did we actually keep, and why" survives
      past the build's own log output.
 
-**Shape:** a new `GET /api/v1/data/analytics` (or similar) endpoint as the
-primary deliverable — JSON first, since the stated audience (a data
-engineer scripting against this) wants machine-readable output, not just a
-page to read. A thin HTML view on top (`/data/analytics` or extending
-`/data` with a new tab), consistent with every other page in this app being
-a view over its own JSON API, not the other way around.
+**Shipped:** `GET /api/v1/data/analytics` (`app/core/analytics.py`) — one
+JSON payload combining source provenance (FDC/OFF/GPC dataset identity,
+freshness, size), per-nutrient FDC-vs-OFF coverage (all 36 fields from
+`nutrients.NUTRIENTS`, matched by column name since both mirrors are built
+from the same tuple), and the two GPC coverage reports (`fdc_curated`,
+`reviewed`) side by side — JSON-first, since the stated audience (a data
+engineer scripting against this) wants machine-readable output before a
+page to read. Plus two new general-purpose `data_browser.py` primitives,
+not analytics-specific: `GET /api/v1/data/{store}/numeric-columns` and
+`GET /api/v1/data/{store}/histogram?column=...&bins=...` — usable for any
+numeric column in any store, not just the ones the dashboard picks.
 
-**Open questions before starting:** whether per-column distributions need
-their own cache table (a full percentile computation over 2.24M rows per
-numeric column, repeated across dozens of nutrient columns, may not be as
-cheap as the existing single-pass null-count query — needs measuring against
-the real `off.sqlite3`/`fdc.sqlite3` before committing to "compute on
-request, cache by mtime" vs. "compute once at build time, store the
-summary"); and how much of "external repositories" should also mean the
-*sibling code packages* (`usda-fdc`, `gs1-gpc`, `nutrimetrics`, ...) rather
-than just the upstream *data* sources — this item assumes data sources, but
-worth confirming before designing the exact scope.
+The `/data/analytics` HTML page consumes all of the above: stat tiles,
+per-source cards, two coverage gauges, an FDC-vs-OFF bar comparison for
+every nutrient field, and an on-demand histogram explorer (pick a store +
+column, get both mirrors' distributions side by side).
+
+**A real finding the histogram work surfaced immediately, live on the real
+data:** `off.sqlite3`'s raw `calories_kcal` column contains a value of
+**1.4 × 10¹⁶** — a single garbage row, invisible to a pure null-rate check
+(the column is 97.1% non-null, looks perfectly healthy by that measure
+alone) but exactly the kind of thing a value-distribution check exists to
+catch. A naive equal-width histogram would have been destroyed by it (every
+bucket empty except the one holding this single value) — the shipped
+`_sqlite_histogram` bins over the 1st-99th percentile range instead
+(computed via SQLite's offset-into-sorted-order trick, since it has no
+native `PERCENTILE_CONT`), reporting `below_range`/`above_range` counts
+explicitly rather than hiding what got clipped. This value is stored raw in
+the mirror and would be caught by `app/core/nutrients.py`'s physical-max
+check at lookup time — this dashboard is looking at data *before* that
+filter runs, which is the point: it shows what the raw local copy actually
+contains, not what a caller of `/api/v1/lookup` would ever see.
+
+**A second finding worth surfacing here, not buried in a commit message:**
+`gpc_match.coverage_report()`/`off_tag_coverage_report()` had no caching at
+all — `GET /api/v1/data/analytics` was taking ~11s on *every* request
+because it re-scanned the entire `off.sqlite3.categories` column (a
+1-3s full-table operation) every single time through `off_tag_coverage_
+report()`. Fixed with the same mtime-keyed cache pattern `data_browser.py`
+already uses (`_mtime_cached` in `gpc_match.py`) — cold request still ~11s,
+warm requests ~55ms. This also quietly speeds up `/gpc/mappings`, which
+called the same uncached functions and had the same latent cost.
+
+**Performance characteristics, measured against the real corpus, not
+estimated:** `coverage()` for `off.sqlite3` (all 36+ columns, 2.24M rows) is
+part of the ~11s cold `/api/v1/data/analytics` cost, then cached by mtime.
+A single histogram is more expensive than coverage — the percentile
+computation requires a sort — measured at **~14-16s cold** for
+`off.sqlite3.calories_kcal` specifically (2.17M non-null values), ~2.5s for
+the equivalent `fdc.sqlite3` column (390K rows). This is why histograms are
+lazy/on-demand in the UI (computed only when a user picks a column, not
+precomputed for every nutrient on page load) rather than "compute once at
+build time" — the open question in the original design about which
+caching strategy to use is resolved by measurement: request-time + mtime
+cache is fine for an occasionally-visited dashboard, since the cost lands
+once per data refresh, not once per page load.
+
+**Left out of the first draft**, both explicit design items in the original
+scope, not accidental gaps:
+- **Cross-source agreement** (item 3 in the original list) — whether FDC
+  and OFF agree on a nutrient for the same GTIN. Real and wanted, but a
+  materially different kind of computation (a join across both mirrors,
+  not a single-table scan) from everything else here; better as its own
+  follow-up than rushed into this draft.
+- **Upstream-vs-mirrored exclusion counts** (item 4) — persisting what
+  `build_off_db.py`/`build_fdc_db.py` already log at build time
+  (`_step()` messages) into the mirrors' own metadata tables. Needs
+  touching the build scripts, not just the read-side dashboard this draft
+  is; scoped out to keep the draft to read-only additions.
+- Whether "external repositories" should also cover the *sibling code
+  packages* (`usda-fdc`, `gs1-gpc`, `nutrimetrics`) was an open question in
+  the original design — resolved by this draft's scope: it means the
+  upstream *data* sources (FDC/OFF/GPC), not the code packages. A
+  code-package angle, if wanted, would be a different item.
 
 ## 7. Automated dependency vulnerability scanning in CI
 

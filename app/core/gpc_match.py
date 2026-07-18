@@ -50,6 +50,24 @@ Licensed under MIT License
 import re
 import sqlite3
 
+# A tiny mtime-keyed cache for the full-corpus scans below
+# (fdc_category_counts/off_tag_counts) -- same pattern as data_browser.py's
+# _cached, kept local rather than imported to avoid coupling this module to
+# the data browser. Without it, GET /api/v1/data/analytics (which calls
+# through coverage_report()/off_tag_coverage_report()) re-scanned the whole
+# 1.36GB off.sqlite3 categories column on every single request.
+_scan_cache: dict = {}
+
+
+def _mtime_cached(key, mtime, compute):
+    hit = _scan_cache.get(key)
+    if hit is not None and hit[0] == mtime:
+        return hit[1]
+    value = compute()
+    _scan_cache[key] = (mtime, value)
+    return value
+
+
 # FDC branded_food_category (exact string, as FDC publishes it) -> GPC
 # brick_code. Verified against the real April 2026 GPC taxonomy — every code
 # here was looked up in data/gpc.sqlite3 and read, not guessed from memory.
@@ -1082,26 +1100,36 @@ def off_tag_counts() -> dict[str, int] | None:
     """{off_tag: product count}, from the local OFF bulk copy.
 
     None if the local copy isn't present -- same degrade-without-failing
-    contract as fdc_category_counts().
+    contract as fdc_category_counts(). Cached by the database's own mtime
+    (_mtime_cached): this is a full scan of every category on every
+    product (~1-3s on the real 1.36GB off.sqlite3), and GET
+    /api/v1/data/analytics calls through to this on every request via
+    off_tag_coverage_report() -- uncached, that turned one dashboard load
+    into a multi-second full-table scan every single time.
     """
     from . import off_local
     if not off_local.DB_PATH.exists():
         return None
-    conn = sqlite3.connect(f"file:{off_local.DB_PATH}?mode=ro", uri=True)
-    try:
-        counts: dict[str, int] = {}
-        rows = conn.execute(
-            "SELECT categories FROM products "
-            "WHERE categories IS NOT NULL AND categories != ''"
-        )
-        for (categories,) in rows:
-            # A product's own tag list has no duplicates worth double
-            # counting, but dedupe defensively (set()) rather than assume.
-            for tag in {t.strip() for t in categories.split(",") if t.strip()}:
-                counts[tag] = counts.get(tag, 0) + 1
-        return counts
-    finally:
-        conn.close()
+
+    def compute():
+        conn = sqlite3.connect(f"file:{off_local.DB_PATH}?mode=ro", uri=True)
+        try:
+            counts: dict[str, int] = {}
+            rows = conn.execute(
+                "SELECT categories FROM products "
+                "WHERE categories IS NOT NULL AND categories != ''"
+            )
+            for (categories,) in rows:
+                # A product's own tag list has no duplicates worth double
+                # counting, but dedupe defensively (set()) rather than assume.
+                for tag in {t.strip() for t in categories.split(",") if t.strip()}:
+                    counts[tag] = counts.get(tag, 0) + 1
+            return counts
+        finally:
+            conn.close()
+
+    return _mtime_cached(
+        ("off_tag_counts",), off_local.DB_PATH.stat().st_mtime, compute)
 
 
 def off_tag_coverage_report() -> dict | None:
@@ -1189,20 +1217,26 @@ def fdc_category_counts() -> dict[str, int] | None:
 
     None if the local copy isn't present -- the caller decides how to degrade
     (the mapping viewer shows the curated tables without a coverage number
-    rather than failing outright).
+    rather than failing outright). Cached by the database's own mtime, same
+    reasoning as off_tag_counts().
     """
     from . import fdc_local
     if not fdc_local.DB_PATH.exists():
         return None
-    conn = sqlite3.connect(f"file:{fdc_local.DB_PATH}?mode=ro", uri=True)
-    try:
-        rows = conn.execute(
-            "SELECT category, COUNT(*) FROM foods "
-            "WHERE category IS NOT NULL AND category != '' GROUP BY category"
-        ).fetchall()
-        return dict(rows)
-    finally:
-        conn.close()
+
+    def compute():
+        conn = sqlite3.connect(f"file:{fdc_local.DB_PATH}?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                "SELECT category, COUNT(*) FROM foods "
+                "WHERE category IS NOT NULL AND category != '' GROUP BY category"
+            ).fetchall()
+            return dict(rows)
+        finally:
+            conn.close()
+
+    return _mtime_cached(
+        ("fdc_category_counts",), fdc_local.DB_PATH.stat().st_mtime, compute)
 
 
 def coverage_report() -> dict | None:

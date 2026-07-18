@@ -96,6 +96,7 @@ Then open:
 - `/gpc` — GPC taxonomy browser (search + drill Segment → Family → Class → Brick → Attributes)
 - `/gpc/mappings` — GPC Mapping Viewer: every curated FDC-category → GPC brick/class entry (`app/core/gpc_match.py`), resolved to its full hierarchy, plus live coverage against the local FDC corpus and the ranked list of categories still uncovered
 - `/data` — read-only Data Browser for the local stores (OFF, FDC, GPC, response cache): schema, rows, and per-column coverage. The response cache's linked `usda/upc` (barcode → fdc_id) and `usda/food` (fdc_id → food) records are shown merged as one `usda` table, not two disconnected ones. Row pages default to 10 records, with a picker (5/10/20/50/custom, capped at 200) next to Prev/Next
+- `/data/analytics` — Data Quality Dashboard: dataset provenance and freshness for FDC/OFF/GPC, per-nutrient FDC-vs-OFF field coverage, GPC category-matching coverage, and on-demand value-distribution histograms (outlier-resistant, binned over the 1st–99th percentile range). For a data engineer or analyst deciding what's usable, not an operational-health view — see `/status` for that. See PLAN.md item 6
 - `/docs` — Swagger UI, or `/redoc` for reference-style docs
 
 ### Docker
@@ -220,9 +221,12 @@ GPC keeps the specifics in attributes, not brick names — "olive oil" is the at
 | GET | `/api/v1/data/{store_id}/schema` | Schema of one store (columns, types, foreign keys) |
 | GET | `/api/v1/data/{store_id}/rows?table=...` | Paginated, searchable, sortable rows |
 | GET | `/api/v1/data/{store_id}/coverage?table=...` | Per-column non-null percentage |
+| GET | `/api/v1/data/{store_id}/numeric-columns?table=...` | Columns worth histogramming |
+| GET | `/api/v1/data/{store_id}/histogram?table=...&column=...&bins=...` | Value distribution, binned over the 1st–99th percentile range so one outlier can't collapse it |
 | GET | `/api/v1/data/{store_id}/record?table=...&key=...` | One full response-store record, untruncated |
+| GET | `/api/v1/data/analytics` | The Data Quality Dashboard's aggregated payload — sources, nutrient coverage, GPC matching, all in one JSON-first response |
 
-`store_id` is one of `off`, `fdc`, `gpc`, `store` (the response cache). Read-only; see `app/core/data_browser.py` for the safety model.
+`store_id` is one of `off`, `fdc`, `gpc`, `store` (the response cache). Read-only; see `app/core/data_browser.py` for the safety model, `app/core/analytics.py` for the dashboard aggregation.
 
 ### Operations
 

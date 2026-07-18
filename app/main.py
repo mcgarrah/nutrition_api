@@ -201,6 +201,12 @@ async def gpc_mappings_page():
     return FileResponse(STATIC_DIR / "gpc_mappings.html")
 
 
+@app.get("/data/analytics", include_in_schema=False)
+async def data_analytics_page():
+    """Serve the data quality & coverage dashboard UI."""
+    return FileResponse(STATIC_DIR / "data_analytics.html")
+
+
 @app.get("/api/v1/health", tags=["Operations"], summary="Health check")
 async def health():
     from .database import get_db

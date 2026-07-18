@@ -25,6 +25,7 @@ const PAGES = [
   "app/static/data.html",
   "app/static/gpc_mappings.html",
   "app/static/search.html",
+  "app/static/data_analytics.html",
   "deploy/site/index.html",
   "deploy/site/status.html",
 ];
