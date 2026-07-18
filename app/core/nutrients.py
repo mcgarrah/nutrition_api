@@ -330,6 +330,25 @@ _OFF_GRAMS_TO_UG = {
 }
 
 
+def off_raw_to_published_scale(field: str) -> float:
+    """The multiplier that turns OFF's *raw stored* value (always grams,
+    see off_local.py) into the unit we publish for `field` -- 1000 for the
+    mg group, 1e6 for the µg group, 1 for a field OFF already reports in
+    the unit we publish (calories_kcal, protein, fat, ...).
+
+    Public precisely so a caller comparing OFF's raw column against another
+    source's already-published-unit value (app/core/analytics.py's
+    cross_source_agreement, not from_off() itself) doesn't have to guess at
+    or duplicate _OFF_GRAMS_TO_MG/_OFF_GRAMS_TO_UG -- comparing without this
+    silently compares two different units and calls the result "disagreement."
+    """
+    if field in _OFF_GRAMS_TO_MG:
+        return 1000.0
+    if field in _OFF_GRAMS_TO_UG:
+        return 1_000_000.0
+    return 1.0
+
+
 def from_usda(nutrients: list[dict]) -> dict[str, float]:
     """Pull our nutrients out of an FDC food's nutrient list, by id.
 

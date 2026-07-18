@@ -13,6 +13,8 @@ a bulk export of it for analysis.
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
+import sqlite3
+
 from . import data_browser
 from . import fdc_local
 from . import gpc_match
@@ -25,6 +27,17 @@ from ..database import get_db
 # same NUTRIENTS tuple) -- comparing FDC vs. OFF coverage for the "same"
 # field is therefore a column-name match, not a mapping table to maintain.
 _NUTRIENT_FIELDS = [spec.field for spec in nutrient_spec.NUTRIENTS]
+
+# "Agree" means within this fraction of whichever value is larger (floored
+# at 1, so two negligible trace amounts -- 0.01g vs 0.02g fiber -- don't
+# register as "100% different" by relative error alone). A documented,
+# adjustable choice, not a regulatory figure: FDA label-rounding tolerance
+# rules are a materially different question (permitted variance in a single
+# lab-tested value against its label), not "do two independent sources
+# describing the same product roughly agree."
+_AGREEMENT_TOLERANCE = 0.15
+
+_cross_source_cache: dict = {}
 
 
 def nutrient_field_coverage() -> list[dict]:
@@ -101,6 +114,98 @@ def gpc_matching_summary() -> dict:
     }
 
 
+def _cross_source_compute() -> list[dict]:
+    conn = sqlite3.connect(":memory:")
+    try:
+        # Read-only ATTACH, same as every other local-mirror query in this
+        # codebase -- nothing here ever writes to either file.
+        conn.execute(f"ATTACH DATABASE 'file:{fdc_local.DB_PATH}?mode=ro' AS fdcdb")
+        conn.execute(f"ATTACH DATABASE 'file:{off_local.DB_PATH}?mode=ro' AS offdb")
+
+        # Both build scripts always create a column for every field in
+        # NUTRIENT_FIELDS, so in production this intersection is just
+        # _NUTRIENT_FIELDS itself -- but assuming that without checking
+        # would be one un-degraded assumption in a module that otherwise
+        # degrades every missing piece gracefully (nutrient_field_coverage()
+        # already tolerates a column absent from either mirror). A comparable
+        # field a schema doesn't have yet gets reported as zero matched
+        # pairs below, not a query error.
+        fdc_cols = {r[1] for r in conn.execute("PRAGMA fdcdb.table_info(foods)")}
+        off_cols = {r[1] for r in conn.execute("PRAGMA offdb.table_info(products)")}
+        comparable = [f for f in _NUTRIENT_FIELDS if f in fdc_cols and f in off_cols]
+
+        results = {
+            field: {"field": field, "matched_gtins": 0, "agree": 0, "agree_pct": None}
+            for field in _NUTRIENT_FIELDS
+        }
+        if not comparable:
+            return list(results.values())
+
+        # One pass over the whole join computes every comparable field's
+        # stats at once -- the same "single scan, many expressions" shape as
+        # data_browser._sqlite_coverage and _sqlite_histogram, measured at
+        # ~6.6s for all 36 fields against the real corpus vs. ~36s+ done as
+        # 36 separate queries. Field names come from the introspected column
+        # list above (not user input) -- interpolated as identifiers is the
+        # same trust model this codebase already applies to validated
+        # column names elsewhere; every *value* here is a literal 1/0.15
+        # constant, never external input.
+        # off_local.py stores every nutrient in OFF's native unit, raw grams
+        # per 100g -- including the ones we publish in mg/ug (from_off()'s
+        # gram->mg/ug conversion runs at *lookup* time, not build time; see
+        # nutrients.off_raw_to_published_scale). fdcdb.foods, by contrast,
+        # already holds published-unit values (build_fdc_db.py calls
+        # from_usda() at build time). Comparing the two raw would silently
+        # compare different units for 26 of 36 fields -- caught live against
+        # the real mirrors as an exact 1000x/1e6x ratio on every mismatch
+        # before this scale factor was added.
+        exprs = []
+        for field in comparable:
+            scale = nutrient_spec.off_raw_to_published_scale(field)
+            off_expr = f'o."{field}"' if scale == 1.0 else f'(o."{field}" * {scale})'
+            exprs.append(
+                f'SUM(CASE WHEN f."{field}" IS NOT NULL AND o."{field}" IS NOT NULL '
+                f'THEN 1 ELSE 0 END)')
+            exprs.append(
+                f'SUM(CASE WHEN f."{field}" IS NOT NULL AND o."{field}" IS NOT NULL '
+                f'AND ABS(f."{field}" - {off_expr}) <= {_AGREEMENT_TOLERANCE} * '
+                f'MAX(ABS(f."{field}"), ABS({off_expr}), 1) THEN 1 ELSE 0 END)')
+        sql = (f'SELECT {", ".join(exprs)} '
+               f'FROM fdcdb.foods f JOIN offdb.products o USING (gtin14)')
+        row = conn.execute(sql).fetchone()
+
+        for i, field in enumerate(comparable):
+            matched, agree = row[i * 2] or 0, row[i * 2 + 1] or 0
+            results[field] = {
+                "field": field,
+                "matched_gtins": matched,
+                "agree": agree,
+                "agree_pct": round(agree / matched * 100, 1) if matched else None,
+            }
+        return list(results.values())
+    finally:
+        conn.close()
+
+
+def cross_source_agreement() -> dict | None:
+    """For GTINs present in *both* local mirrors, how often do FDC and OFF
+    agree on a nutrient value (within _AGREEMENT_TOLERANCE)?
+
+    None if either mirror is unavailable -- there is nothing to join.
+    Cached by both files' mtimes together: either one changing (a fresh
+    build of either mirror) invalidates the cached result.
+    """
+    if not fdc_local.DB_PATH.exists() or not off_local.DB_PATH.exists():
+        return None
+    key = (fdc_local.DB_PATH.stat().st_mtime, off_local.DB_PATH.stat().st_mtime)
+    hit = _cross_source_cache.get("fields")
+    if hit is not None and hit[0] == key:
+        return {"tolerance": _AGREEMENT_TOLERANCE, "fields": hit[1]}
+    fields = _cross_source_compute()
+    _cross_source_cache["fields"] = (key, fields)
+    return {"tolerance": _AGREEMENT_TOLERANCE, "fields": fields}
+
+
 async def summary() -> dict:
     """The single aggregated payload GET /api/v1/data/analytics returns."""
     sources = await source_summary()
@@ -108,4 +213,5 @@ async def summary() -> dict:
         "sources": sources,
         "nutrient_coverage": nutrient_field_coverage(),
         "gpc_matching": gpc_matching_summary(),
+        "cross_source_agreement": cross_source_agreement(),
     }

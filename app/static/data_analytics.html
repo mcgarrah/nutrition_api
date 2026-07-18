@@ -84,6 +84,17 @@
   .legend span { display: inline-flex; align-items: center; gap: .35rem; }
   .swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 
+  /* cross-source agreement */
+  .agree-head { display: grid; grid-template-columns: 150px 1fr 60px 90px; gap: .3rem .7rem; font-size: .625rem;
+    text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); padding: 0 0 .35rem; }
+  .agree-row { display: grid; grid-template-columns: 150px 1fr 60px 90px; gap: .3rem .7rem; align-items: center; padding: .2rem 0; }
+  .agree-row .fname { font-size: .8125rem; font-family: ui-monospace, Menlo, monospace; }
+  .agree-row .track { height: 9px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+  .agree-row .fill { height: 100%; background: var(--qa); }
+  .agree-row .fill.low { background: var(--bad); }
+  .agree-row .p { text-align: right; font-size: .75rem; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+  .agree-row .n { text-align: right; font-size: .6875rem; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+
   /* distribution explorer */
   .dist-toolbar { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; margin-bottom: .8rem; }
   select { padding: .4rem .6rem; font-size: .8125rem; border-radius: 8px; border: 1px solid var(--border);
@@ -136,6 +147,14 @@
       <span><span class="swatch" style="background:var(--fdc)"></span>USDA FDC</span>
       <span><span class="swatch" style="background:var(--off)"></span>Open Food Facts</span>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>Cross-source agreement</h2>
+    <p class="note">For GTINs present in <em>both</em> local mirrors, how often FDC and OFF agree on a nutrient
+      value (within <span id="tolLabel">15%</span> of the larger figure). Sorted worst-agreement first — the
+      fields most worth double-checking before trusting either source alone.</p>
+    <div id="crossSource"><p class="loading">Loading…</p></div>
   </div>
 
   <div class="card">
@@ -252,6 +271,34 @@ function renderNutrientCoverage(a) {
     ${rows}`;
 }
 
+function renderCrossSource(a) {
+  const cs = a.cross_source_agreement;
+  if (!cs) {
+    $("crossSource").innerHTML = `<p class="muted">Both local mirrors are needed to compare them — one is unavailable.</p>`;
+    return;
+  }
+  $("tolLabel").textContent = Math.round(cs.tolerance * 100) + "%";
+  // Only fields with at least one matched pair are worth showing; sorted
+  // worst-agreement-first, since that's the actionable list.
+  const rows = cs.fields
+    .filter(f => f.matched_gtins > 0)
+    .sort((a, b) => a.agree_pct - b.agree_pct);
+  if (!rows.length) {
+    $("crossSource").innerHTML = `<p class="muted">No nutrient has a matched pair in both mirrors.</p>`;
+    return;
+  }
+  const body = rows.map(f => `
+    <div class="agree-row">
+      <span class="fname">${esc(f.field)}</span>
+      <div class="track"><div class="fill ${f.agree_pct < 70 ? "low" : ""}" style="width:${f.agree_pct}%"></div></div>
+      <span class="p">${fmtPct(f.agree_pct)}</span>
+      <span class="n">${fmtNum(f.agree)} / ${fmtNum(f.matched_gtins)} GTINs</span>
+    </div>`).join("");
+  $("crossSource").innerHTML = `
+    <div class="agree-head"><span>Field</span><span>Agreement</span><span></span><span>Matched pairs</span></div>
+    ${body}`;
+}
+
 // ── Value distribution explorer ─────────────────────────────────────
 
 function histogramHtml(label, cls, h) {
@@ -306,6 +353,7 @@ async function init() {
   renderSources(a);
   renderGauges(a);
   renderNutrientCoverage(a);
+  renderCrossSource(a);
 
   $("storeSel").addEventListener("change", populateColumnSelect);
   $("colSel").addEventListener("change", loadDistribution);
