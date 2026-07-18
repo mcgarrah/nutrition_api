@@ -12,8 +12,15 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # Build the GPC SQLite database from the bundled XML (deterministic build —
-# no network fetch; the app can auto-update from GS1 at runtime if needed)
+# no network fetch; the app can auto-update from GS1 at runtime if needed).
+# import_gpc_xml.py imports app.core.gpc_match (PLAN.md item 9's curated-code
+# staleness check) -- copied in individually, not the whole app/ tree, since
+# gpc_match.py's own imports are just re/sqlite3 and this keeps the builder
+# stage from rebuilding on every unrelated app/ change.
 ENV PYTHONPATH=/install/lib/python3.13/site-packages
+COPY app/__init__.py app/__init__.py
+COPY app/core/__init__.py app/core/__init__.py
+COPY app/core/gpc_match.py app/core/gpc_match.py
 COPY scripts/ scripts/
 COPY data/imports/en-v20251127.xml data/imports/en-v20251127.xml
 RUN python scripts/import_gpc_xml.py \
