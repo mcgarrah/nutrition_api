@@ -5,6 +5,14 @@ Not a backlog of every idea — see [NOTES.md](NOTES.md) "Ideas not yet acted
 on" for those. Items here have enough of a concrete approach that starting
 them should mostly be execution, not design.
 
+Three groups below: **Active now** is the current focus. **Longer term** is
+real, decided work that isn't being picked up right now — parked, not
+abandoned. **Shipped** is completed work, kept for the record of what was
+tried, measured, and decided along the way, not just the end state. Item
+numbers are stable IDs — referenced elsewhere in the codebase (README.md,
+ARCH.md, commit messages) — not a reading or priority order; the section
+headings are what's actually being worked on.
+
 ## Project goals
 
 What this project is *for*, so plan items can be judged against something:
@@ -27,6 +35,91 @@ What this project is *for*, so plan items can be judged against something:
 5. **Publicly reachable, defensibly so.** Exposed to the internet (currently
    via Tailscale Funnel) with rate limiting, input caps, a firewalled
    backend, and attribution obligations honored.
+
+# Active now
+
+## 8. Response store retention
+
+**Status:** not started. Found during a platform review, 2026-07-18.
+
+`app/core/store.py` has `get`/`put` and a `TTL_DAYS` (default 30) that
+governs whether a record is still fresh enough to *serve* without
+re-fetching — but nothing ever deletes a record past that age. Checked: no
+`remove`/`prune`/`cleanup` function exists anywhere in the module. A record
+for a barcode nobody looks up again simply stays on disk forever; the
+directory can only grow. Small today (76 KB, 27 files on the reference
+LXC), but this is a store with no ceiling on a service meant to run
+long-term, and `data/` is the one path `nutrition-api.service`'s systemd
+sandboxing grants write access to (`ReadWritePaths`) — worth bounding
+before it's a real disk-exhaustion question instead of a hypothetical one.
+
+Sketch: a `prune(older_than_days=STORE_TTL_DAYS * N)` function (a multiple
+of the serving TTL, not the TTL itself — a record just past 30 days but
+still occasionally re-served-stale-then-refreshed is different from one
+untouched for 6 months) run from a systemd timer — item 3 (longer term)
+proposes the same mechanism for mirror rebuilds; if that gets picked up
+first, fold this in rather than standing up a second scheduling mechanism,
+otherwise a standalone timer for just this is fine too.
+
+## 9. Curated GPC code staleness check
+
+**Status:** not started. Found during a platform review, 2026-07-18.
+
+`FDC_CATEGORY_TO_BRICK`/`_CLASS` and `OFF_TAG_TO_BRICK`/`_CLASS` hard-code
+GPC brick/class codes verified against one specific GS1 taxonomy version at
+curation time. `scripts/import_gpc_xml.py` auto-updates the taxonomy when
+GS1 publishes a newer one — if GS1 ever retires or renumbers a code between
+versions, the corresponding curated entry doesn't error, it just silently
+starts resolving to an empty hierarchy (`hierarchy_for_brick`/
+`hierarchy_for_class` return `[]` for an unknown code, by design, so an
+unresolved *lookup* code degrades gracefully — but an unresolved *curated*
+code degrading the same way is a regression nobody would notice, since it
+looks identical to "no curated entry exists for this category/tag" rather
+than "a curated entry broke"). No check anywhere currently confirms every
+curated code still resolves against the *current* live taxonomy.
+
+Sketch: a small script (or a step folded into `import_gpc_xml.py --auto-
+update`, right after a successful rebuild) that resolves every code in all
+four curated tables against the freshly-imported database and logs/alerts
+on any that come back empty — the same verification method already used by
+hand while building each table (`hierarchy_for_brick`/`hierarchy_for_class`
+against the real `gpc.sqlite3`), just automated and run on every taxonomy
+refresh instead of once at curation time.
+
+## 10. Advanced filters for `/search` and `/lookup` (collapsed by default)
+
+**Status:** not started, exploration only. Requested 2026-07-19.
+
+Both query forms are a single field today. `/search` (`app/static/search.html`)
+is just a text input submitting to `GET /api/v1/search?q=...&limit=...`;
+`search_products()` always queries *both* local mirrors and merges
+(`app/core/search.py:129-147`) with no way to scope to one. `/lookup`
+(`app/static/lookup.html`) is a barcode field against
+`GET /api/v1/lookup/{gtin}`, whose only extra parameter is `fresh` (bypass
+every cache and force a live call) — nothing today lets a caller scope
+*which* sources participate, only whether cached results are trusted.
+
+Idea: a hidden "Advanced" disclosure under each form (`<details>/<summary>`,
+closed by default so the common one-field case is unchanged), opening to
+offer a **source scope** — "Both (default)" / "USDA FDC only" / "Open Food
+Facts only" — plus whatever other typical advanced options prove worth
+adding once this gets designed (candidates to weigh, not commitments: a
+"local mirrors only, never fall through to a live upstream" toggle for
+`/lookup`, the inverse of `fresh`; exposing the `limit` param `/search`'s
+API already has but the UI doesn't; a brand/category filter, which
+`search.py` has no column support for yet).
+
+Not sketched yet: the API shape (a new query param threaded through
+`search_products()`/`orchestrator.lookup()` to skip the excluded source's
+local and upstream calls entirely, not just filter results after the
+fact — a real latency win for the source skipped, not just a UI
+convenience), and how `orchestrator.lookup()`'s current source-fanout
+structure would need to change to make a source actually skippable. Explore
+before committing to a design.
+
+# Longer term
+
+Real, decided work — not a vague idea — but not being picked up right now.
 
 ## 1. Custom domain (`nutrition-api-dev.mcgarrah.org`) via Tailscale Funnel raw TCP forwarding
 
@@ -187,6 +280,80 @@ flowchart LR
   block (current working `*.ts.net` setup) running alongside this, or replace
   it outright once the custom domain is verified working.
 
+## 3. Scheduled refresh of the local bulk mirrors
+
+**Status:** not started. Currently a fully manual loop.
+
+OFF republishes daily and FDC twice a year, but refreshing the mirrors
+means remembering to run `build_off_db.py` / `build_fdc_db.py
+--auto-update`, then `gh release create`/`upload` the `.xz` archives, then
+restart the service. Nothing schedules it, so the OFF mirror silently ages
+(rebuilt by hand each time this session needed fresher data, most recently
+2026-07-18 to pick up the outlier-storage fix in item 6).
+
+Sketch: a systemd **timer** on the reference LXC (weekly for OFF — daily is
+churn without benefit given the response store absorbs misses; on-release
+for FDC, which `--check` already detects) running a script that rebuilds,
+verifies row counts against the previous build (a >10% shrink aborts —
+upstream export glitches happen), publishes the release asset with
+`gh release upload --clobber`, and restarts `nutrition-api.service` off-peak.
+Decisions to make when picking this up: whether the LXC (12 GB RAM) is the
+right build host or whether a beefier build node should push assets; where
+build logs/failures surface (the `/status` dashboard already shows dataset
+dates, so staleness is at least *visible* today); and whether to prune old
+dated OFF downloads (they are deliberately kept side-by-side today). If
+item 8 (response store retention) is still unpicked when this starts, its
+prune job fits naturally on the same timer rather than a second one.
+
+## 7. Automated dependency vulnerability scanning in CI
+
+**Status:** not started. Found during a platform review, 2026-07-18.
+
+`pip-audit` was run once, by hand, during the earlier security-hardening
+session (PR #38) — it is not part of `.github/workflows/ci.yml`, which
+currently runs flake8, pytest, the node static-page tests, and a Docker
+build, nothing dependency-scanning shaped. A CVE disclosed in `fastapi`,
+`pydantic`, or any other pinned dependency *after* that one-time check would
+never be caught. No Dependabot config either (`.github/dependabot.yml`
+doesn't exist).
+
+Sketch: add a `pip-audit` step to the existing `test` job (fails the build
+on a known vulnerability, same bar as flake8/pytest already failing it) or
+a separate scheduled job (weekly, since a new CVE can appear without any
+code change here to trigger CI) — worth deciding which before starting,
+since a PR-blocking scan and a scheduled advisory scan serve different
+purposes and this codebase doesn't need to choose only one. A minimal
+`dependabot.yml` (pip + github-actions ecosystems) covers the "keep
+versions current" half separately from the "block on known-bad" half.
+
+## 12. Persist upstream-vs-mirrored exclusion counts
+
+**Status:** not started — split out of item 6's first draft, 2026-07-18,
+to give it a proper home instead of staying buried in a "left out" note.
+
+Each local mirror is a *filtered subset* of what the upstream actually
+publishes — OFF's ~4.5M-row export becomes ~2.24M kept rows (needs barcode
++ name + a usable nutrient), FDC's 2.0M branded records collapse to 442,095
+barcodes. The exclusion counts already get logged during
+`build_off_db.py`/`build_fdc_db.py` runs (`_step()` messages) but aren't
+persisted or queryable afterward.
+
+Sketch: record them in the mirror's own `*_metadata` table, alongside
+`dataset`/`source_modified`, the same place dataset provenance already
+lives, so "what fraction of upstream did we actually keep, and why"
+survives past the build's own log output — and becomes visible in the Data
+Quality dashboard (item 6, shipped) rather than only in a build-time log
+line. Needs touching the build scripts, not just a read-side addition,
+which is why it was scoped out of item 6's first (read-only) draft.
+
+Also open, resolved for item 6's shipped scope but worth restating if this
+is picked up: whether "external repositories" should also cover the
+*sibling code packages* (`usda-fdc`, `gs1-gpc`, `nutrimetrics`) — no, this
+item means the upstream *data* sources (FDC/OFF/GPC) only. A code-package
+staleness angle, if ever wanted, would be a distinct item.
+
+# Shipped
+
 ## 2. ~~Name search: stop blocking the event loop, then make it fast (FTS5)~~ — DONE 2026-07-18
 
 **Status:** (a) and (b) both fixed and deployed — `data/fdc.sqlite3` and
@@ -239,29 +406,6 @@ the running service measured 25–203ms, matching the synthetic numbers
 above. Tokenizer behavior on OFF's non-English/accented product names was
 not separately audited — `remove_diacritics 2` should handle the common
 case, but this wasn't stress-tested against real multilingual rows.
-
-## 3. Scheduled refresh of the local bulk mirrors
-
-**Status:** not started. Currently a fully manual loop.
-
-OFF republishes daily and FDC twice a year, but refreshing the mirrors
-means remembering to run `build_off_db.py` / `build_fdc_db.py
---auto-update`, then `gh release create`/`upload` the `.xz` archives, then
-restart the service. Nothing schedules it, so the OFF mirror silently ages
-(the one on the reference LXC is `off-2026-07-14` and only that fresh
-because it was rebuilt by hand during the nutrient-expansion work).
-
-Sketch: a systemd **timer** on the reference LXC (weekly for OFF — daily is
-churn without benefit given the response store absorbs misses; on-release
-for FDC, which `--check` already detects) running a script that rebuilds,
-verifies row counts against the previous build (a >10% shrink aborts —
-upstream export glitches happen), publishes the release asset with
-`gh release upload --clobber`, and restarts `nutrition-api.service` off-peak.
-Decisions to make when picking this up: whether the LXC (12 GB RAM) is the
-right build host or whether a beefier build node should push assets; where
-build logs/failures surface (the `/status` dashboard already shows dataset
-dates, so staleness is at least *visible* today); and whether to prune old
-dated OFF downloads (they are deliberately kept side-by-side today).
 
 ## 4. ~~Upgrade the OFF fuzzy GPC matcher to the word-boundary prototype~~ — DONE 2026-07-18
 
@@ -400,8 +544,9 @@ security-hardening pass?).
 
 **Status:** first draft shipped 2026-07-18 (items 1-2 below). Round 2 shipped
 2026-07-18: item 3 (cross-source agreement) plus an OFF outlier fix the first
-draft's own histogram work surfaced. Item 4 still deliberately not in — see
-"Left out."
+draft's own histogram work surfaced. The remaining deferred piece (item 4,
+upstream-vs-mirrored exclusion counts) was split out to its own longer-term
+item — see item 12, above.
 
 **The audience is a data engineer or data analyst, not an operator.**
 `/status` already answers "is the service up" (Caddy, backend, upstream
@@ -444,16 +589,9 @@ not building:
      item is making that a systematic, queryable statistic instead of a
      one-off manual spot check.
   4. **Upstream vs. mirrored ("external repositories").** Each local mirror
-     is a *filtered subset* of what the upstream actually publishes — OFF's
-     ~4.5M-row export becomes ~2.24M kept rows (needs barcode + name + a
-     usable nutrient), FDC's 2.0M branded records collapse to 442,095
-     barcodes. The exclusion counts already get logged during
-     `build_off_db.py`/`build_fdc_db.py` runs (`_step()` messages) but
-     aren't persisted or queryable afterward — this item means recording
-     them (in the mirror's own `*_metadata` table, alongside `dataset`/
-     `source_modified`, the same place dataset provenance already lives)
-     so "what fraction of upstream did we actually keep, and why" survives
-     past the build's own log output.
+     is a *filtered subset* of what the upstream actually publishes — see
+     item 12 (longer term) for the full writeup; split out of this item's
+     first draft rather than kept as a buried note.
 
 **Shipped:** `GET /api/v1/data/analytics` (`app/core/analytics.py`) — one
 JSON payload combining source provenance (FDC/OFF/GPC dataset identity,
@@ -467,10 +605,11 @@ not analytics-specific: `GET /api/v1/data/{store}/numeric-columns` and
 `GET /api/v1/data/{store}/histogram?column=...&bins=...` — usable for any
 numeric column in any store, not just the ones the dashboard picks.
 
-The `/data/analytics` HTML page consumes all of the above: stat tiles,
-per-source cards, two coverage gauges, an FDC-vs-OFF bar comparison for
-every nutrient field, and an on-demand histogram explorer (pick a store +
-column, get both mirrors' distributions side by side).
+The dashboard (now the "Data Quality" tab of `/data`, see item 11) consumes
+all of the above: stat tiles, per-source cards, two coverage gauges, an
+FDC-vs-OFF bar comparison for every nutrient field, and an on-demand
+histogram explorer (pick a store + column, get both mirrors' distributions
+side by side).
 
 **A real finding the histogram work surfaced immediately, live on the real
 data:** `off.sqlite3`'s raw `calories_kcal` column contains a value of
@@ -495,8 +634,9 @@ because it re-scanned the entire `off.sqlite3.categories` column (a
 1-3s full-table operation) every single time through `off_tag_coverage_
 report()`. Fixed with the same mtime-keyed cache pattern `data_browser.py`
 already uses (`_mtime_cached` in `gpc_match.py`) — cold request still ~11s,
-warm requests ~55ms. This also quietly speeds up `/gpc/mappings`, which
-called the same uncached functions and had the same latent cost.
+warm requests ~55ms. This also quietly speeds up the GPC Mappings tab of
+`/data`, which called the same uncached functions and had the same latent
+cost.
 
 **Performance characteristics, measured against the real corpus, not
 estimated:** `coverage()` for `off.sqlite3` (all 36+ columns, 2.24M rows) is
@@ -510,7 +650,9 @@ precomputed for every nutrient on page load) rather than "compute once at
 build time" — the open question in the original design about which
 caching strategy to use is resolved by measurement: request-time + mtime
 cache is fine for an occasionally-visited dashboard, since the cost lands
-once per data refresh, not once per page load.
+once per data refresh, not once per page load. (This cold-cache cost is
+also why the `/data` explorer shows a "still working" note and progress
+bar past ~2.2s of loading — see item 11.)
 
 **Round 2: the OFF outlier fix.** The 1.4×10¹⁶ `calories_kcal` garbage row
 above wasn't a one-off — measuring `nutrients.is_physically_possible()`
@@ -527,7 +669,8 @@ contain — reusing its existing plausibility and cross-nutrient checks
 (`_enforce_subsets`, `_reconcile_energy`) rather than duplicating range
 logic, confirmed safe because those two only ever delete keys, never add
 synthetic ones. `off.sqlite3` schema_version bumped 2 → 3; a rebuild
-(`scripts/build_off_db.py`) is required to pick this up.
+(`scripts/build_off_db.py`) is required to pick this up — done 2026-07-18,
+verified 0 implausible values across all 36 fields post-rebuild.
 
 **Round 2: cross-source agreement**, item 3 from the original list — for
 GTINs present in *both* local mirrors, how often do FDC and OFF agree on a
@@ -577,119 +720,7 @@ disagreement here. Not yet investigated: the actual cause (spot-checked
 rows look more like barcode reuse/wrong-product mapping or OCR/crowd-entry
 typos than a systematic offset).
 
-**Left out of the first draft**, an explicit design item in the original
-scope, not an accidental gap:
-- **Upstream-vs-mirrored exclusion counts** (item 4) — persisting what
-  `build_off_db.py`/`build_fdc_db.py` already log at build time
-  (`_step()` messages) into the mirrors' own metadata tables. Needs
-  touching the build scripts, not just the read-side dashboard this draft
-  is; scoped out to keep the draft to read-only additions.
-- Whether "external repositories" should also cover the *sibling code
-  packages* (`usda-fdc`, `gs1-gpc`, `nutrimetrics`) was an open question in
-  the original design — resolved by this draft's scope: it means the
-  upstream *data* sources (FDC/OFF/GPC), not the code packages. A
-  code-package angle, if wanted, would be a different item.
-
-## 7. Automated dependency vulnerability scanning in CI
-
-**Status:** not started. Found during a platform review, 2026-07-18.
-
-`pip-audit` was run once, by hand, during the earlier security-hardening
-session (PR #38) — it is not part of `.github/workflows/ci.yml`, which
-currently runs flake8, pytest, the node static-page tests, and a Docker
-build, nothing dependency-scanning shaped. A CVE disclosed in `fastapi`,
-`pydantic`, or any other pinned dependency *after* that one-time check would
-never be caught. No Dependabot config either (`.github/dependabot.yml`
-doesn't exist).
-
-Sketch: add a `pip-audit` step to the existing `test` job (fails the build
-on a known vulnerability, same bar as flake8/pytest already failing it) or
-a separate scheduled job (weekly, since a new CVE can appear without any
-code change here to trigger CI) — worth deciding which before starting,
-since a PR-blocking scan and a scheduled advisory scan serve different
-purposes and this codebase doesn't need to choose only one. A minimal
-`dependabot.yml` (pip + github-actions ecosystems) covers the "keep
-versions current" half separately from the "block on known-bad" half.
-
-## 8. Response store retention
-
-**Status:** not started. Found during a platform review, 2026-07-18.
-
-`app/core/store.py` has `get`/`put` and a `TTL_DAYS` (default 30) that
-governs whether a record is still fresh enough to *serve* without
-re-fetching — but nothing ever deletes a record past that age. Checked: no
-`remove`/`prune`/`cleanup` function exists anywhere in the module. A record
-for a barcode nobody looks up again simply stays on disk forever; the
-directory can only grow. Small today (76 KB, 27 files on the reference
-LXC), but this is a store with no ceiling on a service meant to run
-long-term, and `data/` is the one path `nutrition-api.service`'s systemd
-sandboxing grants write access to (`ReadWritePaths`) — worth bounding
-before it's a real disk-exhaustion question instead of a hypothetical one.
-
-Sketch: a `prune(older_than_days=STORE_TTL_DAYS * N)` function (a multiple
-of the serving TTL, not the TTL itself — a record just past 30 days but
-still occasionally re-served-stale-then-refreshed is different from one
-untouched for 6 months) run from a systemd timer, the same mechanism item 3
-already proposes for the mirror rebuilds — a natural place to fold this in
-rather than standing up a second scheduling mechanism.
-
-## 9. Curated GPC code staleness check
-
-**Status:** not started. Found during a platform review, 2026-07-18.
-
-`FDC_CATEGORY_TO_BRICK`/`_CLASS` and `OFF_TAG_TO_BRICK`/`_CLASS` hard-code
-GPC brick/class codes verified against one specific GS1 taxonomy version at
-curation time. `scripts/import_gpc_xml.py` auto-updates the taxonomy when
-GS1 publishes a newer one — if GS1 ever retires or renumbers a code between
-versions, the corresponding curated entry doesn't error, it just silently
-starts resolving to an empty hierarchy (`hierarchy_for_brick`/
-`hierarchy_for_class` return `[]` for an unknown code, by design, so an
-unresolved *lookup* code degrades gracefully — but an unresolved *curated*
-code degrading the same way is a regression nobody would notice, since it
-looks identical to "no curated entry exists for this category/tag" rather
-than "a curated entry broke"). No check anywhere currently confirms every
-curated code still resolves against the *current* live taxonomy.
-
-Sketch: a small script (or a step folded into `import_gpc_xml.py --auto-
-update`, right after a successful rebuild) that resolves every code in all
-four curated tables against the freshly-imported database and logs/alerts
-on any that come back empty — the same verification method already used by
-hand while building each table (`hierarchy_for_brick`/`hierarchy_for_class`
-against the real `gpc.sqlite3`), just automated and run on every taxonomy
-refresh instead of once at curation time.
-
-## 10. Advanced filters for `/search` and `/lookup` (collapsed by default)
-
-**Status:** not started, exploration only. Requested 2026-07-19.
-
-Both query forms are a single field today. `/search` (`app/static/search.html`)
-is just a text input submitting to `GET /api/v1/search?q=...&limit=...`;
-`search_products()` always queries *both* local mirrors and merges
-(`app/core/search.py:129-147`) with no way to scope to one. `/lookup`
-(`app/static/lookup.html`) is a barcode field against
-`GET /api/v1/lookup/{gtin}`, whose only extra parameter is `fresh` (bypass
-every cache and force a live call) — nothing today lets a caller scope
-*which* sources participate, only whether cached results are trusted.
-
-Idea: a hidden "Advanced" disclosure under each form (`<details>/<summary>`,
-closed by default so the common one-field case is unchanged), opening to
-offer a **source scope** — "Both (default)" / "USDA FDC only" / "Open Food
-Facts only" — plus whatever other typical advanced options prove worth
-adding once this gets designed (candidates to weigh, not commitments: a
-"local mirrors only, never fall through to a live upstream" toggle for
-`/lookup`, the inverse of `fresh`; exposing the `limit` param `/search`'s
-API already has but the UI doesn't; a brand/category filter, which
-`search.py` has no column support for yet).
-
-Not sketched yet: the API shape (a new query param threaded through
-`search_products()`/`orchestrator.lookup()` to skip the excluded source's
-local and upstream calls entirely, not just filter results after the
-fact — a real latency win for the source skipped, not just a UI
-convenience), and how `orchestrator.lookup()`'s current source-fanout
-structure would need to change to make a source actually skippable. Explore
-before committing to a design.
-
-## 11. Consolidate the ad-hoc explorer/debug pages into one coherent set
+## 11. ~~Consolidate the ad-hoc explorer/debug pages into one coherent set~~ — DONE 2026-07-19
 
 **Status:** shipped 2026-07-19. Flagged the same day: these pages were added
 one at a time, each to support whatever was being developed at the time,
@@ -716,9 +747,24 @@ live `deploy/site/index.html` — a duplication found and fixed along the
 way, not in the original design) regrouped into "Explore the data" (one
 tile now) and "Operate."
 
+**Follow-up shipped the same day:** a cold local-mirror scan right after a
+rebuild/restart could take noticeably longer than the typical 2-3s with no
+sign it was still working (see item 6's performance notes). Added a shared
+`showLoading()` helper: the plain message shows immediately, and upgrades
+in place after 2.2s (past what any cached call takes) to an explicit "still
+working, can take up to 15s" note plus an indeterminate progress bar.
+Verified with Playwright that the upgrade fires past the threshold and not
+before, and doesn't false-positive on a normal fast load. Also, on request,
+scrubbed every remaining internal doc/file reference (`PLAN.md item N`,
+`ARCH.md`, `app/core/gpc_match.py`, `OFF_TAG_TO_BRICK`) from the page's
+user-visible text — this site is public, and a repo-internal reference means
+nothing to a visitor who can't see the source. API contract values
+(`reviewed`, `off_fuzzy`) and data column names (`branded_food_category`)
+were kept, since those are meaningful regardless of audience.
+
 ### The problem, measured, not just felt
 
-Eight pages make up the browser-facing surface today:
+Eight pages made up the browser-facing surface before this shipped:
 
 | Page | Route | Purpose |
 |---|---|---|
@@ -731,35 +777,34 @@ Eight pages make up the browser-facing surface today:
 | Data Quality Dashboard | `/data/analytics` | Aggregated coverage, value distributions, cross-source agreement (item 6) |
 | Status | `/status` | Caddy/backend/upstream health |
 
-Each page hand-writes its own `<span class="nav">...</span>` footer-nav line
-— copy-pasted per file, not a shared component — and the six that share the
-pattern (`/lookup` uses a slightly different inline format) each link a
-*different* subset of the others, in different order, with different labels
-for the same target. Checked line by line, not estimated:
+Each page hand-wrote its own `<span class="nav">...</span>` footer-nav line
+— copy-pasted per file, not a shared component — and the six that shared
+the pattern (`/lookup` used a slightly different inline format) each linked
+a *different* subset of the others, in different order, with different
+labels for the same target. Checked line by line, not estimated:
 
-- **`/gpc` is labelled three different ways** across the pages that link it
-  at all: "GPC taxonomy" (`data.html`, `gpc_mappings.html`), "GPC"
+- **`/gpc` was labelled three different ways** across the pages that linked
+  it at all: "GPC taxonomy" (`data.html`, `gpc_mappings.html`), "GPC"
   (`search.html`), "GPC browser" (`lookup.html`) — and `data_analytics.html`
-  doesn't link it at all.
-- **`/data` (Data Browser) is missing from `gpc.html` and `lookup.html`'s
+  didn't link it at all.
+- **`/data` (Data Browser) was missing from `gpc.html` and `lookup.html`'s
   nav entirely.**
-- **`/status` appears in only 2 of 6** navs (`data.html`,
-  `data_analytics.html`); `/docs` appears in only 1 (`gpc.html`, plus
+- **`/status` appeared in only 2 of 6** navs (`data.html`,
+  `data_analytics.html`); `/docs` appeared in only 1 (`gpc.html`, plus
   `lookup.html`'s own differently-formatted footer).
-- **`/data/analytics`, the newest and most substantial page (item 6),
-  is missing from `index.html`'s "More tools" grid entirely** — reachable
-  only by already being on another explorer page, or by typing the URL.
-- `deploy/site/status.html` is the structural odd one out: it's a
-  Caddy-served static file under `deploy/site/`, on a completely different
-  deploy path from the other seven, which are all `app/static/*.html`
-  served through `main.py` `FileResponse` routes — despite matching the same
-  CSS custom-property design language (`--surface-0`, `--accent`, etc.),
-  it's maintained and shipped separately.
+- **`/data/analytics`, the newest and most substantial page (item 6), was
+  missing from `index.html`'s "More tools" grid entirely** — reachable only
+  by already being on another explorer page, or by typing the URL.
+- `deploy/site/status.html` was the structural odd one out: a Caddy-served
+  static file under `deploy/site/`, on a completely different deploy path
+  from the other seven, which were all `app/static/*.html` served through
+  `main.py` `FileResponse` routes — despite matching the same CSS
+  custom-property design language, it was maintained and shipped separately.
 
-None of this is a functional bug — every page still works, every link that
-exists still resolves — it's discoverability and coherence: there is no
-single place that tells a newcomer "here are the N things you can do here,"
-grouped by what they're for.
+None of this was a functional bug — every page still worked, every link
+that existed still resolved — it was discoverability and coherence: there
+was no single place that told a newcomer "here are the N things you can do
+here," grouped by what they're for.
 
 ### Decisions
 
@@ -790,31 +835,28 @@ Resolved directly with the user, 2026-07-19:
    `/redoc`, and the example lookup stay together, same spirit as today's
    "API" section.
 
-### Implementation sketch
+### Implementation
 
-- **Route**: the consolidated page lives at `/data` — today's Data Browser
-  route, kept stable since it's the most centrally-linked of the four.
-  `/gpc`, `/gpc/mappings`, and `/data/analytics` become thin redirects in
-  `main.py` to `/data?tab=gpc`, `/data?tab=mappings`, `/data?tab=analytics`
-  respectively, so every existing bookmark or link (including ones already
-  written into this session's own commit messages and PLAN.md prose) still
-  resolves. `/data` with no query param keeps defaulting to the Data
-  Browser tab, matching that URL's behavior today.
-- **Page structure**: the page gains a tab strip at the top — four buttons,
+- **Route**: the consolidated page lives at `/data` — the former Data
+  Browser route, kept stable since it was the most centrally-linked of the
+  four. `/gpc`, `/gpc/mappings`, and `/data/analytics` are thin redirects in
+  `main.py` to `/data?tab=taxonomy`, `?tab=mappings`, `?tab=quality`
+  respectively, so every existing bookmark or link still resolves. `/data`
+  with no query param defaults to the Data Browser tab, matching that URL's
+  behavior before this shipped.
+- **Page structure**: the page has a tab strip at the top — four buttons,
   reading `?tab=` on load to preselect and updating the URL via
   `history.replaceState` on click (bookmarkable, no full reload). Each
-  tab's markup/JS is today's four pages' bodies, carried over largely as-is
-  into four panel `<div>`s (inactive panels `display: none`) — this
-  consolidates existing, working code into one shell rather than rewriting
-  any tool's functionality.
-- **Shared nav**: `app/static/nav.js`, the `{href, label, group}` array
-  from decision 2, rendered into a `<div id="nav"></div>` placeholder on
-  `index.html`, `lookup.html`, `search.html`, and the new consolidated
-  page — replacing every hand-written `<span class="nav">` line on those
-  four. `status.html` is explicitly excluded per decision 1.
-- **Not yet decided, flagged for the implementation PR rather than
-  blocking this plan**: exact tab-strip visual design; whether the four
-  merged pages' individual `<style>` blocks collide or need namespacing
-  once combined into one document; whether a tab's own in-page search/
-  filter state (e.g. the GPC Taxonomy tab's search box) should reset or
-  persist across a tab switch.
+  tab's markup/JS is the four former pages' bodies, carried over largely
+  as-is into four panel `<div>`s (inactive panels `display: none`) —
+  consolidating existing, working code into one shell rather than
+  rewriting any tool's functionality.
+- **Shared nav**: `deploy/site/nav.js` (plus a FastAPI `/nav.js` fallback
+  route for local dev without Caddy in front), rendered into a
+  `<span id="nav"></span>` placeholder on `index.html`, `lookup.html`,
+  `search.html`, and the consolidated page — replacing every hand-written
+  `<span class="nav">` line on those four. `status.html` is explicitly
+  excluded per decision 1.
+- **Slow-load indicator** (follow-up, same day): `showLoading()`, declared
+  in the page's shared (unwrapped) tab-controller script so all four
+  panels can call it, wired into each panel's slow-path entry point.
