@@ -19,6 +19,16 @@ local copy's name text matched, not that no upstream has it. The existing
 GTIN lookup still falls through to the live APIs for a barcode a caller
 already has.
 
+No `fresh=` bypass-cache param, unlike GET /api/v1/lookup/{gtin}, and not an
+oversight: `fresh` on that endpoint has something real to skip to -- a local
+mirror miss falls through to a live API call, with an in-memory TTL cache
+layered on top of that whole chain. This module has no live-API fallback and
+no result cache to bypass in the first place -- the local mirror is the only
+source, on purpose (the rate-limit argument two paragraphs up). A "fresh"
+toggle here would have nothing to bypass to. Wanting the live upstreams'
+newest data for a specific product is what /lookup?fresh=true is for, once a
+search here has found the GTIN.
+
 Querying prefers each mirror's FTS5 index (foods_fts / products_fts,
 scripts/build_fdc_db.py / build_off_db.py) over a `LIKE '%q%'` scan: a
 leading wildcard can never use an index, so LIKE is a full-table scan by
