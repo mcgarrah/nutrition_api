@@ -38,30 +38,9 @@ What this project is *for*, so plan items can be judged against something:
 
 # Active now
 
-## 9. Curated GPC code staleness check
-
-**Status:** not started. Found during a platform review, 2026-07-18.
-
-`FDC_CATEGORY_TO_BRICK`/`_CLASS` and `OFF_TAG_TO_BRICK`/`_CLASS` hard-code
-GPC brick/class codes verified against one specific GS1 taxonomy version at
-curation time. `scripts/import_gpc_xml.py` auto-updates the taxonomy when
-GS1 publishes a newer one — if GS1 ever retires or renumbers a code between
-versions, the corresponding curated entry doesn't error, it just silently
-starts resolving to an empty hierarchy (`hierarchy_for_brick`/
-`hierarchy_for_class` return `[]` for an unknown code, by design, so an
-unresolved *lookup* code degrades gracefully — but an unresolved *curated*
-code degrading the same way is a regression nobody would notice, since it
-looks identical to "no curated entry exists for this category/tag" rather
-than "a curated entry broke"). No check anywhere currently confirms every
-curated code still resolves against the *current* live taxonomy.
-
-Sketch: a small script (or a step folded into `import_gpc_xml.py --auto-
-update`, right after a successful rebuild) that resolves every code in all
-four curated tables against the freshly-imported database and logs/alerts
-on any that come back empty — the same verification method already used by
-hand while building each table (`hierarchy_for_brick`/`hierarchy_for_class`
-against the real `gpc.sqlite3`), just automated and run on every taxonomy
-refresh instead of once at curation time.
+Nothing currently in progress — see "Shipped" below for items 8 and 9,
+both closed out 2026-07-19. Next up is whatever's picked from "Longer
+term."
 
 # Longer term
 
@@ -882,3 +861,47 @@ timer, per the original sketch's documented fallback.
 9 new tests (`test_store.py`), full suite green, flake8 clean. Live-verified
 with `--dry-run` against the real `data/responses/` corpus (27 records, 0
 prunable — all well within the 90-day window).
+
+## 9. ~~Curated GPC code staleness check~~ — DONE 2026-07-19
+
+**Status:** shipped 2026-07-19.
+
+**What shipped:** `scripts/import_gpc_xml.py`'s `check_curated_codes(db_path)`
+resolves every code in all four curated tables
+(`FDC_CATEGORY_TO_BRICK`/`_CLASS`, `OFF_TAG_TO_BRICK`/`_CLASS`) against the
+just-imported database — a plain `SELECT brick_code FROM bricks` /
+`SELECT class_code FROM classes` existence check, not the full
+`hierarchy_for_brick`/`hierarchy_for_class` join, since only "does this
+code still exist" needs answering here, not the hierarchy text. Wired into
+`_run_import()` right after a successful build (real import only — the
+`--auto-update` early-return path when GS1 has nothing newer never reaches
+it, correctly, since nothing changed to re-check).
+
+**A design call worth recording:** a stale code is logged as a `WARNING`,
+not turned into a non-zero exit code. `import_gpc_xml.py --auto-update`
+already runs on *every app startup* (`app/main.py`'s `lifespan`), and a
+non-zero exit there is already caught and logged as "GPC auto-update
+failed... continuing with existing data" — conflating a genuinely stale
+curated code (a curation-maintenance signal; the import itself succeeded)
+with an actual import failure would misreport a successful rebuild as
+broken on every subsequent startup log line. The log line is the alert;
+the exit code still means "did the import itself succeed."
+
+Needed adding `from app.core import gpc_match` to a script that previously
+had zero `app.*` dependencies — safe, since `gpc_match.py` itself only
+imports `re`/`sqlite3` at module level, the same lightweight-import
+property `import_store_to_sqlite.py` already relies on for `app.core.store`.
+This also required copying `gpc_match.py` (and its two empty `__init__.py`
+package markers) into the Dockerfile's builder stage — that stage bakes
+the GPC database at build time using only `scripts/` and the bundled XML,
+never `app/`, and the new import broke that build (`ModuleNotFoundError:
+No module named 'app'`) until fixed. Verified with a local `--no-cache`
+Docker build.
+
+3 new tests (`test_gpc_importer.py`), full suite green (901), flake8
+clean. Live-verified two ways: `check_curated_codes()` against the real
+`data/gpc.sqlite3` and the real curated tables (0 stale, as expected —
+they were all verified against this taxonomy version at curation time),
+and a full `import_gpc_xml.py` run against a scratch database using the
+real cached `data/imports/en-v20260520.xml`, confirming the check fires
+automatically as part of the normal build/log flow.
