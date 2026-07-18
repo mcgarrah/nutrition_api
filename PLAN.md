@@ -38,29 +38,6 @@ What this project is *for*, so plan items can be judged against something:
 
 # Active now
 
-## 8. Response store retention
-
-**Status:** not started. Found during a platform review, 2026-07-18.
-
-`app/core/store.py` has `get`/`put` and a `TTL_DAYS` (default 30) that
-governs whether a record is still fresh enough to *serve* without
-re-fetching — but nothing ever deletes a record past that age. Checked: no
-`remove`/`prune`/`cleanup` function exists anywhere in the module. A record
-for a barcode nobody looks up again simply stays on disk forever; the
-directory can only grow. Small today (76 KB, 27 files on the reference
-LXC), but this is a store with no ceiling on a service meant to run
-long-term, and `data/` is the one path `nutrition-api.service`'s systemd
-sandboxing grants write access to (`ReadWritePaths`) — worth bounding
-before it's a real disk-exhaustion question instead of a hypothetical one.
-
-Sketch: a `prune(older_than_days=STORE_TTL_DAYS * N)` function (a multiple
-of the serving TTL, not the TTL itself — a record just past 30 days but
-still occasionally re-served-stale-then-refreshed is different from one
-untouched for 6 months) run from a systemd timer — item 3 (longer term)
-proposes the same mechanism for mirror rebuilds; if that gets picked up
-first, fold this in rather than standing up a second scheduling mechanism,
-otherwise a standalone timer for just this is fine too.
-
 ## 9. Curated GPC code staleness check
 
 **Status:** not started. Found during a platform review, 2026-07-18.
@@ -871,3 +848,37 @@ panel is closed by default on both pages; `sources=fdc`/`sources=off`
 correctly change the outgoing request and the rendered result (source
 badges on `/lookup`, source labels on `/search`); `/search`'s `limit`
 field is honored end to end.
+
+## 8. ~~Response store retention~~ — DONE 2026-07-19
+
+**Status:** shipped 2026-07-19.
+
+**What shipped:** `store.prune(older_than_days=None, dry_run=False)` —
+removes any record past `STORE_PRUNE_AFTER_DAYS` (env-overridable, default
+`STORE_TTL_DAYS * 3` = 90 days), plus anything with an unreadable payload or
+an untrustworthy (naive) timestamp, since `get()` already refuses to serve
+either of those and a record nobody will ever be served again is worth zero
+regardless of age. Deliberately a *multiple* of the serving TTL, not the TTL
+itself, per the original sketch — a record just past the 30-day serving TTL
+is stale (`get()` won't return it) but still recently useful, and deleting
+it that early would erase the re-fetch-avoidance the store exists for.
+`prune()` has no `STORE_ENABLED` gate of its own — an operator running it
+explicitly should get an honest answer about what's on disk, not a silent
+no-op — and it also cleans up the now-empty two-level shard directories it
+leaves behind, so `data/responses/` doesn't accumulate thousands of dead
+leaf directories over the service's lifetime.
+
+**Shipped as a periodic sweep, not inline logic**, the same split
+`import_store_to_sqlite.py` already uses for the corpus-export side of this
+store: `scripts/prune_response_store.py` (with `--dry-run` and
+`--older-than`, mirroring `build_off_db.py --check`'s "preview before you
+commit" pattern) plus `deploy/nutrition-api-prune.service` +
+`.timer` (weekly, `Persistent=true` so a missed run catches up, same
+sandboxing as `nutrition-api.service`). Item 3 (longer term, scheduled
+mirror refresh) sketched sharing one timer for both jobs — not picked up
+since item 3 itself is still parked; this ships as its own standalone
+timer, per the original sketch's documented fallback.
+
+9 new tests (`test_store.py`), full suite green, flake8 clean. Live-verified
+with `--dry-run` against the real `data/responses/` corpus (27 records, 0
+prunable — all well within the 90-day window).
