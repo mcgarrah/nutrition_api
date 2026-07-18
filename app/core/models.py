@@ -50,13 +50,20 @@ class CanonicalProduct(BaseModel):
         default_factory=list,
         description="GS1 category path: Segment > Family > Class > Brick",
     )
-    category_hierarchy_source: Literal["fdc_curated", "off_fuzzy", "none"] = Field(
+    category_hierarchy_source: Literal[
+        "fdc_curated", "reviewed", "off_fuzzy", "none"
+    ] = Field(
         default="none",
         description=(
             "How category_hierarchy was produced, so a caller can tell a "
             "verified classification from a best-effort guess:\n"
             "'fdc_curated' — FDC's own branded_food_category, resolved through "
             "a hand-verified table (app/core/gpc_match.py). High confidence.\n"
+            "'reviewed' — an Open Food Facts category tag, resolved through a "
+            "hand-verified table (app/core/gpc_match.py's OFF_TAG_TO_BRICK / "
+            "OFF_TAG_TO_CLASS) rather than the fuzzy text matcher. High "
+            "confidence, same as fdc_curated, just keyed on an OFF tag "
+            "instead of an FDC category.\n"
             "'off_fuzzy' — Open Food Facts category tags, resolved by "
             "best-effort text matching against GPC brick descriptions. "
             "Real matches, but not verified case by case — treat as a hint, "
@@ -64,10 +71,7 @@ class CanonicalProduct(BaseModel):
             "'none' — no source produced a GPC-verified category. "
             "category_hierarchy may still be populated with raw OFF tags as "
             "a fallback in that case; those are upstream labels, not a GPC "
-            "classification.\n"
-            "A future 'reviewed' tier is planned for off_fuzzy matches that "
-            "have been human-checked, once that review process exists — not "
-            "implemented yet."
+            "classification."
         ),
     )
 

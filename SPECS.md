@@ -104,7 +104,7 @@ class CanonicalProduct(BaseModel):
     product_name: str = "Unknown"
     brand: str | None = None
     category_hierarchy: list[str] = []
-    category_hierarchy_source: Literal["fdc_curated", "off_fuzzy", "none"] = "none"
+    category_hierarchy_source: Literal["fdc_curated", "reviewed", "off_fuzzy", "none"] = "none"
     calories_kcal: float | None = None
     protein: NutrientValue | None = None
     fat: NutrientValue | None = None
@@ -134,7 +134,7 @@ When fields are provided concurrently across vendors, conflicts are evaluated de
 | :--- | :--- | :--- |
 | **Nutrients** | **USDA FDC** | Reconciles raw laboratory outputs; per-100g baselines. Open Food Facts values are provisional and overridden when USDA data exists. |
 | **Media / Images** | **Open Food Facts** | Validates public URLs; grabs real-time label photography strings. |
-| **Taxonomy** | **GS1 GPC** | Two tiers, graded by confidence and reported in `category_hierarchy_source`: FDC's own category resolves through a hand-curated, verified mapping (`fdc_curated`) when one exists; otherwise Open Food Facts' tags are matched against GPC brick descriptions by best-effort text search (`off_fuzzy`). See ARCH.md, "GPC Category Matching". |
+| **Taxonomy** | **GS1 GPC** | Three tiers, graded by confidence and reported in `category_hierarchy_source`: FDC's own category resolves through a hand-curated mapping (`fdc_curated`) when one exists; else an OFF category tag resolves through its own hand-curated mapping (`reviewed`, same confidence); else OFF's tags are matched against GPC brick descriptions by best-effort text search (`off_fuzzy`). See ARCH.md, "GPC Category Matching". |
 | **Ingredients** | **USDA FDC** | USDA's official label text overrides Open Food Facts' crowd-sourced text when USDA has an ingredients list; OFF's text is used when USDA has none. |
 
 Within a single source, the **local bulk mirror answers before the live API**

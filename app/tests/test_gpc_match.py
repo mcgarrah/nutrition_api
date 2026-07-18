@@ -19,14 +19,19 @@ import app.database as database
 from app.core.gpc_match import (
     FDC_CATEGORY_TO_BRICK,
     FDC_CATEGORY_TO_CLASS,
+    OFF_TAG_TO_BRICK,
+    OFF_TAG_TO_CLASS,
     _meaningful_words,
     _fts_match_expr,
     curated_brick_for_fdc_category,
+    curated_brick_for_off_tag,
     curated_class_for_fdc_category,
+    curated_class_for_off_tag,
     curated_hierarchy_for_fdc_category,
     fuzzy_hierarchy_for_off_categories,
     hierarchy_for_brick,
     hierarchy_for_class,
+    reviewed_hierarchy_for_off_categories,
 )
 from .conftest import GPC_ROWS, GPC_SCHEMA
 
@@ -332,3 +337,128 @@ async def test_fuzzy_falls_back_to_like_when_bricks_fts_is_absent(gpc_db):
     db = await get_db()
     hierarchy = await fuzzy_hierarchy_for_off_categories(db, ["en:cola-drinks"])
     assert hierarchy[-1] == "Cola Drinks"
+
+
+# ── OFF_TAG_TO_BRICK / OFF_TAG_TO_CLASS: table integrity ────────────────
+
+def test_off_tag_table_is_non_trivial():
+    assert len(OFF_TAG_TO_BRICK) >= 10
+
+
+def test_every_off_tag_brick_code_has_the_right_shape():
+    for tag, code in OFF_TAG_TO_BRICK.items():
+        assert _BRICK_CODE.match(code), f"{tag!r} -> {code!r} is not an 8-digit brick code"
+
+
+def test_every_off_tag_class_code_has_the_right_shape():
+    for tag, code in OFF_TAG_TO_CLASS.items():
+        assert _CLASS_CODE.match(code), f"{tag!r} -> {code!r} is not an 8-digit class code"
+
+
+def test_no_off_tag_key_is_blank_or_whitespace_only():
+    for tag in list(OFF_TAG_TO_BRICK) + list(OFF_TAG_TO_CLASS):
+        assert tag.strip(), "a blank OFF tag key can never match anything"
+
+
+def test_no_off_tag_key_has_unstripped_surrounding_whitespace():
+    for tag in list(OFF_TAG_TO_BRICK) + list(OFF_TAG_TO_CLASS):
+        assert tag == tag.strip(), (
+            f"{tag!r} has surrounding whitespace and can never match a lookup, "
+            f"which always strips its input first -- store it stripped"
+        )
+
+
+def test_off_tag_brick_and_class_tables_do_not_claim_the_same_tag():
+    """Mirrors FDC's own brick/class table invariant: a tag should have an
+    entry in exactly one of the two tables, never both -- if a brick fits,
+    the class table has no reason to also carry it."""
+    overlap = set(OFF_TAG_TO_BRICK) & set(OFF_TAG_TO_CLASS)
+    assert overlap == set()
+
+
+# ── curated_brick_for_off_tag / curated_class_for_off_tag ──────────────
+
+def test_a_known_off_tag_resolves_to_a_brick():
+    assert curated_brick_for_off_tag("en:cheeses") == "10000028"
+
+
+def test_an_unknown_off_tag_returns_none():
+    assert curated_brick_for_off_tag("en:totally-unknown-tag") is None
+
+
+def test_off_tag_brick_lookup_of_none_returns_none():
+    assert curated_brick_for_off_tag(None) is None
+
+
+def test_off_tag_brick_lookup_strips_whitespace():
+    assert curated_brick_for_off_tag("  en:cheeses  ") == "10000028"
+
+
+def test_a_known_off_tag_resolves_to_a_class():
+    assert curated_class_for_off_tag("en:coffees") == "50202600"
+
+
+def test_off_tag_class_lookup_of_none_returns_none():
+    assert curated_class_for_off_tag(None) is None
+
+
+# ── reviewed_hierarchy_for_off_categories ───────────────────────────────
+
+@pytest.fixture
+def small_off_tag_tables(monkeypatch):
+    """A controlled substitute for OFF_TAG_TO_BRICK/CLASS, pointing at codes
+    that actually exist in the gpc_db fixture taxonomy -- mirrors the
+    pattern already used for FDC_CATEGORY_TO_BRICK/CLASS in
+    test_gpc_mappings.py."""
+    monkeypatch.setattr(
+        "app.core.gpc_match.OFF_TAG_TO_BRICK",
+        {"en:cola-drinks": "10000201", "en:lemonade": "10000202"},
+    )
+    monkeypatch.setattr(
+        "app.core.gpc_match.OFF_TAG_TO_CLASS",
+        {"en:fresh-fruits": "50101800"},
+    )
+
+
+async def test_reviewed_resolves_a_curated_off_tag_to_its_brick(gpc_db, small_off_tag_tables):
+    from app.database import get_db
+    db = await get_db()
+    hierarchy = await reviewed_hierarchy_for_off_categories(db, ["en:cola-drinks"])
+    assert hierarchy == ["Food/Beverage", "Beverages", "Carbonated Drinks", "Cola Drinks"]
+
+
+async def test_reviewed_falls_back_to_a_curated_class(gpc_db, small_off_tag_tables):
+    from app.database import get_db
+    db = await get_db()
+    hierarchy = await reviewed_hierarchy_for_off_categories(db, ["en:fresh-fruits"])
+    assert hierarchy == ["Food/Beverage", "Fruits/Vegetables", "Fresh Fruits"]
+
+
+async def test_reviewed_tries_the_narrowest_tag_first(gpc_db, small_off_tag_tables):
+    """OFF orders tags broad -> narrow; 'en:lemonade' (narrower, last in the
+    list) must be tried before 'en:cola-drinks' (broader, earlier)."""
+    from app.database import get_db
+    db = await get_db()
+    hierarchy = await reviewed_hierarchy_for_off_categories(db, ["en:cola-drinks", "en:lemonade"])
+    assert hierarchy[-1] == "Lemonade"
+
+
+async def test_reviewed_falls_through_an_unreviewed_tag_to_a_reviewed_one(
+        gpc_db, small_off_tag_tables):
+    from app.database import get_db
+    db = await get_db()
+    hierarchy = await reviewed_hierarchy_for_off_categories(
+        db, ["en:cola-drinks", "en:not-in-either-table"])
+    assert hierarchy[-1] == "Cola Drinks"
+
+
+async def test_reviewed_returns_empty_when_no_tag_is_curated(gpc_db, small_off_tag_tables):
+    from app.database import get_db
+    db = await get_db()
+    assert await reviewed_hierarchy_for_off_categories(db, ["en:totally-unknown"]) == []
+
+
+async def test_reviewed_returns_empty_for_no_tags(gpc_db, small_off_tag_tables):
+    from app.database import get_db
+    db = await get_db()
+    assert await reviewed_hierarchy_for_off_categories(db, []) == []

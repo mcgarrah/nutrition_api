@@ -161,9 +161,15 @@ class SearchResponse(BaseModel):
 # --- Curated FDC-category -> GPC mapping viewer ------------------------
 
 class CuratedMapping(BaseModel):
-    """One hand-verified entry from gpc_match.py's curated tables."""
+    """One hand-verified entry from gpc_match.py's curated tables.
 
-    category: str = Field(description="FDC branded_food_category, exact string")
+    Shared by both curated sources: FDC's branded_food_category
+    (fdc_curated) and Open Food Facts' category tags (reviewed) -- the same
+    shape either way, just a different key string in `category`.
+    """
+
+    category: str = Field(
+        description="The FDC branded_food_category or OFF category tag, exact string")
     level: str = Field(description="'brick' (specific) or 'class' (coarser)")
     code: str = Field(description="The matched GPC brick_code or class_code")
     hierarchy: list[str] = Field(
@@ -199,9 +205,45 @@ class MappingCoverage(BaseModel):
     )
 
 
+class UncoveredOffTag(BaseModel):
+    """An OFF category tag with no curated mapping at either level, ranked
+    by how many products carry it."""
+
+    tag: str
+    product_count: int
+
+
+class OffTagCoverage(BaseModel):
+    """How much of the real local OFF corpus OFF_TAG_TO_BRICK/OFF_TAG_TO_CLASS
+    reach, measured against tag *occurrences* -- one product usually carries
+    several tags at once, so this is not directly comparable to
+    MappingCoverage's food-count figures. Measured live against the local
+    OFF bulk copy, same "computed, not asserted" contract as MappingCoverage.
+    """
+
+    total_tag_occurrences: int
+    covered_occurrences: int
+    coverage_pct: float
+    distinct_tags: int
+    curated_brick_entries: int
+    curated_class_entries: int
+    uncovered_tags: list[UncoveredOffTag] = Field(
+        default_factory=list,
+        description="OFF tags with no curated mapping, largest first (capped)",
+    )
+
+
 class MappingsResponse(BaseModel):
     mappings: list[CuratedMapping] = Field(default_factory=list)
     coverage: MappingCoverage | None = Field(
         default=None,
         description="None when the local FDC bulk copy isn't available to measure against",
+    )
+    off_tag_mappings: list[CuratedMapping] = Field(
+        default_factory=list,
+        description="The `reviewed` tier: hand-verified OFF tag -> GPC entries",
+    )
+    off_tag_coverage: OffTagCoverage | None = Field(
+        default=None,
+        description="None when the local OFF bulk copy isn't available to measure against",
     )

@@ -33,7 +33,7 @@ from .models import (
     AttributeTypeItem, AttributeValueItem,
     AttributeMatch,
     PaginatedResponse, SearchResponse,
-    CuratedMapping, MappingCoverage, MappingsResponse,
+    CuratedMapping, MappingCoverage, MappingsResponse, OffTagCoverage,
 )
 
 router = APIRouter(prefix="/api/v1/gpc", tags=["GPC"])
@@ -469,20 +469,29 @@ async def search_gpc(
 # ── Curated FDC-category -> GPC mapping viewer ──────────────────────────
 
 @router.get("/mappings", response_model=MappingsResponse,
-            summary="Curated FDC-category -> GPC mappings, with live coverage")
+            summary="Curated FDC-category and OFF-tag -> GPC mappings, with live coverage")
 async def gpc_mappings():
-    """Every hand-verified entry in gpc_match.py's two curated tables, each
-    resolved to its full GPC hierarchy, plus how much of the real local FDC
-    corpus the tables reach.
+    """Every hand-verified entry in gpc_match.py's curated tables — FDC
+    categories (fdc_curated) and OFF tags (reviewed) — each resolved to its
+    full GPC hierarchy, plus how much of each real local corpus the tables
+    reach.
 
-    This is the working surface for the ongoing FDC-curation effort (see
+    This is the working surface for the ongoing curation effort (see
     ARCH.md, "GPC Category Matching") — a place to see what is mapped, at
     which level, and what is still uncovered, without reading the source.
     """
     db = await get_db()
+    all_codes = (
+        set(gpc_match.FDC_CATEGORY_TO_BRICK.values())
+        | set(gpc_match.OFF_TAG_TO_BRICK.values())
+    )
+    all_class_codes = (
+        set(gpc_match.FDC_CATEGORY_TO_CLASS.values())
+        | set(gpc_match.OFF_TAG_TO_CLASS.values())
+    )
     brick_hierarchies, class_hierarchies = await asyncio.gather(
-        gpc_match.hierarchy_for_bricks(db, gpc_match.FDC_CATEGORY_TO_BRICK.values()),
-        gpc_match.hierarchy_for_classes(db, gpc_match.FDC_CATEGORY_TO_CLASS.values()),
+        gpc_match.hierarchy_for_bricks(db, all_codes),
+        gpc_match.hierarchy_for_classes(db, all_class_codes),
     )
     mappings = [
         CuratedMapping(category=category, level="brick", code=code,
@@ -493,8 +502,20 @@ async def gpc_mappings():
                        hierarchy=class_hierarchies.get(code, []))
         for category, code in sorted(gpc_match.FDC_CATEGORY_TO_CLASS.items())
     ]
+    off_tag_mappings = [
+        CuratedMapping(category=tag, level="brick", code=code,
+                       hierarchy=brick_hierarchies.get(code, []))
+        for tag, code in sorted(gpc_match.OFF_TAG_TO_BRICK.items())
+    ] + [
+        CuratedMapping(category=tag, level="class", code=code,
+                       hierarchy=class_hierarchies.get(code, []))
+        for tag, code in sorted(gpc_match.OFF_TAG_TO_CLASS.items())
+    ]
     coverage = gpc_match.coverage_report()
+    off_tag_coverage = gpc_match.off_tag_coverage_report()
     return MappingsResponse(
         mappings=mappings,
         coverage=MappingCoverage(**coverage) if coverage else None,
+        off_tag_mappings=off_tag_mappings,
+        off_tag_coverage=OffTagCoverage(**off_tag_coverage) if off_tag_coverage else None,
     )

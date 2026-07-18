@@ -386,28 +386,61 @@ async def lookup(gtin: str, fresh: bool = False) -> CanonicalProduct:
             product.ingredients_text = usda_ingredients
 
     # --- Layer 3: GS1 GPC (category taxonomy) ---
-    # FDC's own category is tried FIRST, through a hand-verified table
-    # (gpc_match.py) rather than text matching. When it hits, the result is
-    # trustworthy in a way fuzzy matching against OFF's free-form tags never
-    # is, so it wins outright and the fuzzy path below is skipped. Brick-level
-    # matches (specific) are tried before class-level ones (coarser, used
-    # when we're confident about the category but not a single brick within
-    # it) — curated_hierarchy_for_fdc_category does both in one call.
+    # Three tiers, tried in order, each skipping the rest on a hit:
+    #   1. FDC's own category, through a hand-verified table (fdc_curated).
+    #   2. An OFF tag, through its OWN hand-verified table (reviewed) --
+    #      the same trust level as fdc_curated, just keyed on an OFF tag
+    #      instead of an FDC category (see gpc_match.py's "Curated OFF
+    #      tags" section for why this exists as a separate table rather
+    #      than folding into the fuzzy matcher).
+    #   3. Best-effort text matching against OFF's free-form tags
+    #      (off_fuzzy) -- real matches, not verified case by case.
+    # Brick-level matches are tried before class-level ones within each
+    # tier (specific wins over coarse when both exist).
     gpc_ms = 0.0
+    off_categories = _str_list(off_data.get("categories")) if off_data else []
+
+    async def _timed_gpc_lookup(resolve):
+        """Run a GPC-database lookup, timed, degrading to [] on any failure.
+
+        A corrupted or momentarily-unavailable local gpc.sqlite3 must not
+        take the whole product lookup down with it -- the same
+        never-a-500-for-an-upstream-hiccup principle this module already
+        applies to USDA and OFF, just for a local file instead of a network
+        call. `_fetch_gpc_categories` (the fuzzy tier, below) already has
+        this same protection built in; this covers the two curated tiers
+        the same way.
+        """
+        nonlocal gpc_ms
+        start = time.monotonic()
+        try:
+            db = await get_db()
+            hierarchy = await resolve(db)
+        except Exception as e:
+            logger.warning("GPC category lookup failed: %s", e)
+            hierarchy = []
+        gpc_ms += (time.monotonic() - start) * 1000
+        return hierarchy
+
     fdc_category = usda_data.get("category") if usda_data else None
     if gpc_match.curated_brick_for_fdc_category(fdc_category) or \
             gpc_match.curated_class_for_fdc_category(fdc_category):
-        start = time.monotonic()
-        db = await get_db()
-        curated_hierarchy = await gpc_match.curated_hierarchy_for_fdc_category(db, fdc_category)
-        gpc_ms += (time.monotonic() - start) * 1000
+        curated_hierarchy = await _timed_gpc_lookup(
+            lambda db: gpc_match.curated_hierarchy_for_fdc_category(db, fdc_category))
         if curated_hierarchy:
             product.category_hierarchy = curated_hierarchy
             product.category_hierarchy_source = "fdc_curated"
             product.data_sources.append("GS1_GPC")
 
+    if not product.category_hierarchy and off_categories:
+        reviewed_hierarchy = await _timed_gpc_lookup(
+            lambda db: gpc_match.reviewed_hierarchy_for_off_categories(db, off_categories))
+        if reviewed_hierarchy:
+            product.category_hierarchy = reviewed_hierarchy
+            product.category_hierarchy_source = "reviewed"
+            product.data_sources.append("GS1_GPC")
+
     if not product.category_hierarchy:
-        off_categories = _str_list(off_data.get("categories")) if off_data else []
         fuzzy_hierarchy, fuzzy_ms = await _fetch_gpc_categories(off_categories)
         gpc_ms += fuzzy_ms
         if fuzzy_hierarchy:

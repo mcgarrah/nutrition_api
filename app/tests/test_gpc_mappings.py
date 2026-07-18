@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.core import fdc_local
 from app.core import gpc_match
+from app.core import off_local
 from app.main import app
 
 client = TestClient(app)
@@ -35,6 +36,27 @@ def fdc_db(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
     monkeypatch.setattr(fdc_local, "DB_PATH", path)
+    return path
+
+
+@pytest.fixture
+def off_db(tmp_path, monkeypatch):
+    """A tiny local OFF bulk copy, with just the `categories` column
+    off_tag_counts()/off_tag_coverage_report() read -- comma-joined tags,
+    the same shape the real build produces."""
+    path = tmp_path / "off_fixture.sqlite3"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE products (gtin14 TEXT PRIMARY KEY, categories TEXT)")
+    conn.executemany("INSERT INTO products (gtin14, categories) VALUES (?, ?)", [
+        ("1", "en:beverages,en:sodas"),
+        ("2", "en:beverages,en:sodas"),
+        ("3", "en:beverages,en:mystery-drink"),  # mystery-drink not in either curated table
+        ("4", None),   # no categories at all -- excluded from the denominator
+        ("5", ""),     # blank categories -- also excluded
+    ])
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(off_local, "DB_PATH", path)
     return path
 
 
@@ -105,6 +127,50 @@ def test_coverage_report_matches_the_real_lookup_for_whitespace_padded_categorie
     assert report["uncovered_categories"] == []
     # And the real runtime path resolves the same raw (unstripped) value too.
     assert gpc_match.curated_brick_for_fdc_category("Cheese - Speciality ") == "10000028"
+
+
+# ── off_tag_counts / off_tag_coverage_report ────────────────────────────
+
+def test_off_tag_counts_none_without_a_local_off_copy(tmp_path, monkeypatch):
+    monkeypatch.setattr(off_local, "DB_PATH", tmp_path / "absent_off.sqlite3")
+    assert gpc_match.off_tag_counts() is None
+    assert gpc_match.off_tag_coverage_report() is None
+
+
+def test_off_tag_counts_excludes_null_and_blank(off_db):
+    assert gpc_match.off_tag_counts() == {
+        "en:beverages": 3, "en:sodas": 2, "en:mystery-drink": 1,
+    }
+
+
+def test_off_tag_coverage_report_totals(off_db, monkeypatch):
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_BRICK", {})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_CLASS", {"en:sodas": "50202300"})
+
+    report = gpc_match.off_tag_coverage_report()
+
+    assert report["total_tag_occurrences"] == 6  # 3 + 2 + 1
+    assert report["covered_occurrences"] == 2    # only en:sodas is curated
+    assert report["coverage_pct"] == pytest.approx(33.3, abs=0.1)
+    assert report["distinct_tags"] == 3
+    assert report["curated_brick_entries"] == 0
+    assert report["curated_class_entries"] == 1
+    assert report["uncovered_tags"] == [
+        {"tag": "en:beverages", "product_count": 3},
+        {"tag": "en:mystery-drink", "product_count": 1},
+    ]
+
+
+def test_off_tag_coverage_report_ranks_uncovered_by_size(off_db, monkeypatch):
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_BRICK", {})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_CLASS", {})
+
+    report = gpc_match.off_tag_coverage_report()
+
+    assert [u["tag"] for u in report["uncovered_tags"]] == [
+        "en:beverages", "en:sodas", "en:mystery-drink"]
+    assert report["covered_occurrences"] == 0
+    assert report["coverage_pct"] == 0.0
 
 
 # ── hierarchy_for_bricks / hierarchy_for_classes (bulk) ──────────────────
@@ -189,3 +255,68 @@ def test_mappings_route_unresolved_code_gets_an_empty_hierarchy(gpc_db, monkeypa
 
     assert body["mappings"] == [
         {"category": "Ghost", "level": "brick", "code": "99999999", "hierarchy": []}]
+
+
+# ── /api/v1/gpc/mappings route: the `reviewed` (OFF tag) tables ────────
+
+def test_mappings_route_returns_off_tag_mappings_and_coverage(gpc_db, off_db, monkeypatch):
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_BRICK", {})
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_CLASS", {})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_BRICK", {"en:sodas": "10000201"})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_CLASS", {"en:mystery-drink": "50101800"})
+
+    body = client.get("/api/v1/gpc/mappings").json()
+
+    assert len(body["off_tag_mappings"]) == 2
+    brick_entry = next(m for m in body["off_tag_mappings"] if m["level"] == "brick")
+    assert brick_entry == {
+        "category": "en:sodas", "level": "brick", "code": "10000201",
+        "hierarchy": ["Food/Beverage", "Beverages", "Carbonated Drinks", "Cola Drinks"],
+    }
+    class_entry = next(m for m in body["off_tag_mappings"] if m["level"] == "class")
+    assert class_entry == {
+        "category": "en:mystery-drink", "level": "class", "code": "50101800",
+        "hierarchy": ["Food/Beverage", "Fruits/Vegetables", "Fresh Fruits"],
+    }
+
+    coverage = body["off_tag_coverage"]
+    assert coverage["total_tag_occurrences"] == 6
+    assert coverage["covered_occurrences"] == 3  # en:sodas(2) + en:mystery-drink(1)
+    assert coverage["curated_brick_entries"] == 1
+    assert coverage["curated_class_entries"] == 1
+
+
+def test_mappings_route_off_tag_coverage_is_null_without_a_local_off_copy(gpc_db, monkeypatch):
+    """isolated_off_local (autouse) already points at a nonexistent copy --
+    the route must degrade to a null off_tag_coverage block, not error."""
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_BRICK", {"en:sodas": "10000201"})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_CLASS", {})
+
+    body = client.get("/api/v1/gpc/mappings").json()
+
+    assert body["off_tag_coverage"] is None
+    assert len(body["off_tag_mappings"]) == 1
+
+
+def test_mappings_route_off_tag_unresolved_code_gets_an_empty_hierarchy(gpc_db, monkeypatch):
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_BRICK", {"en:ghost-tag": "99999999"})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_CLASS", {})
+
+    body = client.get("/api/v1/gpc/mappings").json()
+
+    assert body["off_tag_mappings"] == [
+        {"category": "en:ghost-tag", "level": "brick", "code": "99999999", "hierarchy": []}]
+
+
+def test_mappings_route_fdc_and_off_tag_sections_are_independent(gpc_db, fdc_db, monkeypatch):
+    """FDC and OFF-tag curated tables must not bleed into each other's
+    section of the response, even when both are populated at once."""
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_BRICK", {"Bread": "10000201"})
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_CLASS", {})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_BRICK", {"en:sodas": "10000202"})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_CLASS", {})
+
+    body = client.get("/api/v1/gpc/mappings").json()
+
+    assert [m["category"] for m in body["mappings"]] == ["Bread"]
+    assert [m["category"] for m in body["off_tag_mappings"]] == ["en:sodas"]
