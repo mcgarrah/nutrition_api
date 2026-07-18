@@ -691,7 +691,7 @@ before committing to a design.
 
 ## 11. Consolidate the ad-hoc explorer/debug pages into one coherent set
 
-**Status:** not started — planning only, for review before any code changes.
+**Status:** design decided with the user 2026-07-19; not yet implemented.
 Flagged 2026-07-19: these pages were added one at a time, each to support
 whatever was being developed at the time, never designed as a set — the
 user's framing is that this is a debugging/dev feature that was "just
@@ -742,60 +742,60 @@ exists still resolves — it's discoverability and coherence: there is no
 single place that tells a newcomer "here are the N things you can do here,"
 grouped by what they're for.
 
-### Sketch: two separable questions, not one
+### Decisions
 
-**1. Shared navigation, not per-page copies.** Whatever the final page
-inventory is, the nav should be written once and included everywhere.
-Options, roughly in order of how much they disturb the current no-build-step
-static-file setup:
-  - A small vanilla-JS include: one `nav.js` exporting a `{href, label,
-    group}` array, injected into a placeholder element on page load. No new
-    dependency, fits every page's existing "plain HTML + inline `<script>`"
-    style exactly.
-  - Move page-serving to Jinja2 templates with a real `{% include %}` base
-    layout. Bigger change — FastAPI pulls in Jinja2 transitively via
-    Starlette already, but no route in `main.py` uses it today, they're all
-    `FileResponse` over static files — but it's the more idiomatic FastAPI
-    pattern, and would let `deploy/site/status.html` join the same served
-    set instead of living under a separate Caddy static path.
+Resolved directly with the user, 2026-07-19:
 
-**2. Whether/how to group or merge the tools themselves** — the actual
-"easier to consume" ask, separate from just fixing broken nav links.
-Candidates to weigh, not decided:
-  - Group `index.html`'s flat "More tools" grid into labelled sections
-    matching the audiences already implicit in the pages: **use the API**
-    (`/lookup`, `/search`), **explore the data** (`/gpc`, `/gpc/mappings`,
-    `/data`, `/data/analytics` — four lenses on the same four local stores,
-    currently four unrelated-looking pages), **operate it** (`/status`,
-    `/docs`, `/redoc`).
-  - Whether `/data` (raw browser) and `/data/analytics` (aggregated
-    dashboard) should become two tabs of *one* page rather than two
-    separately-routed ones — they already read the same four local stores;
-    a user moving between "what does this column actually look like" and
-    "how healthy is this column overall" currently has to navigate away and
-    back rather than flip a tab.
-  - Same question for `/gpc` (browse the taxonomy) and `/gpc/mappings`
-    (browse how FDC/OFF categories resolve into it) — related, currently
-    unconnected pages.
-  - Lower-risk alternative to merging pages: leave every route as-is and
-    solve this purely with grouped navigation, possibly via a dedicated
-    `/explore` landing page one level under `/` that hosts a real,
-    sectioned "More tools" view instead of today's flat grid — no page-
-    restructuring risk, worth weighing against the tab-merge idea above
-    before picking either.
+1. **`/status` stays out of this entirely.** Different audience (operator,
+   not data explorer) and a different deploy path already
+   (`deploy/site/`, Caddy-served, not an `app/static/` FastAPI page) —
+   left exactly as it is today, untouched by this item.
+2. **Shared nav: the small vanilla-JS include, not a move to Jinja2
+   templates.** One `nav.js` exporting a `{href, label, group}` array,
+   injected into a placeholder element on every remaining page. Since
+   `/status` is out (decision 1), `status.html` keeps its own hand-written
+   nav — it was never going to join the shared component anyway.
+3. **All four data-exploration pages merge into *one* page, as tabs** —
+   not two separate tabbed pages (`/data`+`/data/analytics` kept apart from
+   `/gpc`+`/gpc/mappings`), but a single page with four tabs: **Data
+   Browser** (today's `/data`), **Data Quality** (today's
+   `/data/analytics`), **GPC Taxonomy** (today's `/gpc`), **GPC Mappings**
+   (today's `/gpc/mappings`). One destination for "explore the local data,"
+   not four separately-routed lenses on it.
+4. **Home page grouping**: `index.html`'s flat "More tools" grid becomes
+   labelled sections instead of one undifferentiated grid — **Use the API**
+   (`/lookup`, `/search`, already the page's primary "choices" cards,
+   unchanged) and **Explore the data** (one tile now, linking to the
+   consolidated tabbed page, replacing today's four separate `/gpc`,
+   `/gpc/mappings`, `/data`, `/data/analytics` tiles). `/status`, `/docs`,
+   `/redoc`, and the example lookup stay together, same spirit as today's
+   "API" section.
 
-### Open questions to resolve before implementation starts
-1. Merge `/data` + `/data/analytics` into one tabbed page, or keep them
-   separate and fix navigation/grouping only?
-2. Same question for `/gpc` + `/gpc/mappings`.
-3. Shared-nav mechanism: small vanilla-JS include, or a move to Jinja2
-   templates (bigger change, but lets `status.html` join the same system
-   instead of living in `deploy/site/` under Caddy's separate static path)?
-4. Does `/status` belong in this consolidation at all, given it already
-   serves a different audience (operator, not data explorer) and lives on a
-   different deploy path today?
+### Implementation sketch
 
-Deliberately scoped as a planning item, not a design — next step is
-resolving the four questions above (with the user), then a follow-up pass
-sketches the concrete page/route/nav-component shape before any code
-changes.
+- **Route**: the consolidated page lives at `/data` — today's Data Browser
+  route, kept stable since it's the most centrally-linked of the four.
+  `/gpc`, `/gpc/mappings`, and `/data/analytics` become thin redirects in
+  `main.py` to `/data?tab=gpc`, `/data?tab=mappings`, `/data?tab=analytics`
+  respectively, so every existing bookmark or link (including ones already
+  written into this session's own commit messages and PLAN.md prose) still
+  resolves. `/data` with no query param keeps defaulting to the Data
+  Browser tab, matching that URL's behavior today.
+- **Page structure**: the page gains a tab strip at the top — four buttons,
+  reading `?tab=` on load to preselect and updating the URL via
+  `history.replaceState` on click (bookmarkable, no full reload). Each
+  tab's markup/JS is today's four pages' bodies, carried over largely as-is
+  into four panel `<div>`s (inactive panels `display: none`) — this
+  consolidates existing, working code into one shell rather than rewriting
+  any tool's functionality.
+- **Shared nav**: `app/static/nav.js`, the `{href, label, group}` array
+  from decision 2, rendered into a `<div id="nav"></div>` placeholder on
+  `index.html`, `lookup.html`, `search.html`, and the new consolidated
+  page — replacing every hand-written `<span class="nav">` line on those
+  four. `status.html` is explicitly excluded per decision 1.
+- **Not yet decided, flagged for the implementation PR rather than
+  blocking this plan**: exact tab-strip visual design; whether the four
+  merged pages' individual `<style>` blocks collide or need namespacing
+  once combined into one document; whether a tab's own in-page search/
+  filter state (e.g. the GPC Taxonomy tab's search box) should reset or
+  persist across a tab switch.
