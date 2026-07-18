@@ -361,26 +361,39 @@ explicit `gpc_db` fixture that it never mattered — until broadening when
 against the real `data/gpc.sqlite3` on a developer's box. Added
 `isolated_gpc_db` (autouse), same pattern as its two siblings.
 
-**Curation seed:** 26 brick + 5 class entries, each individually verified
-against real product samples and the real GPC taxonomy (not worked
-mechanically down the frequency list — OFF's tag-frequency head skews
-toward broad umbrella terms unlike FDC's, see ARCH.md's "Curated OFF tags"
-section for why). Measured against the real corpus: **4.4% of real tag
-occurrences covered** (296,084 of 6,657,990) — a modest, honest first pass,
-sized to what one careful verification round actually produced rather than
-a target picked in advance, the same incremental spirit as FDC's own
-multi-round path to 91.4%. Live-verified end to end on a real product
-(`00000000030489`, "Moutarde au miel") returning
-`category_hierarchy_source: "reviewed"` through the running dev server, not
-just the test suite.
+**Curation seed, round 1:** 26 brick + 5 class entries, each individually
+verified against real product samples and the real GPC taxonomy (not
+worked mechanically down the frequency list — OFF's tag-frequency head
+skews toward broad umbrella terms unlike FDC's, see ARCH.md's "Curated OFF
+tags" section for why). Reached 4.4% of real tag occurrences (296,084 of
+6,657,990). Live-verified end to end on a real product (`00000000030489`,
+"Moutarde au miel") returning `category_hierarchy_source: "reviewed"`
+through the running dev server, not just the test suite.
 
-**Left for later, not blocking:** broader OFF tag coverage (more curation
-rounds, the same way FDC grew from its first pass to 91.4% — worth its own
-future PLAN.md item once this one is merged) and a genuine live review
-workflow, if one is ever actually wanted for collaborative/non-git-access
-review — the security question that ruled it out this round would need a
-real answer first (an API key? Caddy-level LAN/tailnet-only gating for just
-that route, mirroring how debug endpoints were handled during the earlier
+**Round 2 (same day):** 69 more brick entries — reusing an already-verified
+code where an OFF tag names the same real-world thing as an existing entry
+(a dozen cheese-style tags all resolve to the one Cheese brick), and fresh
+codes, each checked against real samples, for categories with no existing
+FDC-curated equivalent (oils, fruit juice, ice cream, cooking sauces,
+soups, hummus/dips, sugar, syrups, cereal/protein bars). Caught and fixed
+one real mistake via that sample-checking discipline: `en:beef` and
+`en:beef-and-its-products` looked at first like Prepared/Processed
+(matching FDC's own beef categories), but their actual samples were raw
+cuts — moved to Unprepared/Unprocessed, keeping only `en:beef-dishes`
+(genuinely prepared meals in its samples) on the other brick. **100 brick +
+5 class entries now reach 13.5%** (898,275 of 6,657,990) — 3x round 1's
+coverage. Live-verified 5 more real products end to end, including the
+beef correction (`British Beef Braising Steak` → `Beef -
+Unprepared/Unprocessed`, not the prepared brick).
+
+**Left for later, not blocking:** further curation rounds (the same way
+FDC grew from its first pass to 91.4% — the broad umbrella tags at the
+head of the frequency distribution remain deliberately uncurated, see
+ARCH.md) and a genuine live review workflow, if one is ever actually
+wanted for collaborative/non-git-access review — the security question
+that ruled it out this round would need a real answer first (an API key?
+Caddy-level LAN/tailnet-only gating for just that route, mirroring how
+debug endpoints were handled during the earlier
 security-hardening pass?).
 
 ## 6. Data quality & coverage dashboard
