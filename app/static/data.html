@@ -377,7 +377,7 @@
     <h1><span class="g">Explore</span> the Data</h1>
     <span class="nav" id="nav"></span>
   </header>
-  <p class="sub">Four tools over the local FDC/OFF/GPC bulk copies and <code>gpc_match.py</code>'s curated tables —
+  <p class="sub">Four tools over the local FDC/OFF/GPC bulk copies and the curated GPC category-matching tables —
     read-only, computed live. Not operational health (see <a href="/status">/status</a> for that).</p>
 
   <div class="toptabs" id="toptabs">
@@ -399,7 +399,7 @@
 
   <!-- ============================= Data Quality ============================= -->
   <div class="tabpanel" id="panel-quality">
-    <p class="sub" style="max-width:none;margin:-.4rem 0 1rem">Dataset freshness, per-field completeness, value distributions, and GPC category-matching coverage. See PLAN.md item 6.</p>
+    <p class="sub" style="max-width:none;margin:-.4rem 0 1rem">Dataset freshness, per-field completeness, value distributions, and GPC category-matching coverage.</p>
 
     <div class="tiles" id="dq-tiles"><p class="loading">Loading…</p></div>
 
@@ -474,9 +474,8 @@
   <!-- ============================= GPC Mappings ============================= -->
   <div class="tabpanel" id="panel-mappings">
     <p class="sub" style="max-width:none;margin:-.4rem 0 1rem">
-      Every hand-verified entry linking an FDC <code>branded_food_category</code> to a GPC brick or class
-      (<code>app/core/gpc_match.py</code>), and how much of the real local FDC corpus the curated tables reach right now.
-      See ARCH.md, "GPC Category Matching".
+      Every hand-verified entry linking an FDC <code>branded_food_category</code> to a GPC brick or class,
+      and how much of the real local FDC corpus the curated tables reach right now.
     </p>
 
     <div id="gm-coverage"><p class="loading">Loading…</p></div>
@@ -495,11 +494,10 @@
 
     <h2 class="section-divider">OFF tag reviews <span class="muted">— the <code>reviewed</code> tier</span></h2>
     <p class="sub" style="max-width:none;margin:0 0 1rem">
-      Open Food Facts category tags that have been individually hand-verified against a GPC brick or class
-      (<code>OFF_TAG_TO_BRICK</code> / <code>OFF_TAG_TO_CLASS</code> in <code>gpc_match.py</code>), and how much
-      of the real local OFF corpus they reach. Trusted at the same level as the FDC mappings above — a
+      Open Food Facts category tags that have been individually hand-verified against a GPC brick or class,
+      and how much of the real local OFF corpus they reach. Trusted at the same level as the FDC mappings above — a
       <code>reviewed</code> match is not a best-effort guess, unlike the fuzzy matcher's <code>off_fuzzy</code>
-      fallback. See PLAN.md item 5.
+      fallback.
     </p>
 
     <div id="gm-offCoverage"><p class="loading">Loading…</p></div>
@@ -517,7 +515,7 @@
     <div id="gm-offUncoveredWrap"></div>
   </div>
 
-  <footer>Read-only, computed live from the local FDC/OFF/GPC bulk copies and <code>gpc_match.py</code>'s curated
+  <footer>Read-only, computed live from the local FDC/OFF/GPC bulk copies and the curated GPC category-matching
     tables. Full-corpus scans (coverage, distributions) are cached by the source file's own mtime — the first
     request after a rebuild is slow, everything after is fast.</footer>
 </div>
