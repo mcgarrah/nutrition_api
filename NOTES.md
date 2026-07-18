@@ -48,39 +48,7 @@ see the commit for `claude/usda-fdc-0.2.0`: a missing food and a rate limit were
 both being counted as *upstream failures*, so five lookups of absent foods in a
 row would trip the circuit breaker and shut USDA out for everyone.
 
-### 1. ~~`usda_fdc` drops `gtinUpc`~~ — RESOLVED
-
-Fixed upstream in
-[usda_fdc_python#8](https://github.com/mcgarrah/usda_fdc_python/pull/8) and
-released as **usda-fdc 0.1.10**, which exposes `gtin_upc` on `Food` and
-`SearchResultFood` — and also adds a request `timeout`, since `requests` has no
-default and a stalled FDC socket used to block its thread forever.
-
-This repo now pins `usda-fdc>=0.1.10`, verifies the barcode through the public
-`client.search()`, and has **deleted** the `_make_request` workaround. It also
-passes `timeout=UPSTREAM_TIMEOUT_S` to the client, which is what finally
-releases a thread stuck on a stalled socket — `asyncio.wait_for` never could.
-
-That repo also had no CI at all and published to PyPI without running its
-tests; both are fixed
-([usda_fdc_python#9](https://github.com/mcgarrah/usda_fdc_python/pull/9)).
-
-### 2. ~~We import `gpcc._crawlers`, a private module~~ — RESOLVED
-
-I was wrong about this one: it was never a `gpcc` problem. `gpcc` already
-re-exports `get_language` and `get_publications` from its package root and
-lists both in `__all__` — they are the *same function objects*. Reaching into
-`gpcc._crawlers` bought nothing and risked a private module being renamed under
-us in a patch release, which would silently stop the taxonomy auto-updating.
-
-`scripts/import_gpc_xml.py` now imports them from `gpcc` directly. No upstream
-change was needed.
-
-While fixing it: `gpcc` was only a *transitive* dependency (via `gs1-gpc`)
-despite being imported directly, so it is now declared in `requirements.txt`.
-A direct import deserves a direct dependency.
-
-### 3. `nutrimetrics`' copper `display_unit` does not match what FDC returns
+### 1. `nutrimetrics`' copper `display_unit` does not match what FDC returns
 
 Learned from `nutrimetrics` while expanding `app/core/nutrients.py` from the
 US label panel to the full vitamin/mineral set: its `Nutrient('copper', ...,
@@ -95,6 +63,16 @@ does. `nutrients.py` publishes copper in mg, verified against the live API,
 with the discrepancy documented in a code comment. No upstream change needed.
 
 ## Ideas not yet acted on
+
+- **Custom domain (`nutrition-api-dev.mcgarrah.org`) for the public site.**
+  See [PLAN.md](PLAN.md) item 1 for the full writeup — shelved until the
+  domain finishes migrating from Squarespace to Porkbun. Short version:
+  Tailscale Funnel has no custom-domain support (it only issues/serves TLS for
+  `*.ts.net`), so a plain CNAME to the Funnel hostname resolves but fails TLS.
+  The preferred fix found while researching this (2026-07-17) is Funnel's raw
+  `--tcp=443` forwarder plus Caddy doing its own DNS-01 ACME against Porkbun —
+  full detail, commands, and the multi-service front-Caddy architecture it
+  enables are in PLAN.md, not duplicated here.
 
 - **Real GTIN→GPC classification.** Worth being honest that we don't have one.
   `gpcc`'s own README says the classification "cannot be inferred from the

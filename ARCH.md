@@ -16,8 +16,10 @@ The Unified Food Intelligence API is an asynchronous, container-native data aggr
           v                         v                         v
 +-------------------+     +-------------------+     +-------------------+
 |     USDA FDC      |     |  Open Food Facts  |     |   Local SQLite    |
-|   (Remote API)    |     |   (Remote API)    |     |   (GS1 GPC Cache) |
-+-------------------+     +-------------------+     +-------------------+
+| local bulk mirror |     | local bulk mirror |     |   (GS1 GPC Cache) |
+| first; live API   |     | first; live API   |     +-------------------+
+| on a miss         |     | on a miss         |
++-------------------+     +-------------------+
           |                         |                         |
           +-------------------------+-------------------------+
                                     |
@@ -35,7 +37,7 @@ The Unified Food Intelligence API is an asynchronous, container-native data aggr
 The runtime leverages an ASGI architecture powered by **FastAPI** and **Uvicorn**. Instead of blocking execution lines on latent upstream network calls, `asyncio.gather` spawns concurrent I/O operations. The worst-case latency of a single request is capped by the slowest responding service, rather than the cumulative sum of all services. Synchronous upstream SDKs (usda-fdc, openfoodfacts) are bridged into the event loop via thread-pool executors.
 
 ### 2. Tiered Storage & Caching Layer
-To optimize hosting costs on the **DigitalOcean App Platform** and avoid reliance on heavy infrastructure like Redis, caching is implemented on two levels:
+To keep the service deployable on small hosts (a DigitalOcean App Platform container, a Proxmox LXC) without heavy infrastructure like Redis, caching and local data are layered in four tiers:
 1. **In-Memory LRU/TTL Cache:** `cachetools.TTLCache` caches hot GTIN lookups at the application level (default: 1024 entries, 300s TTL — tunable via `LOOKUP_CACHE_MAX_SIZE` / `LOOKUP_CACHE_TTL_S`) to prevent redundant network round-trips for high-volume items. Only results with at least one contributing source are cached, so transient upstream failures can recover. Entries are keyed on the **GTIN-14 normalized** barcode, so the same product written with different zero-padding shares one entry rather than costing a fresh round trip each way.
 
    A cached response is marked `cached: true`. Its `upstream_latency_ms` describes the fetch that *produced* the data, not the request that just returned it — without the flag, a 1 ms cache hit would still claim it spent 500 ms querying USDA.
@@ -45,7 +47,9 @@ To optimize hosting costs on the **DigitalOcean App Platform** and avoid relianc
 
 The taxonomy import is **atomic and cross-process locked**. Every uvicorn worker runs the startup lifespan, so `--workers N` means N processes reach the importer on the same boot. It builds into a temporary file and `os.replace()`s it into position, and holds an exclusive `flock` for the whole decide-and-import sequence — so a second worker waits, then finds the work already done rather than re-downloading 27 MB and rebuilding the same file underneath the first.
 
-3. **On-Disk Response Store:** every upstream response is kept as an individual JSON record under `data/responses/`, with the payload as it arrived and a UTC timestamp, and served on a repeat lookup within its TTL (default 30 days — food composition is close to static).
+3. **Local Bulk Mirrors (`app/core/fdc_local.py`, `app/core/off_local.py`):** both remote sources publish their entire corpus as a bulk download — USDA twice a year, Open Food Facts daily — and the API imports each into a local SQLite database (`data/fdc.sqlite3`, ~327 MB / 442k barcodes; `data/off.sqlite3`, ~1.2 GB / 2.24M products). The orchestrator consults the mirror **before** the live API: a hit answers in ~25 µs with no API key, no rate-limit spend, and no network dependency; a miss (a product newer than the export) falls through to the live API, which stays authoritative for anything the mirror hasn't got. `provenance` in the lookup response records, per source, whether the answer came from the mirror (with its dataset date) or the live API. Neither database is committed — each is published as a GitHub release asset (`fdc-YYYY-MM-DD` / `off-YYYY-MM-DD` tags, `.xz`-compressed) and expanded on first startup. Build/refresh mechanics, dataset-revision handling, and size/latency tables are in README.md's "Local USDA FDC copy" / "Local Open Food Facts copy" sections.
+
+4. **On-Disk Response Store:** every upstream response is kept as an individual JSON record under `data/responses/`, with the payload as it arrived and a UTC timestamp, and served on a repeat lookup within its TTL (default 30 days — food composition is close to static).
 
    This is load-bearing rather than decorative. The in-memory cache dies with the process, so every deploy re-spent Open Food Facts' entire 15-requests-per-minute allowance re-fetching barcodes already seen; and it is per-worker, so two workers paid twice. A record on disk costs neither a request nor a rate-limit token. It also removes the *search* call from a USDA barcode lookup on the second visit, by remembering which FDC id a barcode resolved to.
 
@@ -94,3 +98,21 @@ A future `reviewed` tier is planned for `off_fuzzy` matches that have since been
 The curated path is tried first and, on a hit, the fuzzy path is skipped entirely — not run in the background and discarded, actually skipped, so a curated answer never pays for a query it doesn't need.
 
 **Progress on the curation effort is browsable, not just documented here.** `/gpc/mappings` (backed by `GET /api/v1/gpc/mappings`) lists every entry in both curated tables with its resolved GPC hierarchy, a live coverage percentage measured against the local FDC bulk copy, and the ranked list of FDC categories still uncovered — so the next category worth curating is visible without reading `gpc_match.py`'s source, and the coverage number on screen and the one in this document are computed the same way.
+
+### 6. Nutrient Normalization
+
+`app/core/nutrients.py` is the single table of truth for which nutrients the API publishes and how each is extracted from both upstreams: **36 fields** — the full US Nutrition Facts label panel plus every vitamin and mineral FDC tracks (A, C, D, E, K, the B vitamins, choline, and the trace minerals through molybdenum), plus caffeine. Each `NutrientSpec` carries the FDC nutrient **ids** it accepts (never names — FDC publishes "Energy" twice, in kcal and kJ, and a name key silently keeps whichever came last), the published unit, per-upstream unit conversions (OFF reports everything in grams; FDC mixes mg/µg/IU), and a physical-maximum sanity bound that rejects impossible values (e.g. more than 100 g of protein per 100 g of product) rather than passing garbage through. All values are normalized to a per-100g/100mL baseline. Every field lands on `CanonicalProduct` as a typed `NutrientValue | None`, so "not reported" is distinguishable from zero.
+
+### 7. Local Name Search
+
+`GET /api/v1/search` (backing the `/search` UI) answers "find a product by name" from the local bulk mirrors only — a `LIKE` scan over the FDC and OFF product-name columns, merged and deduped by GTIN. It deliberately returns **identity fields only** (barcode, name, brand, image): the full merged panel for a chosen result comes from the existing `/api/v1/lookup/{gtin}`, so there is exactly one place that merges sources, not a second lighter copy of the logic. It never falls through to the upstreams' live search — OFF's search budget is 10/minute per IP, too tight to spend on keystroke-shaped traffic, and the mirrors already cover the browsable corpus. (Known limitation: the leading-wildcard `LIKE` scan cannot use an index — see PLAN.md for the FTS5 upgrade.)
+
+### 8. Deployment Topology
+
+The service itself is deployment-agnostic (a Dockerfile and `.do/app.yaml` support the container/PaaS path), but the **reference deployment** is a Proxmox LXC running:
+
+- **uvicorn** (2 workers, port 8080) under **systemd** (`deploy/nutrition-api.service`) with resource caps (`MemoryMax`, `CPUQuota`) and filesystem hardening; port 8080 is firewalled to localhost + LAN + tailnet via iptables.
+- **Caddy** in front, terminating TLS and serving the static landing hub and status dashboard itself — so the dashboard stays up, and reports the outage, while the backend restarts. Route split lives in `deploy/caddy/site.caddy`, shared by every site block so configs cannot drift.
+- **Tailscale Funnel** for public internet exposure without port-forwarding, targeting a loopback-only plain-HTTP Caddy listener.
+
+The full run-book — hardening rationale, firewall rules, the Funnel TLS-interop story, and the internal-CA trust procedure — is `deploy/README.md`, which is the authoritative document for this layer; this section is only the map.
