@@ -3,11 +3,18 @@ DataOrchestrator — merges data from USDA FDC, Open Food Facts, and GS1 GPC
 into a single CanonicalProduct response.
 
 Reconciliation logic (layered approach from design doc):
-  Layer 1: Open Food Facts — name, brand, image, ingredients, allergens, labels,
-           and provisional nutrition (used only if USDA is missing).
-  Layer 2: USDA FDC — authoritative nutrition data overrides OFF values.
-           Product name from USDA overrides OFF if available.
-  Layer 3: GS1 GPC — category taxonomy. OFF categories used as fallback.
+  Layer 1: Open Food Facts — name, brand, image, ingredients, allergens,
+           labels, and provisional nutrition. Applied first, as the base —
+           USDA overrides every one of these fields it also carries.
+  Layer 2: USDA FDC — the authoritative source, ahead of OFF wherever both
+           can supply a field: nutrition, product name, brand, and
+           ingredients all override OFF's when USDA has them. OFF's image,
+           allergens, and labels survive untouched because USDA FDC's
+           branded-food data does not carry those fields at all — there is
+           nothing for USDA to override them with.
+  Layer 3: GS1 GPC — category taxonomy. FDC's own category is tried first,
+           through a hand-verified table (gpc_match.py); OFF's informal tags,
+           matched by best-effort text search, are the fallback.
 
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
@@ -392,9 +399,14 @@ async def lookup(gtin: str, fresh: bool = False) -> CanonicalProduct:
         if isinstance(usda_nutrients, list):
             _apply_nutrients(product, nutrient_spec.from_usda(usda_nutrients))
 
-        # Use USDA ingredients if OFF didn't have them
-        if not product.ingredients_text:
-            product.ingredients_text = _text(usda_data.get("ingredients"))
+        # USDA's ingredients (official label text) override OFF's
+        # crowd-sourced text whenever USDA has them -- USDA FDC is
+        # authoritative ahead of OFF across every field both sources can
+        # supply, not just nutrition. OFF's text survives only when USDA
+        # has none.
+        usda_ingredients = _text(usda_data.get("ingredients"))
+        if usda_ingredients:
+            product.ingredients_text = usda_ingredients
 
     # --- Layer 3: GS1 GPC (category taxonomy) ---
     # FDC's own category is tried FIRST, through a hand-verified table

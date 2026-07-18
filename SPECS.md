@@ -135,7 +135,7 @@ When fields are provided concurrently across vendors, conflicts are evaluated de
 | **Nutrients** | **USDA FDC** | Reconciles raw laboratory outputs; per-100g baselines. Open Food Facts values are provisional and overridden when USDA data exists. |
 | **Media / Images** | **Open Food Facts** | Validates public URLs; grabs real-time label photography strings. |
 | **Taxonomy** | **GS1 GPC** | Two tiers, graded by confidence and reported in `category_hierarchy_source`: FDC's own category resolves through a hand-curated, verified mapping (`fdc_curated`) when one exists; otherwise Open Food Facts' tags are matched against GPC brick descriptions by best-effort text search (`off_fuzzy`). See ARCH.md, "GPC Category Matching". |
-| **Ingredients** | **Open Food Facts** | Parses text strings from public product labeling array; USDA ingredients used when OFF has none. |
+| **Ingredients** | **USDA FDC** | USDA's official label text overrides Open Food Facts' crowd-sourced text when USDA has an ingredients list; OFF's text is used when USDA has none. |
 
 Within a single source, the **local bulk mirror answers before the live API**
 (see ARCH.md, "Local Bulk Mirrors") — the mirror is the same data, just
