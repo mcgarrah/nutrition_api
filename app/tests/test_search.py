@@ -5,6 +5,7 @@ GET /api/v1/search route.
 Copyright (c) 2026 Michael McGarrah
 Licensed under MIT License
 """
+import inspect
 import sqlite3
 
 import pytest
@@ -13,9 +14,18 @@ from fastapi.testclient import TestClient
 from app.core import fdc_local
 from app.core import off_local
 from app.core import search
+from app.core.search_routes import search_by_name
 from app.main import app
 
 client = TestClient(app)
+
+
+def test_search_route_is_sync_so_fastapi_runs_it_in_the_threadpool():
+    """search_products() runs blocking sqlite3 queries with no executor of its
+    own; only Starlette's automatic threadpooling for a `def` (not `async
+    def`) route keeps a slow scan off the event loop. Regression guard for
+    the bug measured at ~17s blocking the whole worker — see PLAN.md item 2."""
+    assert not inspect.iscoroutinefunction(search_by_name)
 
 
 def _build_fdc_db(path):

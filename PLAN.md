@@ -146,6 +146,29 @@ Funnel enabled at all; the backend nodes just need tailnet membership, no
 Funnel of their own. Worth a dedicated design pass if/when there's a second
 service wanting public exposure — not needed to unblock this one item.
 
+```mermaid
+flowchart LR
+    internet["Public internet"]
+
+    subgraph front["Front-Caddy LXC — the only node running Funnel"]
+        f["tailscale funnel --tcp=443<br/>(raw, untouched by Tailscale)"]
+        c1["nutrition-api-dev.mcgarrah.org<br/>DNS-01 cert"]
+        c2["other-service.mcgarrah.org<br/>DNS-01 cert"]
+    end
+
+    subgraph tailnet["Tailscale private network (not Funnel)"]
+        direction TB
+        n1["nutrition-api LXC<br/>100.x.x.x, no Funnel"]
+        n2["other-service LXC/VM<br/>100.x.x.x, no Funnel"]
+    end
+
+    internet -->|"raw TLS bytes"| f
+    f --> c1
+    f --> c2
+    c1 -->|"reverse_proxy over tailnet"| n1
+    c2 -->|"reverse_proxy over tailnet"| n2
+```
+
 ### Open questions before starting
 
 - Exact `caddy-dns/porkbun` Caddyfile directive syntax and whether it needs a
@@ -166,21 +189,22 @@ service wanting public exposure — not needed to unblock this one item.
 
 ## 2. Name search: stop blocking the event loop, then make it fast (FTS5)
 
-**Status:** not started. Found during the 2026-07-17 full-repo review.
-Two problems, one endpoint — fix in this order because the first is a
-correctness bug and the second is the enhancement.
+**Status:** (a) fixed 2026-07-18. (b) not started.
 
-**(a) The search endpoint blocks the event loop.** `search_by_name` in
-`app/core/search_routes.py` is `async def`, but `search.search_products()`
+**(a) ~~The search endpoint blocks the event loop~~ — FIXED.** `search_by_name`
+in `app/core/search_routes.py` was `async def`, but `search.search_products()`
 runs synchronous `sqlite3` queries directly — no thread pool, no
 `run_in_executor`. Measured on the reference LXC: a cold-cache
-`LIKE '%peanut butter%'` scan over `off.sqlite3` (1.2 GB) takes **~17 s**
-(≈0.65 s warm). For that whole time the worker's event loop is stalled —
+`LIKE '%peanut butter%'` scan over `off.sqlite3` (1.2 GB) took **~17 s**
+(≈0.65 s warm). For that whole time the worker's event loop was stalled —
 every other request on that worker, including barcode lookups and health
-checks, waits. Cheapest correct fixes: make the route `def` (FastAPI then
-runs it in its threadpool) or push the query through `asyncio.to_thread`.
-CLAUDE.md's own rule — async handlers are for external I/O — argues for
-`def` here since the work is local blocking disk I/O.
+checks, waited. Fixed by making the route `def` instead of `async def` —
+FastAPI/Starlette runs a sync path operation in its threadpool automatically,
+which is what CLAUDE.md's own rule (async handlers are for *external* I/O)
+argues for here anyway, since the work is local blocking disk I/O, not a
+network call. Guarded by a regression test
+(`test_search_route_is_sync_so_fastapi_runs_it_in_the_threadpool`) that fails
+loudly if the route ever goes back to `async def`.
 
 **(b) Leading-wildcard `LIKE` can never use an index.** Both mirrors are
 scanned with `LIKE '%q%'`, which is a full-table scan by construction.

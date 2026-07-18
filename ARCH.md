@@ -3,32 +3,24 @@
 ## Architectural Overview
 The Unified Food Intelligence API is an asynchronous, container-native data aggregation gateway. It acts as a performance-optimized orchestration layer between web clients (or ingestion pipelines) and three distinct food telemetry datasets.
 
-```
-                  [ Web Client / ML Ingestion Pipeline ]
-                                    |
-                                    v (HTTP GET /api/v1/lookup/{gtin})
-                       +-------------------------+
-                       |   FastAPI Gateway API   |
-                       +-------------------------+
-                                    |
-          +-------------------------+-------------------------+
-          | (Async Task)            | (Async Task)            | (Local DB Query)
-          v                         v                         v
-+-------------------+     +-------------------+     +-------------------+
-|     USDA FDC      |     |  Open Food Facts  |     |   Local SQLite    |
-| local bulk mirror |     | local bulk mirror |     |   (GS1 GPC Cache) |
-| first; live API   |     | first; live API   |     +-------------------+
-| on a miss         |     | on a miss         |
-+-------------------+     +-------------------+
-          |                         |                         |
-          +-------------------------+-------------------------+
-                                    |
-                                    v
-                       +-------------------------+
-                       |    DataOrchestrator     | (Schema Normalization & Ranked Truth)
-                       +-------------------------+
-                                    |
-                                    v (CanonicalProduct JSON Response)
+```mermaid
+flowchart TD
+    client["Web Client / ML Ingestion Pipeline"]
+    gateway["FastAPI Gateway<br/>GET /api/v1/lookup/{gtin}"]
+    usda["USDA FDC<br/>local bulk mirror first,<br/>live API on a miss"]
+    off["Open Food Facts<br/>local bulk mirror first,<br/>live API on a miss"]
+    gpc["Local SQLite<br/>GS1 GPC taxonomy cache"]
+    orch["DataOrchestrator<br/>schema normalization &amp; ranked truth"]
+    response["CanonicalProduct JSON response"]
+
+    client -->|"HTTP GET"| gateway
+    gateway -->|"async task"| usda
+    gateway -->|"async task"| off
+    gateway -->|"local DB query"| gpc
+    usda --> orch
+    off --> orch
+    gpc --> orch
+    orch --> response
 ```
 
 ## Key Technical Design Components
@@ -37,7 +29,26 @@ The Unified Food Intelligence API is an asynchronous, container-native data aggr
 The runtime leverages an ASGI architecture powered by **FastAPI** and **Uvicorn**. Instead of blocking execution lines on latent upstream network calls, `asyncio.gather` spawns concurrent I/O operations. The worst-case latency of a single request is capped by the slowest responding service, rather than the cumulative sum of all services. Synchronous upstream SDKs (usda-fdc, openfoodfacts) are bridged into the event loop via thread-pool executors.
 
 ### 2. Tiered Storage & Caching Layer
-To keep the service deployable on small hosts (a DigitalOcean App Platform container, a Proxmox LXC) without heavy infrastructure like Redis, caching and local data are layered in four tiers:
+To keep the service deployable on small hosts (a DigitalOcean App Platform container, a Proxmox LXC) without heavy infrastructure like Redis, caching and local data are layered in four tiers, consulted in this order for a single-source fetch:
+
+```mermaid
+flowchart TD
+    A["GET /api/v1/lookup/{gtin}"] --> B{"In-memory cache hit?<br/>(per worker, 300s TTL)"}
+    B -->|"yes (fresh=false)"| C["Return cached CanonicalProduct<br/>cached: true"]
+    B -->|"no, or fresh=true"| D["Query USDA + OFF concurrently<br/>(asyncio.gather)"]
+    D --> E{"Local bulk mirror<br/>has this GTIN?"}
+    E -->|"yes"| F["~25µs disk read<br/>provenance: local"]
+    E -->|"no"| G{"Disk response store has a<br/>fresh record? (TTL 30 days)"}
+    G -->|"yes"| H["Serve stored JSON<br/>no upstream call, no rate-limit spend"]
+    G -->|"no"| I["Live upstream API call<br/>2s timeout, circuit breaker<br/>provenance: live"]
+    I --> J["Write response to disk store"]
+    F --> K["DataOrchestrator merges sources"]
+    H --> K
+    J --> K
+    K --> L["Populate in-memory cache"]
+    L --> M["CanonicalProduct JSON response"]
+```
+
 1. **In-Memory LRU/TTL Cache:** `cachetools.TTLCache` caches hot GTIN lookups at the application level (default: 1024 entries, 300s TTL — tunable via `LOOKUP_CACHE_MAX_SIZE` / `LOOKUP_CACHE_TTL_S`) to prevent redundant network round-trips for high-volume items. Only results with at least one contributing source are cached, so transient upstream failures can recover. Entries are keyed on the **GTIN-14 normalized** barcode, so the same product written with different zero-padding shares one entry rather than costing a fresh round trip each way.
 
    A cached response is marked `cached: true`. Its `upstream_latency_ms` describes the fetch that *produced* the data, not the request that just returned it — without the flag, a 1 ms cache hit would still claim it spent 500 ms querying USDA.
@@ -114,5 +125,31 @@ The service itself is deployment-agnostic (a Dockerfile and `.do/app.yaml` suppo
 - **uvicorn** (2 workers, port 8080) under **systemd** (`deploy/nutrition-api.service`) with resource caps (`MemoryMax`, `CPUQuota`) and filesystem hardening; port 8080 is firewalled to localhost + LAN + tailnet via iptables.
 - **Caddy** in front, terminating TLS and serving the static landing hub and status dashboard itself — so the dashboard stays up, and reports the outage, while the backend restarts. Route split lives in `deploy/caddy/site.caddy`, shared by every site block so configs cannot drift.
 - **Tailscale Funnel** for public internet exposure without port-forwarding, targeting a loopback-only plain-HTTP Caddy listener.
+
+```mermaid
+flowchart LR
+    phone["Public internet<br/>(phone, external device)"]
+    lan["LAN / tailnet clients<br/>192.168.86.0/23, 100.64.0.0/10"]
+
+    subgraph funnel["Tailscale Funnel"]
+        edge["Funnel edge<br/>terminates real, trusted TLS<br/>on *.ts.net"]
+    end
+
+    subgraph lxc["Proxmox LXC — 12GB RAM / 4 vCPU"]
+        direction TB
+        caddy_https["Caddy :443<br/>TLS via internal CA<br/>site: LAN IP + localhost"]
+        caddy_http["Caddy :8090<br/>plain HTTP, bind 127.0.0.1<br/>(Funnel's raw TCP hop needs no TLS —<br/>Funnel already terminated it)"]
+        systemd["systemd: nutrition-api.service<br/>uvicorn x2 workers, 127.0.0.1:8080<br/>MemoryMax 2G / CPUQuota 200%"]
+        fw["iptables on :8080<br/>allow localhost + LAN + tailnet, drop rest"]
+    end
+
+    phone -->|HTTPS| edge
+    edge -->|"plain HTTP<br/>(loopback only)"| caddy_http
+    lan -->|"HTTPS by IP<br/>(internal CA)"| caddy_https
+    lan -.->|"debug: direct :8080<br/>bypasses Caddy"| fw
+    caddy_https --> systemd
+    caddy_http --> systemd
+    fw -.-> systemd
+```
 
 The full run-book — hardening rationale, firewall rules, the Funnel TLS-interop story, and the internal-CA trust procedure — is `deploy/README.md`, which is the authoritative document for this layer; this section is only the map.

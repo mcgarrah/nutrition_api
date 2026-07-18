@@ -25,7 +25,12 @@ MAX_QUERY_LENGTH = 200
     response_model=SearchResponse,
     summary="Search local product copies by name",
 )
-async def search_by_name(
+# Deliberately `def`, not `async def`: search_products() runs blocking sqlite3
+# queries with no executor of its own (a cold LIKE scan over the ~1.2 GB OFF
+# mirror measured ~17s). A sync route is what makes FastAPI/Starlette run it
+# in its threadpool instead of stalling the event loop for every other
+# request on this worker. See PLAN.md item 2.
+def search_by_name(
     q: str = Query(
         "", max_length=MAX_QUERY_LENGTH,
         description="Product name (or a substring of it) to search for",

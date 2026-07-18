@@ -116,7 +116,39 @@ outage shows as a red tile rather than an unreachable page.
 
 Publishing this site to the public internet with [Funnel](https://tailscale.com/kb/1223/funnel)
 needs two changes beyond a normal Option A deployment (see the Caddyfile's
-"Option A+" block for the exact config):
+"Option A+" block for the exact config). The working setup, and the two
+failure modes it replaced along the way:
+
+```mermaid
+sequenceDiagram
+    participant Ext as External device (phone)
+    participant TS as tailscaled (Funnel edge)
+    participant Caddy as Caddy
+
+    rect rgb(255, 230, 230)
+    note over Ext,Caddy: Attempt 1 — site scoped to LAN IP only
+    Ext->>TS: HTTPS request
+    TS->>Caddy: https+insecure://localhost:443 (SNI: localhost)
+    Caddy--xTS: no site block matches "localhost" — no response
+    TS--xExt: request goes nowhere
+    end
+
+    rect rgb(255, 230, 230)
+    note over Ext,Caddy: Attempt 2 — localhost/127.0.0.1 added to site,<br/>+ default_sni — fixed direct access, not Funnel
+    Ext->>TS: HTTPS request
+    TS->>Caddy: https+insecure://localhost:443 (TLS handshake)
+    Caddy--xTS: "tls: internal error"<br/>(never reproduced with curl/openssl against same port)
+    TS--xExt: TLS alert, internal error
+    end
+
+    rect rgb(220, 255, 220)
+    note over Ext,Caddy: Fix — plain HTTP to a loopback-only port,<br/>Funnel keeps terminating the real public TLS
+    Ext->>TS: HTTPS request (real, trusted cert)
+    TS->>Caddy: http://localhost:8090 (bind 127.0.0.1, no TLS)
+    Caddy->>TS: 200 OK
+    TS->>Ext: 200 OK
+    end
+```
 
 1. **Add `localhost`/`127.0.0.1` to the site address**, alongside the LAN IP.
    `tailscale funnel status` shows what its local proxy actually connects to —
