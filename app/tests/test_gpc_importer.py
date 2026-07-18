@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from app.core import gpc_match
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 import import_gpc_xml as importer  # noqa: E402
@@ -220,6 +222,56 @@ def test_creates_parent_directory(tmp_path, food_xml):
     nested = tmp_path / "deep" / "nested" / "gpc.sqlite3"
     importer.import_food_gpc(str(food_xml), nested)
     assert nested.exists()
+
+
+# ── check_curated_codes (PLAN.md item 9) ───────────────────────────────
+# food_xml/db_path's fixture taxonomy has brick 10000201 (Cola Drinks),
+# brick 10000202 (Lemonade), and class 50202300 (Carbonated Drinks) --
+# real codes a curated entry can point at; "99999999" exists nowhere in it.
+
+def test_reports_nothing_stale_when_every_curated_code_resolves(
+        food_xml, db_path, monkeypatch):
+    importer.import_food_gpc(str(food_xml), db_path)
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_BRICK", {"Cola": "10000201"})
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_CLASS", {"Soda": "50202300"})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_BRICK", {"en:cola": "10000202"})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_CLASS", {"en:soda": "50202300"})
+
+    stale = importer.check_curated_codes(db_path)
+
+    assert stale == {"bricks": [], "classes": []}
+
+
+def test_flags_an_fdc_curated_brick_code_the_taxonomy_no_longer_has(
+        food_xml, db_path, monkeypatch):
+    importer.import_food_gpc(str(food_xml), db_path)
+    monkeypatch.setattr(
+        gpc_match, "FDC_CATEGORY_TO_BRICK", {"Retired Category": "99999999"})
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_CLASS", {})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_BRICK", {})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_CLASS", {})
+
+    stale = importer.check_curated_codes(db_path)
+
+    assert stale["bricks"] == [
+        ("FDC_CATEGORY_TO_BRICK", "Retired Category", "99999999")]
+    assert stale["classes"] == []
+
+
+def test_flags_an_off_curated_class_code_the_taxonomy_no_longer_has(
+        food_xml, db_path, monkeypatch):
+    importer.import_food_gpc(str(food_xml), db_path)
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_BRICK", {})
+    monkeypatch.setattr(gpc_match, "FDC_CATEGORY_TO_CLASS", {})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_BRICK", {})
+    monkeypatch.setattr(
+        gpc_match, "OFF_TAG_TO_CLASS", {"en:renumbered-tag": "88888888"})
+
+    stale = importer.check_curated_codes(db_path)
+
+    assert stale["bricks"] == []
+    assert stale["classes"] == [
+        ("OFF_TAG_TO_CLASS", "en:renumbered-tag", "88888888")]
 
 
 # ── extract_version_from_path ─────────────────────────────────────────

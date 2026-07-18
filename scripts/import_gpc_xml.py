@@ -32,6 +32,10 @@ logging.basicConfig(
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from app.core import gpc_match  # noqa: E402
+
 DATA_DIR = REPO_ROOT / "data"
 DEFAULT_DB = DATA_DIR / "gpc.sqlite3"
 LOCAL_XML = DATA_DIR / "gpc_november_2024.xml"
@@ -432,6 +436,45 @@ def import_food_gpc(xml_path: str, db_path: Path) -> dict:
     return counts
 
 
+def check_curated_codes(db_path: Path) -> dict[str, list[tuple[str, str, str]]]:
+    """Resolve every code in gpc_match.py's four curated tables
+    (FDC_CATEGORY_TO_BRICK/_CLASS, OFF_TAG_TO_BRICK/_CLASS) against the
+    just-imported database.
+
+    A curated code the taxonomy no longer has is a silent regression
+    waiting to happen: hierarchy_for_brick()/hierarchy_for_class() already
+    return [] for an unknown code, by design -- correct for a *lookup*
+    code (a real "no GPC classification found" case) -- but a *curated*
+    code degrading the exact same way is indistinguishable from "no
+    curated entry exists for this category/tag" to anything downstream.
+    Run right after a successful rebuild so a code GS1 retired or
+    renumbered between taxonomy versions is caught here, not discovered
+    later as an unexplained drop in curated coverage. See PLAN.md item 9.
+
+    Returns {"bricks": [(table_name, key, code), ...], "classes": [...]}
+    -- both lists empty means every curated code still resolves.
+    """
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        valid_bricks = {r[0] for r in conn.execute("SELECT brick_code FROM bricks")}
+        valid_classes = {r[0] for r in conn.execute("SELECT class_code FROM classes")}
+    finally:
+        conn.close()
+
+    stale: dict[str, list[tuple[str, str, str]]] = {"bricks": [], "classes": []}
+    tables = [
+        ("FDC_CATEGORY_TO_BRICK", gpc_match.FDC_CATEGORY_TO_BRICK, valid_bricks, "bricks"),
+        ("FDC_CATEGORY_TO_CLASS", gpc_match.FDC_CATEGORY_TO_CLASS, valid_classes, "classes"),
+        ("OFF_TAG_TO_BRICK", gpc_match.OFF_TAG_TO_BRICK, valid_bricks, "bricks"),
+        ("OFF_TAG_TO_CLASS", gpc_match.OFF_TAG_TO_CLASS, valid_classes, "classes"),
+    ]
+    for table_name, mapping, valid_codes, kind in tables:
+        for key, code in mapping.items():
+            if code not in valid_codes:
+                stale[kind].append((table_name, key, code))
+    return stale
+
+
 @contextlib.contextmanager
 def import_lock(db_path: Path):
     """Serialize importers across processes.
@@ -527,6 +570,27 @@ def _run_import(args) -> None:
         row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
         logging.info("  %s (junction rows): %d", table, row[0])
     conn.close()
+
+    # PLAN.md item 9: confirm every curated GPC code still resolves against
+    # *this* taxonomy version. Logged, not fatal -- this script's exit code
+    # already means "did the import itself succeed," and app/main.py's
+    # startup lifespan treats a non-zero exit as an auto-update failure,
+    # falling back to the previous database. A stale curated code is a
+    # curation-maintenance signal, not an import failure, so it must not be
+    # reported (or handled) the same way.
+    stale = check_curated_codes(args.db)
+    stale_count = len(stale["bricks"]) + len(stale["classes"])
+    if stale_count:
+        logging.warning(
+            "%d curated GPC code(s) no longer resolve against this taxonomy "
+            "version -- silently degrading to an unmatched category/tag:",
+            stale_count,
+        )
+        for kind in ("bricks", "classes"):
+            for table_name, key, code in stale[kind]:
+                logging.warning("  %s[%r] -> %s (missing from %s)", table_name, key, code, kind)
+    else:
+        logging.info("All curated GPC codes resolve against this taxonomy version.")
 
 
 if __name__ == "__main__":
