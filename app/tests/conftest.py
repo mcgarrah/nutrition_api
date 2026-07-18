@@ -79,6 +79,33 @@ def isolated_off_local(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolated_gpc_db(tmp_path, monkeypatch):
+    """Keep the tests away from any real local GPC database.
+
+    Same hazard as isolated_fdc_local/isolated_off_local, and easy to miss
+    because get_db() used to be called rarely enough in tests that didn't
+    explicitly want a GPC database (the fdc_curated check only reaches it on
+    a possible curated hit) that the gap stayed latent. Once the orchestrator
+    started consulting OFF_TAG_TO_BRICK/OFF_TAG_TO_CLASS (the `reviewed`
+    tier) it calls get_db() far more often -- whenever a product has any OFF
+    category tags at all -- and a real production entry
+    (OFF_TAG_TO_CLASS["en:carbonated-drinks"]) happens to collide with the
+    shared off_product fixture's category tags. Without isolation, tests
+    using that fixture would silently start resolving against the real
+    data/gpc.sqlite3 on a developer's box instead of the fixture data they
+    asked for. Tests that want a real (fixture) GPC database still get one
+    via the explicit `gpc_db` fixture, which overrides this.
+    """
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "absent_gpc.sqlite3")
+    monkeypatch.setattr(database, "_db", None)
+    yield
+    conn = database._db
+    if conn is not None:
+        asyncio.run(conn.close())
+    database._db = None
+
+
+@pytest.fixture(autouse=True)
 def reset_shared_state():
     """Reset the process-wide singletons between tests.
 

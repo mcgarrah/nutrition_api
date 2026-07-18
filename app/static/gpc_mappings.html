@@ -128,6 +128,11 @@
     padding: 0; font: inherit; margin-top: .3rem;
   }
 
+  .section-divider {
+    font-size: 1.05rem; margin: 2rem 0 .35rem; padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+  }
+  .section-divider .muted { font-size: .8rem; font-weight: 400; }
   .muted { color: var(--text-muted); font-size: .875rem; }
   .loading { color: var(--text-muted); font-size: .875rem; padding: .5rem 0; }
   footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border);
@@ -160,7 +165,30 @@
   <div id="mappings"><p class="loading">Loading mappings…</p></div>
   <div id="uncoveredWrap"></div>
 
-  <footer>Read-only, computed live from <code>gpc_match.py</code>'s curated tables and the local FDC bulk copy.</footer>
+  <h2 class="section-divider">OFF tag reviews <span class="muted">— the <code>reviewed</code> tier</span></h2>
+  <p class="sub">
+    Open Food Facts category tags that have been individually hand-verified against a GPC brick or class
+    (<code>OFF_TAG_TO_BRICK</code> / <code>OFF_TAG_TO_CLASS</code> in <code>gpc_match.py</code>), and how much
+    of the real local OFF corpus they reach. Trusted at the same level as the FDC mappings above — a
+    <code>reviewed</code> match is not a best-effort guess, unlike the fuzzy matcher's <code>off_fuzzy</code>
+    fallback. See PLAN.md item 5.
+  </p>
+
+  <div id="offCoverage"><p class="loading">Loading…</p></div>
+
+  <div class="toolbar">
+    <input type="text" id="offQ" placeholder="Filter by OFF tag, GPC code, or hierarchy…" autocomplete="off">
+    <div class="chips" id="offLevelChips">
+      <button class="chip on" data-level="all">All</button>
+      <button class="chip" data-level="brick">Brick</button>
+      <button class="chip" data-level="class">Class</button>
+    </div>
+  </div>
+
+  <div id="offMappings"><p class="loading">Loading mappings…</p></div>
+  <div id="offUncoveredWrap"></div>
+
+  <footer>Read-only, computed live from <code>gpc_match.py</code>'s curated tables and the local FDC/OFF bulk copies.</footer>
 </div>
 
 <script>
@@ -169,54 +197,102 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt
 const api = p => fetch(p).then(r => r.json());
 const fmtNum = n => typeof n === "number" ? n.toLocaleString() : n;
 
-const state = { level: "all", q: "", mappings: [], coverage: null, uncoveredOpen: false };
+// Two parallel sections share this exact shape (CuratedMapping / *Coverage
+// from app/gpc/models.py), just different key names for the "what matched"
+// column (FDC category vs. OFF tag) and the count unit (foods vs. tag
+// occurrences) -- one parameterized set of render functions serves both,
+// keyed by DOM id prefix ("" for the FDC section, "off" for OFF tags).
+function makeSection(prefix, opts) {
+  return {
+    prefix, ...opts,
+    level: "all", q: "", mappings: [], coverage: null, uncoveredOpen: false,
+  };
+}
 
-function renderCoverage() {
-  const c = state.coverage;
+const sections = {
+  fdc: makeSection("", {
+    coverageTitle: "Coverage of the local FDC corpus",
+    categoryLabel: "FDC category",
+    countLabel: "foods",
+    uncoveredTitle: "Uncovered FDC categories",
+    emptyMsg: "Local FDC bulk copy not available — showing the curated tables without a live coverage number.",
+  }),
+  off: makeSection("off", {
+    coverageTitle: "Coverage of the local OFF corpus (by tag occurrence)",
+    categoryLabel: "OFF tag",
+    // Not "products": a product carrying 5 tags contributes 5 to this
+    // total, one per tag -- see OffTagCoverage's own docstring.
+    countLabel: "tag occurrences",
+    uncoveredTitle: "Uncovered OFF tags",
+    emptyMsg: "Local OFF bulk copy not available — showing the curated tables without a live coverage number.",
+  }),
+};
+
+// Element ids: unprefixed section (FDC) uses the original lowercase-first
+// ids ("coverage", "mappings", ...); the OFF section prefixes them
+// ("offCoverage", "offMappings", ...). One rule covers both.
+function elId(s, suffix) {
+  return s.prefix + (s.prefix === "" ? suffix.charAt(0).toLowerCase() + suffix.slice(1) : suffix);
+}
+
+function renderCoverage(s) {
+  const c = s.coverage;
+  const covEl = $(elId(s, "Coverage"));
   if (!c) {
-    $("coverage").innerHTML = `<div class="card"><p class="muted">
-      Local FDC bulk copy not available — showing the curated tables without a live coverage number.</p></div>`;
+    covEl.innerHTML = `<div class="card"><p class="muted">${s.emptyMsg}</p></div>`;
+    renderUncovered(s, []);
     return;
   }
-  const brickPct = c.total_categorized_foods
-    ? (c.covered_foods / c.total_categorized_foods * 100) : 0;
-  $("coverage").innerHTML = `
+  // Both shapes normalized to the same four numbers the card needs.
+  const totalN = c.total_categorized_foods ?? c.total_tag_occurrences;
+  const coveredN = c.covered_foods ?? c.covered_occurrences;
+  const distinctN = c.distinct_fdc_categories ?? c.distinct_tags;
+  const uncovered = c.uncovered_categories ?? c.uncovered_tags;
+  const brickPct = totalN ? (coveredN / totalN * 100) : 0;
+
+  covEl.innerHTML = `
     <div class="card">
-      <h2>Coverage of the local FDC corpus</h2>
+      <h2>${s.coverageTitle}</h2>
       <div class="stats">
-        <div class="stat"><div class="v">${c.coverage_pct}%</div><div class="l">of categorized foods covered</div></div>
-        <div class="stat"><div class="v">${fmtNum(c.covered_foods)}</div><div class="l">covered foods</div></div>
-        <div class="stat"><div class="v">${fmtNum(c.total_categorized_foods)}</div><div class="l">total categorized foods</div></div>
+        <div class="stat"><div class="v">${c.coverage_pct}%</div><div class="l">of ${s.countLabel} covered</div></div>
+        <div class="stat"><div class="v">${fmtNum(coveredN)}</div><div class="l">covered ${s.countLabel}</div></div>
+        <div class="stat"><div class="v">${fmtNum(totalN)}</div><div class="l">total ${s.countLabel}</div></div>
         <div class="stat"><div class="v">${c.curated_brick_entries + c.curated_class_entries}</div><div class="l">curated entries</div></div>
-        <div class="stat"><div class="v">${c.distinct_fdc_categories - c.uncovered_categories.length}</div><div class="l">of ${c.distinct_fdc_categories} FDC categories mapped</div></div>
+        <div class="stat"><div class="v">${distinctN - uncovered.length}</div><div class="l">of ${fmtNum(distinctN)} ${s.categoryLabel.toLowerCase()}s mapped</div></div>
       </div>
       <div class="bar"><div class="brick-seg" style="width:${brickPct}%"></div></div>
       <div class="barlabel"><span>0%</span><span>100%</span></div>
       <div class="legend">
         <span><span class="swatch" style="background:var(--brick)"></span>${c.curated_brick_entries} brick-level entries</span>
         <span><span class="swatch" style="background:var(--cls)"></span>${c.curated_class_entries} class-level entries</span>
-        <span><span class="swatch" style="background:var(--bad)"></span>${c.uncovered_categories.length} uncovered categories (${fmtNum(c.total_categorized_foods - c.covered_foods)} foods)</span>
+        <span><span class="swatch" style="background:var(--bad)"></span>${fmtNum(uncovered.length)} uncovered ${s.categoryLabel.toLowerCase()}s (${fmtNum(totalN - coveredN)} ${s.countLabel})</span>
       </div>
     </div>`;
 
-  renderUncovered(c.uncovered_categories);
+  renderUncovered(s, uncovered);
 }
 
-function renderUncovered(uncovered) {
-  if (!uncovered || !uncovered.length) { $("uncoveredWrap").innerHTML = ""; return; }
-  const shown = state.uncoveredOpen ? uncovered : uncovered.slice(0, 10);
-  const rows = shown.map(u => `<tr><td class="cat">${esc(u.category)}</td><td class="count">${fmtNum(u.food_count)}</td></tr>`).join("");
-  $("uncoveredWrap").innerHTML = `
+function renderUncovered(s, uncovered) {
+  const wrapId = elId(s, "UncoveredWrap");
+  if (!uncovered || !uncovered.length) { $(wrapId).innerHTML = ""; return; }
+  const shown = s.uncoveredOpen ? uncovered : uncovered.slice(0, 10);
+  const rows = shown.map(u => {
+    const label = u.category ?? u.tag;
+    const count = u.food_count ?? u.product_count;
+    return `<tr><td class="cat">${esc(label)}</td><td class="count">${fmtNum(count)}</td></tr>`;
+  }).join("");
+  const toggleId = s.prefix + "UncToggle";
+  $(wrapId).innerHTML = `
     <div class="card unc">
-      <h2>Uncovered FDC categories<span class="n">${uncovered.length}</span></h2>
-      <div class="tbl-wrap"><table><thead><tr><th>FDC category</th><th style="text-align:right">Foods</th></tr></thead>
+      <h2>${s.uncoveredTitle}<span class="n">${fmtNum(uncovered.length)}</span></h2>
+      <div class="tbl-wrap"><table><thead><tr><th>${s.categoryLabel}</th><th style="text-align:right">${s.countLabel[0].toUpperCase()}${s.countLabel.slice(1)}</th></tr></thead>
         <tbody>${rows}</tbody></table></div>
       ${uncovered.length > 10
-        ? `<button class="unc-toggle" id="uncToggle">${state.uncoveredOpen ? "Show fewer ▲" : `Show all ${uncovered.length} ▼`}</button>`
+        ? `<button class="unc-toggle" id="${toggleId}">${s.uncoveredOpen ? "Show fewer ▲" : `Show all ${fmtNum(uncovered.length)} ▼`}</button>`
         : ""}
     </div>`;
-  const toggle = $("uncToggle");
-  if (toggle) toggle.addEventListener("click", () => { state.uncoveredOpen = !state.uncoveredOpen; renderUncovered(uncovered); });
+  const toggle = $(toggleId);
+  if (toggle) toggle.addEventListener("click", () => { s.uncoveredOpen = !s.uncoveredOpen; renderUncovered(s, uncovered); });
 }
 
 function hierarchyHtml(hierarchy) {
@@ -226,11 +302,11 @@ function hierarchyHtml(hierarchy) {
   ).join(`<span class="arrow">›</span>`);
 }
 
-function filteredMappings() {
-  let rows = state.mappings;
-  if (state.level !== "all") rows = rows.filter(m => m.level === state.level);
-  if (state.q) {
-    const needle = state.q.toLowerCase();
+function filteredMappings(s) {
+  let rows = s.mappings;
+  if (s.level !== "all") rows = rows.filter(m => m.level === s.level);
+  if (s.q) {
+    const needle = s.q.toLowerCase();
     rows = rows.filter(m =>
       m.category.toLowerCase().includes(needle) ||
       m.code.toLowerCase().includes(needle) ||
@@ -239,8 +315,8 @@ function filteredMappings() {
   return rows;
 }
 
-function renderMappings() {
-  const rows = filteredMappings();
+function renderMappings(s) {
+  const rows = filteredMappings(s);
   const body = rows.map(m => `
     <tr>
       <td class="cat">${esc(m.category)}</td>
@@ -248,36 +324,49 @@ function renderMappings() {
       <td class="code">${esc(m.code)}</td>
       <td class="hier">${hierarchyHtml(m.hierarchy)}</td>
     </tr>`).join("");
-  $("mappings").innerHTML = `
+  $(elId(s, "Mappings")).innerHTML = `
     <div class="card">
-      <h2>Curated mappings<span class="n">${rows.length}${rows.length !== state.mappings.length ? ` of ${state.mappings.length}` : ""}</span></h2>
+      <h2>Curated mappings<span class="n">${rows.length}${rows.length !== s.mappings.length ? ` of ${s.mappings.length}` : ""}</span></h2>
       ${rows.length
         ? `<div class="tbl-wrap"><table><thead><tr>
-             <th>FDC category</th><th>Level</th><th>GPC code</th><th>Hierarchy</th>
+             <th>${s.categoryLabel}</th><th>Level</th><th>GPC code</th><th>Hierarchy</th>
            </tr></thead><tbody>${body}</tbody></table></div>`
-        : `<p class="muted">No mappings match “${esc(state.q)}”.</p>`}
+        : `<p class="muted">No mappings match “${esc(s.q)}”.</p>`}
     </div>`;
 }
 
-async function init() {
-  const mappingsResp = await api("/api/v1/gpc/mappings");
-  state.mappings = mappingsResp.mappings || [];
-  state.coverage = mappingsResp.coverage || null;
-  renderCoverage();
-  renderMappings();
-
-  $("q").addEventListener("input", () => { state.q = $("q").value.trim(); renderMappings(); });
-  $("levelChips").addEventListener("click", e => {
+function wireToolbar(s) {
+  const qId = elId(s, "Q");
+  const chipsId = elId(s, "LevelChips");
+  $(qId).addEventListener("input", () => { s.q = $(qId).value.trim(); renderMappings(s); });
+  $(chipsId).addEventListener("click", e => {
     const c = e.target.closest(".chip"); if (!c) return;
-    state.level = c.dataset.level;
-    $("levelChips").querySelectorAll(".chip").forEach(el => el.classList.toggle("on", el === c));
-    renderMappings();
+    s.level = c.dataset.level;
+    $(chipsId).querySelectorAll(".chip").forEach(el => el.classList.toggle("on", el === c));
+    renderMappings(s);
   });
+}
+
+async function init() {
+  const resp = await api("/api/v1/gpc/mappings");
+
+  sections.fdc.mappings = resp.mappings || [];
+  sections.fdc.coverage = resp.coverage || null;
+  sections.off.mappings = resp.off_tag_mappings || [];
+  sections.off.coverage = resp.off_tag_coverage || null;
+
+  for (const s of Object.values(sections)) {
+    renderCoverage(s);
+    renderMappings(s);
+    wireToolbar(s);
+  }
 }
 
 init().catch(e => {
   $("coverage").innerHTML = "";
   $("mappings").innerHTML = `<p class="muted">Failed to load: ${esc(e.message)}</p>`;
+  $("offCoverage").innerHTML = "";
+  $("offMappings").innerHTML = "";
 });
 </script>
 </body>

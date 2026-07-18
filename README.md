@@ -8,7 +8,7 @@ See [ARCH.md](ARCH.md) for the system architecture and [SPECS.md](SPECS.md) for 
 
 The API aggregates food product data from multiple sources into a single canonical interface:
 
-- **GS1 GPC** — Product taxonomy (Segment → Family → Class → Brick → Attributes), served from a local SQLite cache. A product's category is matched to it two ways, graded by confidence in `category_hierarchy_source`: a hand-curated table for FDC's own category (`fdc_curated`, high confidence) tried first, best-effort text matching against Open Food Facts' tags as fallback (`off_fuzzy`). See ARCH.md, "GPC Category Matching", for why the two need different treatment.
+- **GS1 GPC** — Product taxonomy (Segment → Family → Class → Brick → Attributes), served from a local SQLite cache. A product's category is matched to it three ways, graded by confidence in `category_hierarchy_source`: a hand-curated table for FDC's own category (`fdc_curated`, high confidence) tried first, then a hand-curated table for Open Food Facts' category tags (`reviewed`, same confidence, keyed differently), then best-effort text matching against OFF's tags as the last fallback (`off_fuzzy`). See ARCH.md, "GPC Category Matching", for why they need different treatment.
 - **USDA FoodData Central** — Lab-quality nutrient data (authoritative for nutrition), served from a local copy of the bulk dataset with the live API as fallback. 36 nutrients are published: the full US Nutrition Facts label panel plus every vitamin and mineral tracked in `app/core/nutrients.py`
 - **Open Food Facts** — Crowdsourced product metadata (images, ingredients, allergens, labels)
 

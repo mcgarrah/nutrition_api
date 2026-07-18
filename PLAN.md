@@ -310,19 +310,75 @@ scale of the original investigation (item 5, the `reviewed` tier, is
 designed to absorb exactly this kind of review effort once it exists,
 rather than repeating a one-off audit here).
 
-## 5. `reviewed` tier for fuzzy GPC matches
+## 5. ~~`reviewed` tier for fuzzy GPC matches~~ — DONE 2026-07-18 (mechanism); curation ongoing
 
-**Status:** designed-for but not started. Blocked conceptually on item 4 —
-review effort is better spent on the improved matcher's output than the
-current 69%-noise one.
+**What changed from the original design:** the original sketch here assumed
+a live web review workflow — a new SQLite table for (tag → brick, verdict)
+pairs, a `POST` endpoint, an extension of `/gpc/mappings` into a review UI.
+Investigated before building it and found this API has **zero precedent for
+any mutating endpoint** anywhere in `app/` (every route in every router is
+`@router.get`), CORS is locked to `allow_methods=["GET"]`, there is no
+app-level auth at all (only OS-level firewalling), and the service is
+exposed to the public internet via Tailscale Funnel. Adding a write path
+there is a real security decision, not a natural extension — raised with
+the user, who chose the alternative: **treat OFF tag review exactly like
+FDC category curation.** `OFF_TAG_TO_BRICK`/`OFF_TAG_TO_CLASS` in
+`gpc_match.py` are hand-verified Python dicts, built and committed the same
+way `FDC_CATEGORY_TO_BRICK`/`FDC_CATEGORY_TO_CLASS` were. No new
+persistence, no new API surface, no new security question.
 
-`category_hierarchy_source` was deliberately typed so adding a `reviewed`
-value is additive, not breaking (see `models.py` and ARCH.md). The missing
-piece is the review workflow itself: persistence for (OFF tag →
-brick, verdict) pairs — a small SQLite table beside the GPC cache fits the
-existing pattern; a review UI, most naturally an extension of the existing
-`/gpc/mappings` viewer, which already shows coverage and uncovered
-categories; and orchestrator precedence slotting reviewed matches between
-`fdc_curated` and `off_fuzzy`. Scope control: review the *head* of the
-distribution (most-frequent OFF tags first) — the same Pareto logic that
-made FDC curation tractable (top 90 categories → 90.7% coverage there).
+**Mechanism, fully shipped:** `category_hierarchy_source` gained `"reviewed"`
+as a real (not just reserved) value; `gpc_match.reviewed_hierarchy_for_off_
+categories()` walks a product's OFF tags narrowest-first against the two new
+tables; the orchestrator's Layer 3 tries it between `fdc_curated` and
+`off_fuzzy`, same "curated beats best-effort, skip the rest on a hit"
+precedence FDC already had over fuzzy. `/gpc/mappings` (and its UI) got a
+second, parallel section — same `CuratedMapping` shape, same live-coverage
+pattern, just keyed on OFF tags with a `product_count`/tag-occurrence unit
+instead of FDC's `food_count`.
+
+**A real robustness bug found and fixed along the way, not scoped to this
+item:** the existing `fdc_curated` resolution in `orchestrator.py` called
+`get_db()` and resolved a hierarchy with **no error handling at all** — a
+broken or momentarily-unavailable `gpc.sqlite3` at exactly the moment of a
+curated hit would have crashed the *entire* product lookup, not degraded
+it, unlike every real upstream call in this module. Never exercised in
+tests because no existing scenario combined a curated FDC hit with a broken
+database. Wiring in the `reviewed` tier broadened when `get_db()` gets
+called (now on any product with OFF category tags, not just a curated FDC
+hit), which is what surfaced it. Fixed for both tiers at once
+(`_timed_gpc_lookup`, mirroring the try/except the fuzzy tier already had),
+with regression tests for both.
+
+**A second, adjacent gap found and fixed:** `database.DB_PATH` (the GPC
+database) had no autouse test-isolation fixture, unlike `fdc_local`/
+`off_local`'s `isolated_fdc_local`/`isolated_off_local`. Latent until this
+change, because `get_db()` was called rarely enough in tests without an
+explicit `gpc_db` fixture that it never mattered — until broadening when
+`get_db()` fires (above) combined with a real collision: the shared
+`off_product` test fixture's `en:carbonated-drinks` tag is also a genuine
+`OFF_TAG_TO_CLASS` entry, so unisolated tests would have started resolving
+against the real `data/gpc.sqlite3` on a developer's box. Added
+`isolated_gpc_db` (autouse), same pattern as its two siblings.
+
+**Curation seed:** 26 brick + 5 class entries, each individually verified
+against real product samples and the real GPC taxonomy (not worked
+mechanically down the frequency list — OFF's tag-frequency head skews
+toward broad umbrella terms unlike FDC's, see ARCH.md's "Curated OFF tags"
+section for why). Measured against the real corpus: **4.4% of real tag
+occurrences covered** (296,084 of 6,657,990) — a modest, honest first pass,
+sized to what one careful verification round actually produced rather than
+a target picked in advance, the same incremental spirit as FDC's own
+multi-round path to 91.4%. Live-verified end to end on a real product
+(`00000000030489`, "Moutarde au miel") returning
+`category_hierarchy_source: "reviewed"` through the running dev server, not
+just the test suite.
+
+**Left for later, not blocking:** broader OFF tag coverage (more curation
+rounds, the same way FDC grew from its first pass to 91.4% — worth its own
+future PLAN.md item once this one is merged) and a genuine live review
+workflow, if one is ever actually wanted for collaborative/non-git-access
+review — the security question that ruled it out this round would need a
+real answer first (an API key? Caddy-level LAN/tailnet-only gating for just
+that route, mirroring how debug endpoints were handled during the earlier
+security-hardening pass?).

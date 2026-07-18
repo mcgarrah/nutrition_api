@@ -586,3 +586,172 @@ async def test_class_level_category_not_curated_falls_back_to_off_fuzzy(monkeypa
     p = await orchestrator.lookup("1")
 
     assert p.category_hierarchy_source == "off_fuzzy"
+
+
+# ── GPC: the `reviewed` tier (OFF_TAG_TO_BRICK / OFF_TAG_TO_CLASS) ──────
+#
+# Sits between fdc_curated and off_fuzzy: same trust level as fdc_curated
+# (hand-verified, not a best-effort guess), just keyed on an OFF tag instead
+# of an FDC category.
+
+def _reviewed_to_fixture_brick(monkeypatch, tag, brick_code="10000201"):
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_BRICK", {tag: brick_code})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_CLASS", {})
+
+
+async def test_reviewed_wins_over_off_fuzzy(monkeypatch, gpc_db):
+    """A curated OFF tag must win over the fuzzy matcher, and the fuzzy
+    matcher must not even be asked -- reviewed is the higher-confidence
+    source, the same relationship fdc_curated already has over off_fuzzy."""
+    _reviewed_to_fixture_brick(monkeypatch, "en:cola-drinks")
+    fuzzy_calls = {"n": 0}
+
+    async def fake_off(barcode, *a, **k):
+        return {"categories": ["en:cola-drinks"]}, 10.0, None
+
+    async def fake_usda(barcode, *a, **k):
+        return None, 20.0, None
+
+    async def counting_fuzzy(categories):
+        fuzzy_calls["n"] += 1
+        return ["should not be used"], 1.0
+
+    monkeypatch.setattr(orchestrator, "_fetch_off", fake_off)
+    monkeypatch.setattr(orchestrator, "_fetch_usda", fake_usda)
+    monkeypatch.setattr(orchestrator, "_fetch_gpc_categories", counting_fuzzy)
+
+    p = await orchestrator.lookup("1")
+
+    assert p.category_hierarchy == [
+        "Food/Beverage", "Beverages", "Carbonated Drinks", "Cola Drinks"]
+    assert p.category_hierarchy_source == "reviewed"
+    assert fuzzy_calls["n"] == 0, "the fuzzy matcher ran despite a reviewed hit"
+    assert "GS1_GPC" in p.data_sources
+
+
+async def test_fdc_curated_wins_over_reviewed(monkeypatch, gpc_db):
+    """Both a curated FDC category and a curated OFF tag could answer here;
+    FDC curated must win, and the reviewed path must not even be consulted."""
+    _curated_to_fixture_brick(monkeypatch, "Soda")  # -> Cola Drinks, 10000201
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_BRICK", {"en:lemonade": "10000202"})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_CLASS", {})
+    reviewed_calls = {"n": 0}
+    real_reviewed = gpc_match.reviewed_hierarchy_for_off_categories
+
+    async def counting_reviewed(db, categories):
+        reviewed_calls["n"] += 1
+        return await real_reviewed(db, categories)
+
+    async def fake_off(barcode, *a, **k):
+        return {"categories": ["en:lemonade"]}, 10.0, None
+
+    async def fake_usda(barcode, *a, **k):
+        return {"description": "COLA", "category": "Soda", "nutrients": []}, 20.0, None
+
+    monkeypatch.setattr(orchestrator, "_fetch_off", fake_off)
+    monkeypatch.setattr(orchestrator, "_fetch_usda", fake_usda)
+    monkeypatch.setattr(gpc_match, "reviewed_hierarchy_for_off_categories", counting_reviewed)
+
+    p = await orchestrator.lookup("1")
+
+    assert p.category_hierarchy[-1] == "Cola Drinks"
+    assert p.category_hierarchy_source == "fdc_curated"
+    assert reviewed_calls["n"] == 0, "the reviewed path ran despite a curated hit"
+
+
+async def test_reviewed_used_when_fdc_category_is_not_curated(monkeypatch, gpc_db):
+    """FDC has a category, but it's not one we've curated -- reviewed must
+    still get a chance before falling all the way to the fuzzy matcher."""
+    _curated_to_fixture_brick(monkeypatch, "Some Other Category")
+    _reviewed_to_fixture_brick(monkeypatch, "en:lemonade", "10000202")
+    fuzzy_calls = {"n": 0}
+
+    async def fake_off(barcode, *a, **k):
+        return {"categories": ["en:lemonade"]}, 10.0, None
+
+    async def fake_usda(barcode, *a, **k):
+        return (
+            {"description": "COLA", "category": "Uncurated Category", "nutrients": []},
+            20.0, None,
+        )
+
+    async def counting_fuzzy(categories):
+        fuzzy_calls["n"] += 1
+        return ["should not be used"], 1.0
+
+    monkeypatch.setattr(orchestrator, "_fetch_off", fake_off)
+    monkeypatch.setattr(orchestrator, "_fetch_usda", fake_usda)
+    monkeypatch.setattr(orchestrator, "_fetch_gpc_categories", counting_fuzzy)
+
+    p = await orchestrator.lookup("1")
+
+    assert p.category_hierarchy[-1] == "Lemonade"
+    assert p.category_hierarchy_source == "reviewed"
+    assert fuzzy_calls["n"] == 0
+
+
+async def test_falls_through_reviewed_to_fuzzy_when_no_off_tag_is_curated(monkeypatch, gpc_db):
+    """Regression guard: with OFF_TAG_TO_BRICK/CLASS empty, the reviewed
+    step must find nothing and the chain must still fall through to fuzzy,
+    exactly as it did before the reviewed tier existed."""
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_BRICK", {})
+    monkeypatch.setattr(gpc_match, "OFF_TAG_TO_CLASS", {})
+    patch_sources(
+        monkeypatch,
+        off_data={"categories": ["en:cola-drinks"]},
+        usda_data=None,
+        gpc=["Food/Beverage", "Beverages", "Carbonated Drinks", "Cola Drinks"],
+    )
+
+    p = await orchestrator.lookup("1")
+
+    assert p.category_hierarchy_source == "off_fuzzy"
+
+
+async def test_gpc_database_failure_during_a_curated_hit_degrades_to_partial_response(
+        monkeypatch, gpc_db):
+    """Regression: a curated FDC hit used to call get_db() with no error
+    handling at all -- a broken/unavailable gpc.sqlite3 at exactly that
+    moment crashed the whole product lookup instead of degrading, the same
+    way a network hiccup on a real upstream must never surface as a 500.
+    Caught while wiring in the reviewed tier broadened when get_db() gets
+    called; fixed for both tiers at once (_timed_gpc_lookup)."""
+    _curated_to_fixture_brick(monkeypatch, "Soda")
+
+    async def broken_db():
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(orchestrator, "get_db", broken_db)
+    patch_sources(
+        monkeypatch,
+        off_data={"categories": []},
+        usda_data={"description": "COLA", "category": "Soda", "nutrients": []},
+    )
+
+    p = await orchestrator.lookup("1")
+
+    assert p.category_hierarchy == []
+    assert p.category_hierarchy_source == "none"
+    assert p.product_name == "COLA"  # the rest of the merge is untouched
+
+
+async def test_gpc_database_failure_during_a_reviewed_hit_degrades_to_partial_response(
+        monkeypatch, gpc_db):
+    """Same regression, for the reviewed tier specifically. off_categories
+    is non-empty here (needed to reach the reviewed step at all), so once
+    both the reviewed and fuzzy tiers come back empty the existing raw-tag
+    fallback still applies -- that part of the chain is unaffected by this
+    fix, only category_hierarchy_source ('none', not a crash) is what's
+    under test."""
+    _reviewed_to_fixture_brick(monkeypatch, "en:cola-drinks")
+
+    async def broken_db():
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(orchestrator, "get_db", broken_db)
+    patch_sources(monkeypatch, off_data={"categories": ["en:cola-drinks"]}, usda_data=None)
+
+    p = await orchestrator.lookup("1")
+
+    assert p.category_hierarchy == ["Cola Drinks"]  # raw-tag fallback, not a GPC match
+    assert p.category_hierarchy_source == "none"

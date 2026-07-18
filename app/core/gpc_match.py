@@ -780,6 +780,220 @@ async def fuzzy_hierarchy_for_off_categories(db, off_categories: list[str]) -> l
     return []
 
 
+# ── Curated OFF tags: the `reviewed` tier ───────────────────────────────
+#
+# The same reasoning that gave FDC's branded_food_category a curated table
+# instead of a smarter matcher (see this module's docstring) applies to a
+# slice of OFF's tags too: individual tags are free text, but the raw
+# frequency distribution has a genuine head worth hand-verifying, exactly
+# the way FDC's 350 categories did. One real difference changes the shape
+# of that head, though -- OFF tags a product with its *entire* category
+# chain (broad and narrow simultaneously), so frequency-sorted OFF tags
+# skew heavily toward broad umbrella terms (`en:snacks`, `en:dairies`,
+# `en:beverages`) that are exactly the shape of thing the fuzzy matcher's
+# own stopword list already exists to distrust -- not brick-specific
+# enough to curate confidently. Measured on the real corpus (1,095,172
+# products with a category, 64,170 distinct tags): the top 10 tags alone
+# are 25.7% of all tag-occurrences, and are almost entirely these broad
+# umbrella terms. Curation therefore does not simply work down the
+# frequency list the way FDC's did -- each entry below was individually
+# checked against real product samples and the real GPC taxonomy, and a
+# broad tag with no confident single-brick *or* class fit is left out
+# entirely (see "Deliberately excluded" below), the same honest-miss
+# philosophy as the FDC tables.
+#
+# Every code here was looked up in data/gpc.sqlite3 and read, not guessed.
+# Where an OFF tag maps to the same real-world category as an already
+# hand-verified FDC one, the entry reuses that exact code rather than
+# re-deriving it (e.g. "en:cheeses" -> the same brick as FDC's "Cheese") --
+# consistent naming aside, it is the same GPC-taxonomy fact either source
+# asks about.
+OFF_TAG_TO_BRICK: dict[str, str] = {
+    "en:cheeses": "10000028",  # Cheese (Perishable) -- same brick as FDC's "Cheese"
+    "en:mozzarella": "10000028",  # mozzarella is a cheese; no finer-grained brick exists
+    "en:yogurts": "10000278",  # Yogurt (Perishable) -- same brick as FDC's "Yogurt"
+    "en:plain-yogurts": "10000278",
+    "en:greek-style-yogurts": "10000278",
+    "en:milks": "10000025",  # Milk (Perishable) -- same brick as FDC's "Milk"
+    "en:milk-substitutes": "10006971",  # Milk Substitutes -- same as FDC's "Milk/Milk Substitutes"
+    "en:plant-based-milk-alternatives": "10006971",
+    "en:honeys": "10000213",  # Honey (Shelf Stable) -- same brick as FDC's "Honey"
+    "en:waters": "10000232",  # Packaged Water - Unflavoured -- same brick as FDC's "Water"
+    "en:mineral-waters": "10000232",
+    # The fuzzy matcher gets this one wrong on its own -- "spring" survives
+    # stopword filtering and FTS5 prefix-matches "Spring (or Spanish)
+    # Onions", a real bug this curated entry fixes outright.
+    "en:spring-waters": "10000232",
+    "en:beers": "10000159",  # Beer -- same brick as FDC's "Beer"
+    "en:pizzas": "10000248",  # same brick as FDC's "Pizza"
+    "en:ketchup": "10006325",  # Tomato Ketchup/Ketchup Substitutes (Shelf Stable)
+    "en:mayonnaises": "10006319",  # Mayonnaise/Mayonnaise Substitutes (Shelf Stable)
+    # GPC has no dedicated mustard brick; same combined brick FDC's own
+    # "Ketchup, Mustard, BBQ & Cheese Sauce" category already resolves to.
+    "en:mustards": "10000280",
+    # Dry, uncooked pasta -- matches these tags' real product samples
+    # (Fusilli, Spaghetti, Macaroni) far better than the "Ready to Eat"
+    # bricks, which are for prepared/cooked pasta products.
+    "en:pastas": "10000242",  # Pasta/Noodles - Not Ready to Eat (Shelf Stable)
+    "en:dry-pastas": "10000242",
+    "en:durum-wheat-pasta": "10000242",
+    "en:cereal-pastas": "10000242",
+    "en:vinegars": "10000051",  # Vinegars (the brick, not just its containing class)
+    "en:olives": "10000239",  # Olives (Shelf Stable)
+    # Traditional European cured salami/sausage is near-universally pork;
+    # "en:sausages" (species-agnostic samples include chicken sausage) uses
+    # the mixed-species brick below instead.
+    "en:salami": "10005781",  # Pork - Prepared/Processed
+    "en:cured-sausages": "10005781",
+    "en:sausages": "10005836",  # Mixed Species Sausages - Prepared/Processed
+}
+
+# A coarser class, used when confident about the category but not about one
+# specific brick within it -- same role FDC_CATEGORY_TO_CLASS plays for FDC.
+OFF_TAG_TO_CLASS: dict[str, str] = {
+    "en:coffees": "50202600",  # Coffee/Coffee Substitutes -- same class as FDC's "Coffee"
+    "en:teas": "50202700",  # Tea and Infusions/Tisanes -- same class as FDC's own tea entries
+    "en:rices": "50221000",  # Grains/Flour -- same class as FDC's "Rice"
+    # Same class FDC's own "Soda" category resolves to -- broader than just
+    # soda (all non-alcoholic ready-to-drink beverages), but no single brick
+    # within it fits "carbonated drink" or "soda" confidently on its own.
+    "en:carbonated-drinks": "50202300",
+    "en:sodas": "50202300",
+}
+
+# Deliberately excluded -- considered during curation, no confident single
+# brick or class fit found:
+#   en:wines (a real alcoholic beverage; the only vinegar/wine-adjacent GPC
+#     unit found, "Vinegars/Cooking Wines", means *cooking* wine and would
+#     misclassify an actual bottle of wine)
+#   en:peanut-butters / en:nut-butters / en:legume-butters (matches FDC's
+#     own "Nut & Seed Butters" -- already a documented FDC exclusion, no
+#     clean brick exists there either)
+#   en:noodles / en:pasta-dishes / en:stuffed-pastas (samples were mixed
+#     between raw pasta and prepared dishes/other cuisines -- not confident
+#     enough to pick one Pasta/Noodles state brick)
+#   the vast majority of the broad umbrella tags at the head of the
+#   frequency distribution (en:snacks, en:dairies, en:beverages,
+#   en:meats-and-their-products, en:cereals-and-potatoes, ...) -- see this
+#   section's introduction for why the OFF frequency head skews broad.
+
+
+def curated_brick_for_off_tag(tag: str | None) -> str | None:
+    """The verified GPC brick for an OFF category tag, if we have one."""
+    if not tag:
+        return None
+    return OFF_TAG_TO_BRICK.get(tag.strip())
+
+
+def curated_class_for_off_tag(tag: str | None) -> str | None:
+    """The verified GPC class for an OFF category tag, if we have one.
+
+    Checked only when there is no brick-level match -- a class is a coarser
+    unit than a brick, so brick-level always wins when both exist.
+    """
+    if not tag:
+        return None
+    return OFF_TAG_TO_CLASS.get(tag.strip())
+
+
+async def reviewed_hierarchy_for_off_categories(db, off_categories: list[str]) -> list[str]:
+    """The best verified hierarchy from OFF's own tags, or [] if we have none.
+
+    This is the `reviewed` path: OFF_TAG_TO_BRICK / OFF_TAG_TO_CLASS are
+    hand-curated the same way the FDC tables are, so a hit here is as
+    trustworthy as `fdc_curated` -- just keyed on an OFF tag instead of an
+    FDC category. Tried before the fuzzy matcher (fuzzy_hierarchy_for_off_
+    categories), same "curated beats best-effort" precedence FDC already
+    has over the fuzzy path.
+
+    Tries every tag narrowest-first (OFF orders tags broad -> narrow), no
+    cap on how many -- unlike the fuzzy path, this is a plain dict lookup
+    per tag, not a database query, so there is no per-tag cost to bound.
+    """
+    for tag in reversed(off_categories):
+        brick = curated_brick_for_off_tag(tag)
+        if brick:
+            hierarchy = await hierarchy_for_brick(db, brick)
+            if hierarchy:
+                return hierarchy
+
+        cls = curated_class_for_off_tag(tag)
+        if cls:
+            hierarchy = await hierarchy_for_class(db, cls)
+            if hierarchy:
+                return hierarchy
+
+    return []
+
+
+# ── OFF tag frequency and coverage, for the mapping viewer ─────────────
+#
+# Mirrors fdc_category_counts()/coverage_report() below, measured against
+# tag *occurrences* (how many products carry a tag) instead of food counts.
+# Computed in Python after one bulk SELECT rather than in SQL: SQLite has no
+# native string-split, and a hand-rolled recursive-CTE tokenizer measured
+# ~26s on the real 1.36GB off.sqlite3 against ~1-3s for a plain SELECT
+# split client-side.
+
+def off_tag_counts() -> dict[str, int] | None:
+    """{off_tag: product count}, from the local OFF bulk copy.
+
+    None if the local copy isn't present -- same degrade-without-failing
+    contract as fdc_category_counts().
+    """
+    from . import off_local
+    if not off_local.DB_PATH.exists():
+        return None
+    conn = sqlite3.connect(f"file:{off_local.DB_PATH}?mode=ro", uri=True)
+    try:
+        counts: dict[str, int] = {}
+        rows = conn.execute(
+            "SELECT categories FROM products "
+            "WHERE categories IS NOT NULL AND categories != ''"
+        )
+        for (categories,) in rows:
+            # A product's own tag list has no duplicates worth double
+            # counting, but dedupe defensively (set()) rather than assume.
+            for tag in {t.strip() for t in categories.split(",") if t.strip()}:
+                counts[tag] = counts.get(tag, 0) + 1
+        return counts
+    finally:
+        conn.close()
+
+
+def off_tag_coverage_report() -> dict | None:
+    """How much of the real OFF corpus the two curated OFF-tag tables reach.
+
+    None if the local OFF copy isn't available to measure against. Shape
+    mirrors coverage_report(), substituting "tag occurrences" for "foods"
+    since one product can (and usually does) carry several tags at once --
+    the two counts are not directly comparable to the FDC coverage numbers.
+    """
+    counts = off_tag_counts()
+    if counts is None:
+        return None
+
+    total = sum(counts.values())
+    covered = 0
+    uncovered = []
+    for tag, count in counts.items():
+        if tag in OFF_TAG_TO_BRICK or tag in OFF_TAG_TO_CLASS:
+            covered += count
+        else:
+            uncovered.append({"tag": tag, "product_count": count})
+    uncovered.sort(key=lambda entry: -entry["product_count"])
+
+    return {
+        "total_tag_occurrences": total,
+        "covered_occurrences": covered,
+        "coverage_pct": round(covered / total * 100, 1) if total else 0.0,
+        "distinct_tags": len(counts),
+        "curated_brick_entries": len(OFF_TAG_TO_BRICK),
+        "curated_class_entries": len(OFF_TAG_TO_CLASS),
+        "uncovered_tags": uncovered[:200],  # the long tail is 64k+ tags long
+    }
+
+
 # ── Bulk hierarchy lookups, for the mapping viewer ─────────────────────
 #
 # The viewer renders every curated entry at once (currently 85 brick + 73
