@@ -809,6 +809,15 @@ function sourceCard(label, s, extra) {
   return `<div class="source"><h3><span class="dot ok"></span>${label}</h3><dl>${rows}</dl></div>`;
 }
 
+// PLAN.md item 12: absent (not "—") on a mirror built before these keys
+// existed, so an older database's card doesn't grow rows it has nothing to
+// report for.
+const exclusionRows = s => s.rows_read == null ? [] : [
+  ["rows read", fmtNum(s.rows_read)],
+  ["excluded", fmtNum(s.excluded)],
+  ["deduped", fmtNum(s.deduped)],
+];
+
 function renderSources(a) {
   const { fdc, off, gpc } = a.sources;
   $("sources").innerHTML = [
@@ -816,11 +825,13 @@ function renderSources(a) {
       ["dataset", fdc.dataset], ["barcodes", fmtNum(fdc.barcodes)],
       ["source date", (fdc.source_modified || "").slice(0, 10)],
       ["imported", (fdc.imported_at || "").slice(0, 10)], ["size", fdc.size_mb + " MB"],
+      ...exclusionRows(fdc),
     ]),
     sourceCard("Open Food Facts", off, [
       ["dataset", off.dataset], ["products", fmtNum(off.products)],
       ["source date", (off.source_modified || "").slice(0, 10)],
       ["imported", (off.imported_at || "").slice(0, 10)], ["size", off.size_mb + " MB"],
+      ...exclusionRows(off),
     ]),
     sourceCard("GS1 GPC", gpc, [
       ["version", gpc.version], ["bricks", fmtNum(gpc.bricks)], ["classes", fmtNum(gpc.classes)],

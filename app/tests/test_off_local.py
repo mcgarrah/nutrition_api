@@ -234,6 +234,35 @@ def test_health_names_the_dataset_before_any_lookup(local_db):
     assert reported["products"] == len(ROWS)
 
 
+def test_health_reports_none_for_exclusion_counts_on_an_older_mirror(local_db):
+    """PLAN.md item 12: build_db()'s fixture predates rows_read/excluded/deduped,
+    exactly like a mirror built before this was added -- absent, not an error."""
+    reported = off_local.stats()
+
+    assert reported["rows_read"] is None
+    assert reported["excluded"] is None
+    assert reported["deduped"] is None
+
+
+def test_health_reports_exclusion_counts_when_present(tmp_path, monkeypatch):
+    path = build_db(tmp_path / "off.sqlite3")
+    db = sqlite3.connect(path)
+    db.executemany("INSERT INTO off_metadata VALUES (?,?)", [
+        ("rows_read", "5"), ("excluded", "2"), ("deduped", "1"),
+    ])
+    db.commit()
+    db.close()
+    monkeypatch.setattr(off_local, "DB_PATH", path)
+    monkeypatch.setattr(off_local, "_db", None)
+    monkeypatch.setattr(off_local, "_metadata", {})
+
+    reported = off_local.stats()
+
+    assert reported["rows_read"] == 5
+    assert reported["excluded"] == 2
+    assert reported["deduped"] == 1
+
+
 # ── Wiring: local first, API for the rest ─────────────────────────────
 
 @pytest.mark.asyncio

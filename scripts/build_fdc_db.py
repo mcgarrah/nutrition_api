@@ -417,6 +417,15 @@ def build(zip_path: Path, out_path: Path, dataset: str) -> dict:
          time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())),
         ("schema_version", SCHEMA_VERSION),
         ("barcodes", str(served)),
+        # PLAN.md item 12: what fraction of upstream we actually kept, and
+        # why -- previously only ever logged (the _step() lines above),
+        # never queryable after the build finished. excluded = branded_
+        # food.csv records with no usable GTIN (dropped outright); deduped
+        # = superseded label revisions of a barcode already kept under its
+        # newest revision (collapsed, not dropped).
+        ("rows_read", str(branded + rejected)),
+        ("excluded", str(rejected)),
+        ("deduped", str(branded - served)),
     ])
     for table in ("stg_food", "stg_branded", "stg_nutrients"):
         db.execute(f"DROP TABLE {table}")

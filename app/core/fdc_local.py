@@ -209,10 +209,20 @@ def stats() -> dict:
     metadata = _read_metadata()
     if not metadata:
         return {"status": "error", "detail": "database present but unreadable"}
+
+    def _int(key):
+        return int(metadata[key]) if key in metadata else None
+
     return {
         "status": "ok",
         "dataset": metadata.get("dataset"),
-        "barcodes": int(metadata["barcodes"]) if "barcodes" in metadata else None,
+        "barcodes": _int("barcodes"),
+        # PLAN.md item 12: absent (None) for a mirror built before this was
+        # added, not an error -- an older database simply has nothing to
+        # report here yet.
+        "rows_read": _int("rows_read"),
+        "excluded": _int("excluded"),
+        "deduped": _int("deduped"),
         "source_modified": metadata.get("source_modified"),
         "imported_at": metadata.get("import_timestamp"),
         "size_mb": round(DB_PATH.stat().st_size / 1e6, 1),

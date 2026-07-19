@@ -260,6 +260,15 @@ def build(gz_path: Path, out_path: Path, dataset: str) -> dict:
          time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())),
         ("schema_version", SCHEMA_VERSION),
         ("products", str(served)),
+        # PLAN.md item 12: what fraction of upstream we actually kept, and
+        # why -- previously only ever logged (the _step() line above),
+        # never queryable after the build finished. excluded = rows with
+        # no usable barcode/name/nutrient (dropped outright); deduped =
+        # rows that shared a barcode with a newer row (collapsed, not
+        # dropped -- the data survived under one row instead of several).
+        ("rows_read", str(total)),
+        ("excluded", str(total - kept)),
+        ("deduped", str(kept - served)),
     ])
     db.commit()
     db.execute("VACUUM")

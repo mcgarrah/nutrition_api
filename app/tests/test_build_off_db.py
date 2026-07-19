@@ -103,6 +103,53 @@ def test_build_records_the_source_export_timestamp(tmp_path):
     assert meta["dataset"] == "off-2026-07-14"
 
 
+def test_build_records_upstream_vs_mirrored_exclusion_counts(tmp_path):
+    """PLAN.md item 12: what fraction of upstream we kept, and why, must
+    survive past the build's own log line."""
+    gz = tmp_path / "off-products-2026-07-14T112659Z.csv.gz"
+    _tiny_export(gz, MODIFIED)
+    out = tmp_path / "off.sqlite3"
+
+    stats = bod.build(gz, out, "off-2026-07-14")
+
+    meta = dict(sqlite3.connect(out).execute(
+        "SELECT key, value FROM off_metadata").fetchall())
+    assert meta["rows_read"] == "2"      # both rows in the tiny export
+    assert meta["excluded"] == "1"       # the nameless row, dropped outright
+    assert meta["deduped"] == "0"        # no duplicate barcodes in this fixture
+    assert stats["products"] == 1
+
+
+def test_deduped_count_reflects_repeated_barcodes_collapsing_to_one(tmp_path):
+    """Two rows for the same barcode (OFF occasionally carries a barcode
+    twice) collapse to one product -- excluded stays 0 (both rows had a
+    usable barcode/name/nutrient), but deduped counts the collapse."""
+    gz = tmp_path / "export.csv.gz"
+    header = ["code", "product_name", "last_modified_t",
+              "energy-kcal_100g", "proteins_100g", "sodium_100g",
+              "categories_tags", "allergens"]
+    rows = [
+        ["3017620422003", "Nutella (old)", "1700000000",
+         "539", "6.3", "0.0428", "", ""],
+        ["3017620422003", "Nutella (newer)", "1700000100",
+         "539", "6.3", "0.0428", "", ""],
+    ]
+    lines = ["\t".join(header)] + ["\t".join(r) for r in rows]
+    with gzip.open(gz, "wt", encoding="utf-8", newline="") as f:
+        f.write("\n".join(lines) + "\n")
+    os.utime(gz, (MODIFIED.timestamp(), MODIFIED.timestamp()))
+    out = tmp_path / "off.sqlite3"
+
+    stats = bod.build(gz, out, "off-2026-07-14")
+
+    meta = dict(sqlite3.connect(out).execute(
+        "SELECT key, value FROM off_metadata").fetchall())
+    assert meta["rows_read"] == "2"
+    assert meta["excluded"] == "0"
+    assert meta["deduped"] == "1"        # two rows, one surviving product
+    assert stats["products"] == 1
+
+
 def test_build_stores_nutrients_raw_for_conversion_at_lookup(tmp_path):
     """Sodium goes in as OFF's 0.0428 g, not a pre-multiplied 42.8 mg."""
     gz = tmp_path / "export.csv.gz"
