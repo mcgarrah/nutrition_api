@@ -1,0 +1,31 @@
+name: Dependency audit
+
+# Separate from CI's own pip-audit step (which only re-checks a PR's exact
+# dependency set at the moment it's opened): a CVE disclosed against an
+# already-merged, already-pinned dependency needs no code change here to
+# appear, so nothing would ever trigger CI to notice it. This runs on a
+# schedule instead, against whatever is on main right now. See PLAN.md
+# item 7 — "a PR-blocking scan and a scheduled advisory scan serve
+# different purposes... this codebase doesn't need to choose only one."
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"  # every Monday, 06:00 UTC
+  workflow_dispatch: {}   # manual trigger, e.g. right after a new CVE lands
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Audit dependencies for known vulnerabilities (pip-audit)
+        run: pip-audit -r requirements.txt -r requirements-dev.txt

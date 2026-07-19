@@ -1,0 +1,32 @@
+version: 2
+
+# "Keep versions current" (this file) is a separate concern from "block on
+# a known-bad version" (pip-audit, wired into ci.yml and
+# .github/workflows/dependency-audit.yml) — a dependency can be perfectly
+# current and still vulnerable the day a CVE is disclosed against it, and a
+# dependency can be outdated with no known vulnerability at all. See
+# PLAN.md item 7.
+#
+# Three ecosystems this project actually has a real dependency surface in:
+# pip (requirements.txt/requirements-dev.txt), GitHub Actions (the
+# workflow files under .github/workflows/), and the Dockerfile's base
+# image. Deliberately no npm/yarn entry — checked: no package.json,
+# node_modules, or CDN-hosted <script> anywhere in the repo. jstests/ uses
+# only Node's own built-in node:test/node:assert/node:fs/node:path/node:vm
+# modules, so there is no third-party JavaScript dependency surface to
+# track here.
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"

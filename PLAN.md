@@ -230,27 +230,6 @@ dated OFF downloads (they are deliberately kept side-by-side today). If
 item 8 (response store retention) is still unpicked when this starts, its
 prune job fits naturally on the same timer rather than a second one.
 
-## 7. Automated dependency vulnerability scanning in CI
-
-**Status:** not started. Found during a platform review, 2026-07-18.
-
-`pip-audit` was run once, by hand, during the earlier security-hardening
-session (PR #38) — it is not part of `.github/workflows/ci.yml`, which
-currently runs flake8, pytest, the node static-page tests, and a Docker
-build, nothing dependency-scanning shaped. A CVE disclosed in `fastapi`,
-`pydantic`, or any other pinned dependency *after* that one-time check would
-never be caught. No Dependabot config either (`.github/dependabot.yml`
-doesn't exist).
-
-Sketch: add a `pip-audit` step to the existing `test` job (fails the build
-on a known vulnerability, same bar as flake8/pytest already failing it) or
-a separate scheduled job (weekly, since a new CVE can appear without any
-code change here to trigger CI) — worth deciding which before starting,
-since a PR-blocking scan and a scheduled advisory scan serve different
-purposes and this codebase doesn't need to choose only one. A minimal
-`dependabot.yml` (pip + github-actions ecosystems) covers the "keep
-versions current" half separately from the "block on known-bad" half.
-
 ## 12. Persist upstream-vs-mirrored exclusion counts
 
 **Status:** not started — split out of item 6's first draft, 2026-07-18,
@@ -905,3 +884,41 @@ they were all verified against this taxonomy version at curation time),
 and a full `import_gpc_xml.py` run against a scratch database using the
 real cached `data/imports/en-v20260520.xml`, confirming the check fires
 automatically as part of the normal build/log flow.
+
+## 7. ~~Automated dependency vulnerability scanning in CI~~ — DONE 2026-07-19
+
+**Status:** shipped 2026-07-19. Both sketched options built, per the
+original "this codebase doesn't need to choose only one" reasoning.
+
+**What shipped:** a `pip-audit` step added to `ci.yml`'s existing `test`
+job (PR-blocking, same bar flake8/pytest already hold the build to), plus
+a separate `.github/workflows/dependency-audit.yml` running the identical
+check weekly (Mondays 06:00 UTC, plus `workflow_dispatch` for an on-demand
+run right after a new CVE is disclosed) — the PR-blocking scan only ever
+re-checks a PR's exact dependency set at the moment it's opened, so a CVE
+disclosed against an already-merged, already-pinned dependency needs the
+schedule to ever get noticed, since no code change here would trigger CI
+to look again. `pip-audit` itself is now a pinned `requirements-dev.txt`
+entry rather than an ad-hoc install, so `pip install -r requirements-dev.
+txt` is enough for both workflow steps and a local run.
+
+**`.github/dependabot.yml`** covers the separate "keep versions current"
+half (a dependency can be current with no known CVE, or outdated with
+none either — different question from what `pip-audit` answers): `pip`
+and `github-actions` ecosystems, per the original sketch, plus `docker`
+for the Dockerfile's `python:3.13-slim` base image — a real dependency
+surface this project has that the original two-ecosystem sketch didn't
+call out, added since Dependabot supports it natively and the project
+already ships a Docker image.
+
+**Checked, not assumed: no JavaScript dependency surface exists to add.**
+No `package.json`, no `node_modules`, no CDN-hosted `<script>` anywhere in
+the repo — `jstests/` (the static-page test suite) uses only Node's own
+built-in `node:test`/`node:assert`/`node:fs`/`node:path`/`node:vm`
+modules. A JS-focused scanner would have nothing to scan.
+
+Both new workflow YAML files validated (`yaml.safe_load`). `pip-audit -r
+requirements.txt -r requirements-dev.txt` run live against this project's
+actual pinned dependencies: no known vulnerabilities found in either
+file, so wiring this in doesn't fail the build it ships in. Full suite
+green (910), flake8 clean, 15/15 node tests.
