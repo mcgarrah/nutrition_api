@@ -32,9 +32,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Audit npm dependencies for known vulnerabilities (npm audit)
+        run: npm audit
 
       - name: Test static-page JavaScript (node)
         run: node --test jstests/
+
+      - name: Verify the vendored zxing.min.js matches the audited version
+        # deploy/site/app/vendor/zxing.min.js is a manually-fetched, committed
+        # copy (see its own header comment) -- not something `npm install`
+        # produces at deploy time. Without this check, package.json could say
+        # 0.21.3, npm audit could clear 0.21.3, and the file actually served
+        # to a phone could silently be a different version with an
+        # unaudited, possibly vulnerable, CVE. The header comment is 13
+        # lines; `tail -n +14` strips it back to the raw UMD build for a
+        # byte-for-byte comparison against what npm ci just installed.
+        run: |
+          tail -n +14 deploy/site/app/vendor/zxing.min.js > /tmp/vendored_body.js
+          diff -q /tmp/vendored_body.js node_modules/@zxing/library/umd/index.min.js
 
   docker:
     runs-on: ubuntu-latest

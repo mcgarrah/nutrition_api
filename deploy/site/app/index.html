@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Nutrition Scanner</title>
+<meta name="theme-color" content="#171716">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Nutrition">
+<link rel="manifest" href="/app/manifest.json">
+<link rel="apple-touch-icon" href="/app/icons/icon-192.png">
+<link rel="icon" href="/app/icons/icon-192.png">
+<style>
+  :root {
+    --surface-0: #f2f2f0;
+    --surface-1: #fcfcfb;
+    --surface-2: #e9e9e5;
+    --border:    #dedddA;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #78776f;
+    --search: #2f7d4f;
+    --good: #008300;
+    --bad:  #e34948;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-0: #111110;
+      --surface-1: #1a1a19;
+      --surface-2: #232320;
+      --border:    #35342f;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #8f8e84;
+      --search: #5fbf8a;
+      --good: #4caf50;
+      --bad:  #e66767;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%; margin: 0;
+    background: var(--surface-0); color: var(--text-primary);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  body { display: flex; flex-direction: column; }
+
+  .topbar {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .75rem 1rem; border-bottom: 1px solid var(--border);
+    background: var(--surface-1);
+  }
+  .topbar a { color: var(--text-secondary); text-decoration: none; font-size: .875rem; }
+  .topbar .title { font-weight: 650; margin-right: auto; }
+  .topbar .info-link { font-size: 1.1rem; }
+
+  .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--surface-1); }
+  .tab {
+    flex: 1; padding: .7rem; border: none; background: none; color: var(--text-secondary);
+    font-size: .9rem; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent;
+  }
+  .tab.active { color: var(--search); border-bottom-color: var(--search); }
+
+  main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .panel[hidden] { display: none; }
+
+  .camera-wrap {
+    flex: 1; min-height: 0; position: relative; background: #000;
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  #camera { width: 100%; height: 100%; object-fit: cover; }
+  .scan-status {
+    margin: 0; padding: .85rem 1rem; text-align: center;
+    background: var(--surface-1); color: var(--text-secondary); font-size: .875rem;
+  }
+
+  #panelSearch { padding: 1rem; gap: .75rem; }
+  #searchInput {
+    width: 100%; padding: .75rem .9rem; font-size: 1rem;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: var(--surface-1); color: var(--text-primary);
+  }
+  .search-results { display: flex; flex-direction: column; gap: .5rem; margin-top: .75rem; overflow-y: auto; }
+  .search-result {
+    display: flex; align-items: center; gap: .75rem; padding: .6rem; text-align: left;
+    border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1);
+    color: var(--text-primary); font: inherit; cursor: pointer;
+  }
+  .search-result img, .thumb-placeholder {
+    width: 44px; height: 44px; border-radius: 8px; object-fit: cover;
+    background: var(--surface-2); flex-shrink: 0;
+  }
+  .sr-text { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+  .sr-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sr-brand { font-size: .8125rem; color: var(--text-muted); }
+  .muted { color: var(--text-muted); }
+
+  .result-card {
+    position: fixed; left: 0; right: 0; bottom: 0; max-height: 75vh;
+    background: var(--surface-1); border-top: 1px solid var(--border);
+    border-radius: 16px 16px 0 0; box-shadow: 0 -4px 24px rgba(0,0,0,.25);
+    padding: 1.25rem 1.25rem 1.5rem; overflow-y: auto;
+  }
+  .result-card[hidden] { display: none; }
+  .product-image { max-width: 120px; max-height: 120px; display: block; margin: 0 auto .75rem; border-radius: 10px; }
+  #resultBody h2 { margin: 0 0 .2rem; font-size: 1.2rem; }
+  #resultBody .brand { margin: 0 0 .75rem; color: var(--text-secondary); }
+  .nutrients { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: .5rem .75rem; margin: 0; }
+  .nutrients div { background: var(--surface-2); border-radius: 8px; padding: .5rem .6rem; }
+  .nutrients dt { font-size: .75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; }
+  .nutrients dd { margin: 0; font-size: 1rem; font-weight: 650; }
+  .allergens { margin-top: .85rem; font-size: .875rem; color: var(--text-secondary); }
+  .link-button {
+    background: none; border: none; padding: 0; color: var(--search);
+    font: inherit; text-decoration: underline; cursor: pointer;
+  }
+  .primary-button {
+    display: block; width: 100%; margin-top: 1rem; padding: .8rem;
+    background: var(--search); color: #fff; border: none; border-radius: 10px;
+    font-size: 1rem; font-weight: 650; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a href="/">← Home</a>
+  <span class="title">Nutrition Scanner</span>
+  <a class="info-link" href="/api/v1/attribution" aria-label="Data attribution">ⓘ</a>
+</header>
+
+<nav class="tabs">
+  <button type="button" id="tabScan" class="tab active">Scan</button>
+  <button type="button" id="tabSearch" class="tab">Search</button>
+</nav>
+
+<main>
+  <section id="panelScan" class="panel">
+    <div class="camera-wrap">
+      <video id="camera" playsinline muted autoplay></video>
+    </div>
+    <p id="scanStatus" class="scan-status">Starting camera…</p>
+  </section>
+
+  <section id="panelSearch" class="panel" hidden>
+    <input id="searchInput" type="search" inputmode="search" autocomplete="off"
+      placeholder="Product name or barcode">
+    <div id="searchResults" class="search-results"></div>
+  </section>
+</main>
+
+<div id="resultCard" class="result-card" hidden>
+  <div id="resultBody"></div>
+  <button type="button" id="dismissBtn" class="primary-button">Done</button>
+</div>
+
+<script src="/app/vendor/zxing.min.js"></script>
+<script src="/app/app.js"></script>
+</body>
+</html>

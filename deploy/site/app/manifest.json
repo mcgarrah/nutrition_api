@@ -1,0 +1,25 @@
+{
+  "name": "Nutrition Scanner",
+  "short_name": "Nutrition",
+  "description": "Scan a barcode or search by name for a merged USDA/Open Food Facts/GS1 GPC nutrition profile.",
+  "start_url": "/app/",
+  "scope": "/app/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#171716",
+  "theme_color": "#171716",
+  "icons": [
+    {
+      "src": "/app/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/app/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

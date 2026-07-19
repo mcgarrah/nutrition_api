@@ -26,6 +26,8 @@ const PAGES = [
   "deploy/site/index.html",
   "deploy/site/status.html",
   "deploy/site/nav.js",
+  "deploy/site/app/app.js",
+  "deploy/site/app/sw.js",
 ];
 
 // Pull the inline <script> bodies out of an HTML file (skipping <script src=…>).
