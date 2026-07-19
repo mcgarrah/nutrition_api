@@ -281,6 +281,74 @@ sequenceDiagram
    external device). Test from a phone on cellular data or another network
    before concluding Funnel itself is broken.
 
+### Tailscale Services (multi-host readiness)
+
+Separate from Funnel above, and set up 2026-07-19 as groundwork for future
+HA / blue-green deployments, not because this deployment needs it today —
+right now there is exactly one host (`nutrition-api-dev`), so this section
+documents the mechanism, not a completed HA setup.
+
+A [Tailscale Service](https://tailscale.com/kb/1553/tailscale-services) is a
+named, tag-based identity (`svc:nutrition-api` here) that gets its own
+tailnet DNS name and virtual IP, **decoupled from any one node**. One or
+more nodes advertise themselves as backing it; Tailscale routes to whichever
+advertising node is currently online. That is the actual value for this
+project: bring up a second LXC, advertise it for the same service, and
+requests get distributed/failed-over across both — the seed of HA and
+blue-green rollouts, without standing up a separate load balancer. Node-
+based Funnel (above) can't do this — it is inherently tied to one node's own
+hostname.
+
+**Two steps are required, and doing only the first one is the mistake to
+avoid** — it's what produced "Advertising the service, but configuration is
+missing" the first time through this:
+
+1. `tailscale serve advertise svc:nutrition-api` — registers this node as
+   *willing* to host the service. On its own this does nothing else; it
+   creates no routing rule, which is exactly why the service showed as
+   configured-but-empty.
+2. `tailscale serve --service=svc:nutrition-api --bg http://localhost:8090`
+   — the step that was actually missing. Defines *what* the service
+   proxies to. Points at the same loopback-only Caddy block (`:8090`) that
+   Funnel already targets above, for the same reason: it's already a
+   working plain-HTTP target, so nothing new needs configuring on the Caddy
+   side.
+
+Verify with `tailscale serve status --json` — a correctly configured
+service shows up under its own top-level `"Services"` key, e.g.:
+
+```json
+"Services": {
+  "svc:nutrition-api": {
+    "TCP": { "443": { "HTTPS": true } },
+    "Web": {
+      "nutrition-api.squeaker-interval.ts.net:443": {
+        "Handlers": { "/": { "Proxy": "http://localhost:8090" } }
+      }
+    }
+  }
+}
+```
+
+That `"Services"` key is confirmed **separate from** the node's own `"Web"`/
+`"AllowFunnel"` entries in the same JSON output — setting up the service does
+not touch or replace the existing node-based Funnel config; both are live
+at once, independently. `nutrition-api.squeaker-interval.ts.net` resolves
+to its own synthetic virtual IP (a distinct address from the node's own
+tailnet IP), not to `nutrition-api-dev`'s address.
+
+**A second host, later, only needs step 2 run locally on it** (same
+`--service=svc:nutrition-api --bg http://localhost:8090`, assuming it also
+runs its own Caddy on `:8090` the same way) — no change needed here. The
+admin console's Services view reports how many hosts are currently
+online for a service; today that reads "1 online."
+
+The service is tailnet-internal only right now — nothing has run
+`tailscale funnel --service=svc:nutrition-api ...` to expose it to the
+public internet the way the node's own hostname already is. The node-based
+Funnel URL remains the public entry point; extending Funnel to the service
+itself is a separate decision for whenever a second host actually exists.
+
 ### Install (Debian/Ubuntu, via apt)
 
 ```bash

@@ -205,6 +205,34 @@ flowchart LR
   block (current working `*.ts.net` setup) running alongside this, or replace
   it outright once the custom domain is verified working.
 
+## 14. HA / blue-green deployment across multiple hosts
+
+**Status:** not started — the enabling infrastructure (a Tailscale Service,
+`svc:nutrition-api`) was set up 2026-07-19, but there is exactly one host
+today (`nutrition-api-dev`). See ARCH.md, "Deployment Topology" and
+`deploy/README.md`, "Tailscale Services (multi-host readiness)" for what's
+already in place and how it works.
+
+The mechanism this would build on: any node running `tailscale serve
+--service=svc:nutrition-api --bg http://localhost:8090` (pointed at its own
+local Caddy) is automatically routed to by the service's stable name —
+Tailscale handles distributing/failing over across whichever advertising
+nodes are online, no separate load balancer needed. A second LXC, brought
+up and pointed at its own copy of the deployment, would already participate
+just by running that one command.
+
+Open, not yet worked through: how the two local bulk mirrors
+(`data/fdc.sqlite3`, `data/off.sqlite3`, currently rebuilt in place by
+`scripts/refresh_mirrors.py`, PLAN.md item 3) and `data/gpc.sqlite3` stay in
+sync across hosts — each host doing its own independent rebuild is the
+simplest option and might just be fine (they'd converge on the same GitHub
+release data), but hasn't been thought through against actual blue-green
+semantics (does a rollout mean bringing up a new host on the new dataset
+and draining the old one, or do both hosts always track the same release).
+Also open: whether "blue-green" here means two permanent hosts sharing
+load, or one host `drain`+bring-up-replacement per deploy — different
+enough to change what step 2 needs to look like when it's actually built.
+
 ## 13. Viewfinder overlay + ROI-cropped decode for `/app`
 
 **Status:** not started — logged 2026-07-19, from a real finding during

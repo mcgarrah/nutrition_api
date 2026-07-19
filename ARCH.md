@@ -223,4 +223,15 @@ flowchart LR
     fw -.-> systemd
 ```
 
+A second, independent exposure sits alongside node-based Funnel: a
+**Tailscale Service** (`svc:nutrition-api`), a tag-based identity decoupled
+from any one node, also proxying to the same `:8090` Caddy listener. It
+exists as groundwork for a future multi-host setup — a second LXC could
+advertise itself for the same service and Tailscale would route across
+both — not because this single-host deployment needs it today; the diagram
+above still reflects the one host that exists right now. Setup, the
+two-step gotcha (advertising a service and configuring what it proxies to
+are separate steps), and the HA/blue-green rationale are in
+`deploy/README.md`, "Tailscale Services (multi-host readiness)".
+
 The full run-book — hardening rationale, firewall rules, the Funnel TLS-interop story, and the internal-CA trust procedure — is `deploy/README.md`, which is the authoritative document for this layer; this section is only the map.
