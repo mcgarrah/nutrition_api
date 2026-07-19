@@ -8,6 +8,6 @@ gs1-gpc>=0.3.3
 # dependency: otherwise gs1-gpc dropping it breaks us with no warning here.
 gpcc>=1.1.0
 usda-fdc>=0.2.0
-python-dotenv>=1.0.0
+python-dotenv>=1.2.2
 openfoodfacts>=5.0.0
 cachetools>=5.5.0
