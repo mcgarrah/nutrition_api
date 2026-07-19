@@ -107,6 +107,67 @@ Preview what a run would remove without deleting anything:
 cd /opt/nutrition_api && .venv/bin/python3 scripts/prune_response_store.py --dry-run
 ```
 
+### Scheduled mirror refresh (PLAN.md item 3)
+
+Before this, refreshing `data/off.sqlite3`/`data/fdc.sqlite3` meant
+remembering to run `build_off_db.py`/`build_fdc_db.py --auto-update`, then
+`gh release create`/`upload` the new archive by hand, then restart the
+service — nothing scheduled it, and the publish step was easy to forget
+entirely (confirmed missing at least once: a same-day rebuild sat
+unpublished until `nutrition-api-refresh.timer`'s own self-heal caught it).
+`nutrition-api-refresh.timer` runs `scripts/refresh_mirrors.py` weekly: for
+each mirror, it rebuilds via `--auto-update`, verifies the new row count
+hasn't shrunk more than 10% (restoring the previous database if it has —
+upstream export glitches happen), publishes the archive as a GitHub
+release, and self-heals a currently-installed dataset that was never
+published (a previous by-hand rebuild, or a run that crashed mid-way).
+`nutrition-api.service` is restarted once at the end if anything actually
+changed.
+
+**One-time setup this needs beyond `install`/`enable`:**
+
+- `gh` authenticated as the user the timer runs as (`gh auth status` to
+  check) — needed to publish/check release assets.
+- Passwordless sudo for exactly the one restart command, so the timer can
+  pick up a rebuild without a human present:
+
+  ```bash
+  echo 'mcgarrah ALL=(root) NOPASSWD: /usr/bin/systemctl restart nutrition-api.service' \
+    | sudo tee /etc/sudoers.d/nutrition-api-refresh
+  sudo visudo -c   # verify the syntax before it's trusted
+  ```
+
+```bash
+sudo install -m 644 deploy/nutrition-api-refresh.service /etc/systemd/system/
+sudo install -m 644 deploy/nutrition-api-refresh.timer /etc/systemd/system/
+sudo systemd-analyze verify /etc/systemd/system/nutrition-api-refresh.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now nutrition-api-refresh.timer
+```
+
+```bash
+sudo systemctl list-timers nutrition-api-refresh.timer   # next scheduled run
+sudo systemctl start nutrition-api-refresh.service         # run it right now
+sudo journalctl -u nutrition-api-refresh -f                 # follow its logs
+```
+
+Preview what a run would do — including whether either mirror's currently-
+installed dataset is missing a published release — without publishing or
+restarting anything:
+
+```bash
+cd /opt/nutrition_api && .venv/bin/python3 scripts/refresh_mirrors.py --dry-run
+```
+
+Refresh just one mirror, or rebuild/publish without ever restarting the
+service:
+
+```bash
+.venv/bin/python3 scripts/refresh_mirrors.py --off-only
+.venv/bin/python3 scripts/refresh_mirrors.py --fdc-only
+.venv/bin/python3 scripts/refresh_mirrors.py --no-restart
+```
+
 ## Caddy (public front — TLS + landing page)
 
 `Caddyfile` puts a [Caddy](https://caddyserver.com/) reverse proxy in front of

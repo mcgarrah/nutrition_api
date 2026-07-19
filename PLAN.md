@@ -205,31 +205,6 @@ flowchart LR
   block (current working `*.ts.net` setup) running alongside this, or replace
   it outright once the custom domain is verified working.
 
-## 3. Scheduled refresh of the local bulk mirrors
-
-**Status:** not started. Currently a fully manual loop.
-
-OFF republishes daily and FDC twice a year, but refreshing the mirrors
-means remembering to run `build_off_db.py` / `build_fdc_db.py
---auto-update`, then `gh release create`/`upload` the `.xz` archives, then
-restart the service. Nothing schedules it, so the OFF mirror silently ages
-(rebuilt by hand each time this session needed fresher data, most recently
-2026-07-18 to pick up the outlier-storage fix in item 6).
-
-Sketch: a systemd **timer** on the reference LXC (weekly for OFF — daily is
-churn without benefit given the response store absorbs misses; on-release
-for FDC, which `--check` already detects) running a script that rebuilds,
-verifies row counts against the previous build (a >10% shrink aborts —
-upstream export glitches happen), publishes the release asset with
-`gh release upload --clobber`, and restarts `nutrition-api.service` off-peak.
-Decisions to make when picking this up: whether the LXC (12 GB RAM) is the
-right build host or whether a beefier build node should push assets; where
-build logs/failures surface (the `/status` dashboard already shows dataset
-dates, so staleness is at least *visible* today); and whether to prune old
-dated OFF downloads (they are deliberately kept side-by-side today). If
-item 8 (response store retention) is still unpicked when this starts, its
-prune job fits naturally on the same timer rather than a second one.
-
 ## 12. Persist upstream-vs-mirrored exclusion counts
 
 **Status:** not started — split out of item 6's first draft, 2026-07-18,
@@ -922,3 +897,70 @@ requirements.txt -r requirements-dev.txt` run live against this project's
 actual pinned dependencies: no known vulnerabilities found in either
 file, so wiring this in doesn't fail the build it ships in. Full suite
 green (910), flake8 clean, 15/15 node tests.
+
+## 3. ~~Scheduled refresh of the local bulk mirrors~~ — DONE 2026-07-19
+
+**Status:** shipped 2026-07-19.
+
+**What shipped:** `scripts/refresh_mirrors.py`, run weekly by
+`nutrition-api-refresh.timer`. For each mirror (OFF, FDC): records the
+installed dataset + row count, runs `build_X_db.py --auto-update` as a
+subprocess, and if the dataset actually changed, checks the new row count
+against the pre-rebuild baseline — a shrink past 10% restores the previous
+database and archive from a backup taken before the rebuild ("a >10%
+shrink aborts" from the original sketch, made real: the bad build is
+undone, not merely logged). A build that passes gets published as a
+GitHub release (`gh release create`, or `upload --clobber` if the tag
+already exists). If anything actually rebuilt, `nutrition-api.service` is
+restarted once at the end.
+
+**Decisions made, per the sketch's own open questions:** this LXC (12 GB
+RAM) is the build host — no separate build node, since the actual
+measured cost (a cold OFF rebuild: ~7 min, ~211 MB peak RSS) doesn't
+justify one. Weekly for both mirrors, not just OFF — FDC's own
+`--auto-update` no-ops in seconds when nothing's newer, so checking it on
+the same cadence costs nothing extra and avoids a second timer. Old dated
+OFF downloads are left exactly as they were (deliberately kept
+side-by-side already, per `build_off_db.py`'s own design) — out of scope
+here. Item 8's prune timer already shipped standalone by the time this
+was picked up, so this is its own timer too, not folded together.
+
+**A real gap this surfaced immediately, live:** `off-2026-07-18` (this
+session's rebuild for item 6's outlier-storage fix) had never been
+published as a release — `gh release list` still showed `off-2026-07-17`
+as latest. `build_*.py`'s own `download_release()` only ever *reads* a
+published release; nothing in either script, or in the by-hand loop this
+replaces, ever *published* one automatically. Added a self-heal check:
+even when `--auto-update` finds nothing to rebuild, `refresh_mirrors.py`
+now also checks whether the *currently-installed* dataset has a published
+release, and publishes it if not — covers a previous manual rebuild, or a
+prior run that crashed between building and publishing, not just its own
+future rebuilds.
+
+**A second real bug caught by that same live check:** FDC's release tag
+(`fdc-2026-04-30`, from `build_fdc_db.py`'s own `release_url()`) is not
+the raw `dataset` value stored in `fdc_metadata`
+(`FoodData_Central_branded_food_csv_2026-04-30`) — OFF's dataset value
+happens to already be its own tag, FDC's doesn't. The first version of
+this script used the raw dataset string as the release tag for both
+mirrors, which would have silently created/checked FDC releases under a
+tag `download_release()` would never look for. Fixed with a per-mirror
+`tag_for_dataset` conversion; caught by running `--dry-run` against the
+real repository's actual releases, not just the test suite (the unit
+tests only had OFF fixtures at that point — added FDC-specific ones
+after finding this).
+
+Needs one-time manual setup beyond `install`/`enable`, documented in
+`deploy/README.md` rather than done automatically: `gh` authenticated as
+the timer's user (already true on the reference LXC), and a narrowly-
+scoped passwordless-sudo rule for exactly `systemctl restart nutrition-
+api.service` — a real system-policy change, not something this session
+applies to a live host unilaterally.
+
+21 new tests (`test_refresh_mirrors.py`), full suite green (931), flake8
+clean. Both new systemd unit files pass `systemd-analyze verify`.
+Live-verified `--dry-run` twice against the real repository and mirrors:
+first confirming both the missing `off-2026-07-18` release and the FDC
+tag bug, then again after the fix confirming FDC correctly reports
+"already current" (its real `fdc-2026-04-30` release exists) while OFF
+still correctly flags the genuine gap.

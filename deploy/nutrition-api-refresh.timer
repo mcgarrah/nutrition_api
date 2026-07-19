@@ -1,0 +1,17 @@
+[Unit]
+Description=Weekly local FDC/OFF mirror refresh (PLAN.md item 3)
+
+[Timer]
+# Weekly matches OFF's actual publish cadence (it rebuilds daily, but the
+# response store already absorbs same-week misses, so daily checking is
+# churn without benefit -- see PLAN.md item 3). FDC only republishes twice
+# a year; --auto-update no-ops instantly when nothing's newer, so checking
+# it on the same weekly cadence costs nothing extra.
+OnCalendar=weekly
+# Catch up if the box was off at the scheduled time, rather than silently
+# skipping a whole week.
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
