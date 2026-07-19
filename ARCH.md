@@ -166,11 +166,16 @@ flowchart TD
 | Chrome/Edge/Samsung Internet, Android | Yes | Native | Verified on a Samsung S23+ — decodes reliably at a distance, the barcode just needs to be somewhere in frame. |
 | Chrome/Edge, desktop | Yes | Native | Same code path as Android; not separately device-tested. |
 | Firefox, Android or desktop | No | ZXing fallback | Verified on Android — decodes correctly, but see the gap noted below. |
-| Safari, iOS | No, as of this writing | ZXing fallback | Not device-tested (no iPhone available). Same fallback code path Firefox already exercised, so that result is meaningful evidence, but iOS-specific behavior (camera permission handling in an installed home-screen PWA — see MOBILE_APP.md) remains unverified. |
+| Safari, macOS | No | ZXing fallback | Verified on a MacBook Pro — decodes correctly, same framing-distance gap as Firefox. |
+| Chrome, macOS | Yes | Native | Verified on a MacBook Pro. |
+| Safari, iOS | No, as of this writing | ZXing fallback | Not yet device-tested (no iPhone available). Shares WebKit with macOS Safari, already verified above -- `BarcodeDetector`'s absence is an engine trait, not a per-platform one, so the fallback branch itself is now well-evidenced on this engine. What macOS testing *can't* cover: iOS-specific camera-permission behavior in an installed home-screen PWA (a sandboxing concern, not a WebKit-engine one -- see MOBILE_APP.md), and whether an iPhone's actual camera characteristics shift the framing-distance gap noted below. |
 
 **A real, measured gap between the two paths, not just a spec difference.**
-Native `BarcodeDetector` picked up a barcode comfortably at a distance in
-testing; the ZXing fallback needed the barcode to fill much more of the
+Confirmed on two independent engines now (Gecko/Firefox, WebKit/Safari
+macOS) that both lack `BarcodeDetector` — strengthens the "inherent to
+ZXing's approach, not one browser's quirk" read. Native `BarcodeDetector`
+picked up a barcode comfortably at a distance in testing; the ZXing
+fallback needed the barcode to fill much more of the
 frame to decode at all. The likely cause: platform `BarcodeDetector`
 implementations run a proper ML-based detector across the full frame,
 while ZXing-js's default continuous-decode mode (`decodeFromStream`) scans

@@ -148,6 +148,20 @@ region-of-interest cropping or multi-scale attempt — a barcode occupying a
 small fraction of the frame is a much smaller target for it. Not a bug, but
 a real UX gap on the fallback path worth designing around (see below).
 
+**Also verified on a MacBook Pro, both Chrome and Safari** — Chrome (native)
+worked as expected; Safari (no `BarcodeDetector`, same ZXing fallback)
+decoded correctly with the identical framing-distance behavior Firefox
+showed. That's the gap confirmed on two independent engines lacking
+`BarcodeDetector` now (Gecko, WebKit), not a one-browser quirk. It also
+meaningfully de-risks the still-outstanding iPhone check: macOS Safari and
+iOS Safari share WebKit, and `BarcodeDetector`'s absence is an engine trait,
+not a per-platform one — so the fallback code path itself is now
+well-evidenced on the same engine iOS will use. What macOS testing can't
+reach: iOS's own camera-permission behavior in an installed home-screen
+PWA (a sandboxing concern, not a WebKit one), and whether an iPhone's actual
+camera shifts the framing-distance numbers. See ARCH.md's compatibility
+table for the full per-browser breakdown.
+
 **Feature idea, not yet built:** a viewfinder overlay — a guide box showing
 where to hold the barcode, and a highlight when one's detected. Beyond the
 UX win, cropping the decode to that guide box's region before handing it to
