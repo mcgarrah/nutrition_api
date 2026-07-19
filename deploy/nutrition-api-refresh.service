@@ -1,0 +1,33 @@
+[Unit]
+Description=Refresh the Nutrition API's local FDC/OFF bulk mirrors (PLAN.md item 3)
+Documentation=https://github.com/mcgarrah/nutrition_api
+
+[Service]
+Type=oneshot
+User=mcgarrah
+Group=mcgarrah
+WorkingDirectory=/opt/nutrition_api
+
+# Needs `gh` authenticated as this user (same requirement the by-hand
+# refresh loop this replaces already had) to publish a release asset, and
+# passwordless sudo for exactly `systemctl restart nutrition-api.service`
+# to pick up a rebuild -- see deploy/README.md for the one-time setup.
+ExecStart=/opt/nutrition_api/.venv/bin/python3 scripts/refresh_mirrors.py
+
+# A cold OFF rebuild alone was measured at ~7 minutes this session; give
+# both mirrors, publishing, and a restart real room rather than racing a
+# default timeout.
+TimeoutStartSec=1800s
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nutrition-api-refresh
+
+# Same minimum-privilege posture as nutrition-api.service and the other
+# periodic jobs (items 8/9) -- this only needs to write data/, read the
+# repo, and reach the network (upstream downloads, GitHub releases).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/nutrition_api/data
