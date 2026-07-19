@@ -10,4 +10,4 @@ gpcc>=1.1.0
 usda-fdc>=0.2.0
 python-dotenv>=1.0.0
 openfoodfacts>=5.0.0
-cachetools>=5.5.0
+cachetools>=7.1.4
