@@ -205,32 +205,6 @@ flowchart LR
   block (current working `*.ts.net` setup) running alongside this, or replace
   it outright once the custom domain is verified working.
 
-## 12. Persist upstream-vs-mirrored exclusion counts
-
-**Status:** not started — split out of item 6's first draft, 2026-07-18,
-to give it a proper home instead of staying buried in a "left out" note.
-
-Each local mirror is a *filtered subset* of what the upstream actually
-publishes — OFF's ~4.5M-row export becomes ~2.24M kept rows (needs barcode
-+ name + a usable nutrient), FDC's 2.0M branded records collapse to 442,095
-barcodes. The exclusion counts already get logged during
-`build_off_db.py`/`build_fdc_db.py` runs (`_step()` messages) but aren't
-persisted or queryable afterward.
-
-Sketch: record them in the mirror's own `*_metadata` table, alongside
-`dataset`/`source_modified`, the same place dataset provenance already
-lives, so "what fraction of upstream did we actually keep, and why"
-survives past the build's own log output — and becomes visible in the Data
-Quality dashboard (item 6, shipped) rather than only in a build-time log
-line. Needs touching the build scripts, not just a read-side addition,
-which is why it was scoped out of item 6's first (read-only) draft.
-
-Also open, resolved for item 6's shipped scope but worth restating if this
-is picked up: whether "external repositories" should also cover the
-*sibling code packages* (`usda-fdc`, `gs1-gpc`, `nutrimetrics`) — no, this
-item means the upstream *data* sources (FDC/OFF/GPC) only. A code-package
-staleness angle, if ever wanted, would be a distinct item.
-
 # Shipped
 
 ## 2. ~~Name search: stop blocking the event loop, then make it fast (FTS5)~~ — DONE 2026-07-18
@@ -964,3 +938,57 @@ first confirming both the missing `off-2026-07-18` release and the FDC
 tag bug, then again after the fix confirming FDC correctly reports
 "already current" (its real `fdc-2026-04-30` release exists) while OFF
 still correctly flags the genuine gap.
+
+## 12. ~~Persist upstream-vs-mirrored exclusion counts~~ — DONE 2026-07-19
+
+**Status:** shipped 2026-07-19.
+
+**What shipped:** `build_off_db.py`/`build_fdc_db.py` now write three more
+keys into their own `*_metadata` table alongside `dataset`/
+`source_modified` — `rows_read` (every row the upstream export offered),
+`excluded` (dropped outright: OFF's no-barcode/name/nutrient rows, FDC's
+no-usable-GTIN rows), `deduped` (collapsed, not dropped: OFF rows sharing
+a barcode with a newer row, FDC's superseded label revisions folded into
+the newest one). Both scripts were already computing these three numbers
+for their existing `_step()` log lines — this only adds persisting them,
+no new computation. `off_local.stats()`/`fdc_local.stats()` expose the
+same three fields (a local `_int()` helper, `None` if the key is absent —
+the existing pattern for `products`/`barcodes` on an older mirror),
+which is the single function already shared by `/api/v1/health` and the
+Data Quality dashboard's `source_summary()`, so both surfaces picked up
+the new fields with zero extra plumbing. `data.html`'s source cards
+gained a `rows read`/`excluded`/`deduped` row each for FDC and OFF, added
+only when `rows_read` is non-null so a mirror built before this shipped
+doesn't grow empty rows. No `schema_version` bump on either mirror — the
+metadata table is a generic key-value store, and new keys are additive,
+unlike item 6's outlier-fix bump which changed the *meaning* of existing
+values.
+
+**Decisions made:** a consistent 3-key shape for both mirrors despite
+their structurally different upstream formats (OFF: one CSV, straight
+total/kept/served triage; FDC: multi-file zip, a distinct
+no-usable-GTIN rejection plus a separate superseded-revision collapse) —
+`rows_read`/`excluded`/`deduped` map onto both scripts' own existing
+local variables directly. Extended the existing shared `stats()`
+functions rather than adding a dashboard-only reader, matching how
+`products`/`barcodes` already flow through both `/health` and the
+dashboard today.
+
+10 new tests: `test_build_off_db.py` gained a dedup-specific case (two
+rows sharing a barcode collapsing to one, `deduped == "1"`) alongside the
+existing single-skip fixture; `test_build_fdc_db.py` is new — no prior
+test built a full synthetic FDC bulk zip end-to-end through `build()`, so
+this added one (`nutrient.csv`/`food.csv`/`branded_food.csv`/
+`food_nutrient.csv`, minimal but real, run through the actual
+`from_usda` mapping) covering both the no-GTIN-exclusion and the
+superseded-revision-dedup cases; `test_off_local.py`/`test_fdc_local.py`
+each gained two tests — the new fields correctly `None` on the existing
+fixture (which predates item 12, exactly like every mirror in production
+right now) and correctly populated when present. Full suite green (939),
+flake8 clean. Live-verified against the real, currently-running
+`data/off.sqlite3`/`data/fdc.sqlite3` (both built before this shipped):
+`off_local.stats()`/`fdc_local.stats()` and both `/api/v1/health` and
+`/api/v1/data/analytics` correctly report `rows_read`/`excluded`/
+`deduped` as `null` rather than erroring, confirming the dashboard degrades
+cleanly today and will start reporting real numbers on the next mirror
+rebuild without any further change.

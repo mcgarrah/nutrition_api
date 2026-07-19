@@ -295,6 +295,35 @@ def test_health_names_the_dataset_before_any_lookup_has_happened(local_db):
     assert reported["imported_at"] == "2026-07-14T00:00:00+00:00"
 
 
+def test_health_reports_none_for_exclusion_counts_on_an_older_mirror(local_db):
+    """PLAN.md item 12: build_db()'s fixture predates rows_read/excluded/deduped,
+    exactly like a mirror built before this was added -- absent, not an error."""
+    reported = fdc_local.stats()
+
+    assert reported["rows_read"] is None
+    assert reported["excluded"] is None
+    assert reported["deduped"] is None
+
+
+def test_health_reports_exclusion_counts_when_present(tmp_path, monkeypatch):
+    path = build_db(tmp_path / "fdc.sqlite3")
+    db = sqlite3.connect(path)
+    db.executemany("INSERT INTO fdc_metadata VALUES (?,?)", [
+        ("rows_read", "5"), ("excluded", "2"), ("deduped", "1"),
+    ])
+    db.commit()
+    db.close()
+    monkeypatch.setattr(fdc_local, "DB_PATH", path)
+    monkeypatch.setattr(fdc_local, "_db", None)
+    monkeypatch.setattr(fdc_local, "_metadata", {})
+
+    reported = fdc_local.stats()
+
+    assert reported["rows_read"] == 5
+    assert reported["excluded"] == 2
+    assert reported["deduped"] == 1
+
+
 def test_health_reports_an_unreadable_database_as_an_error(tmp_path, monkeypatch):
     broken = tmp_path / "fdc.sqlite3"
     broken.write_bytes(b"not a database")
