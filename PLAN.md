@@ -316,17 +316,69 @@ detectors run a proper ML-based detector across the whole frame; ZXing-js's
 default `decodeFromStream` scans the frame as-given with no region-of-
 interest cropping.
 
-Sketch: a viewfinder guide box in `/app`'s Scan UI — both a UX affordance
-(shows where to hold the barcode, highlights it once detected) and, more
-substantively, a decode-quality fix if the crop is real: feed both decoders
-a canvas-cropped region matching the guide box instead of the full video
-frame, which should let ZXing decode a smaller/farther barcode the same
-way the native path already does. Needs moving off `decodeFromStream`'s
-continuous whole-video mode onto a canvas-based per-frame loop for both
-decode paths — a real, contained architecture change to `app.js`'s scan
-loop, not a pure CSS overlay. Worth designing properly (verify the crop
-actually improves ZXing's detection distance, not just assume it) before
-building.
+**Design finalized 2026-07-19 (not yet implemented).** User confirmed via
+`AskUserQuestion`: crop **both** decode paths uniformly, one shared loop —
+not native-Android-only-a-suggestion — so the guide box means the same
+true thing on every browser, and the code stays one loop instead of two
+divergent ones.
+
+**Core architecture change.** Both current paths hand the *entire,
+uncropped* video element to their decoder, with no hook to inject a crop:
+the native path (`startBarcodeDetectorLoop()`) calls `detector.detect(video)`
+directly; the ZXing path (`startZXingLoop()`) uses `zxingReader
+.decodeFromStream(stream, video, callback)`, a continuous loop ZXing owns
+internally (confirmed by reading the vendored source: `decodeFromStream` →
+`attachStreamToVideo` → `decodeContinuously`, which calls
+`this.decode(videoElement)` on ZXing's own timer, not the app's). The fix:
+replace both with one shared, app-owned polling loop that draws the
+cropped video region to an offscreen `<canvas>` every tick, then hands
+*that canvas* to whichever decoder is active. Confirmed feasible by
+reading the vendored source directly (not assumed): `BrowserMultiFormat
+Reader.decode(t)` — the single synchronous method every ZXing convenience
+wrapper already calls internally — branches on `t instanceof
+HTMLVideoElement`; anything else, a plain `HTMLCanvasElement` included,
+goes through `drawImageOnCanvas(t)`. ZXing already accepts a pre-cropped
+canvas as decode input, no internal API needs bypassing.
+`BarcodeDetector.detect()` already accepts any `CanvasImageSource` per
+spec, canvas included.
+
+**The guide box's on-screen position must exactly match the real crop
+region**, or the box becomes a lie. `#camera` is `object-fit: cover` inside
+`.camera-wrap`, so displayed pixels are a scaled, center-cropped view of
+the native `videoWidth`×`videoHeight` stream — the two rarely share an
+aspect ratio on a phone. Plan: on `loadedmetadata` (and resize/orientation
+change), compute the `object-fit: cover` mapping once to get the *visible*
+native-pixel sub-rect; define the guide box as a fixed proportion of
+*that* rect (not of the raw video dimensions, which would drift from
+what's on screen); use the same computed rect both to position the CSS
+overlay and as the `drawImage(video, sx, sy, sWidth, sHeight, ...)` crop
+args each tick — one rect, two consumers, so they cannot independently
+drift apart.
+
+**Highlight on detect:** core deliverable is flashing the guide box itself
+(border + brief pulse) on a successful decode, before the result card
+takes over. A precise per-barcode outline (using `cornerPoints`/
+`getResultPoints()`) is an optional stretch on top, not required — it needs
+mapping decoder-returned points from crop-canvas space back to on-screen
+CSS space, a second instance of the same mapping problem, worth doing only
+once the simpler box-flash is verified working.
+
+**Touches:** `deploy/site/app/app.js` (replace the two start*Loop
+functions with the shared cropped-canvas loop; add the cover-aware rect
+computation; add the flash on `handleDecode`) and `deploy/site/app/
+index.html` (the overlay markup + dimmed-mask CSS). No changes needed to
+`sw.js`, `manifest.json`, or the vendored ZXing file. Camera acquisition,
+`stopCamera()`, and everything from `handleDecode()` onward (dedupe,
+lookup, rendering) are unaffected — only how a frame reaches the decoder
+changes.
+
+**Verification, once built:** cannot check camera/decode behavior from a
+dev environment — needs the same real-device discipline as the rest of
+`/app`. Confirm the on-screen box visually lines up with what's actually
+decoded (hold a barcode just outside the box, confirm it does *not*
+decode), confirm the ZXing-path distance behavior actually improves (the
+whole point), and confirm the native path's new box-constrained behavior
+is the accepted trade-off, not a surprise regression.
 
 ## 2. ~~Name search: stop blocking the event loop, then make it fast (FTS5)~~ — DONE 2026-07-18
 
