@@ -205,6 +205,56 @@ flowchart LR
   block (current working `*.ts.net` setup) running alongside this, or replace
   it outright once the custom domain is verified working.
 
+## 15. Apostrophe/possessive mismatch breaks name search for ~4%+ of products
+
+**Status:** not started — logged 2026-07-19, found live-testing `/app`'s
+search. Real, reproduced bug, not a guess.
+
+`GET /api/v1/search?q=baker's+peanuts` returns a hit
+(`BAKER'S, SOUTHERN TRADITIONS PEANUTS`). The exact same search, typed the
+way most people actually type it — `GET /api/v1/search?q=bakers+peanuts`,
+no apostrophe — returns **zero results** for the identical product.
+
+**Root cause, confirmed against the real FDC mirror, not inferred.**
+`app/core/search.py`'s `_fts_match_expr()` tokenizes a query with `\w+`
+(`re.UNICODE`), which does not include `'` — so "baker's" splits into two
+separate query tokens, `"baker"* "s"*`. FTS5's own `unicode61` tokenizer
+(`scripts/build_fdc_db.py`/`build_off_db.py`) does the same thing to the
+*indexed* text, splitting "BAKER'S" into "baker" and "s" as two separate
+indexed tokens. That's why an apostrophe'd query happens to work — the
+split matches the split. But "bakers" typed as one word tokenizes to a
+single 7-letter token, `"bakers"*`, which prefix-matches neither of the
+row's actual indexed tokens. Confirmed directly via `fts5vocab` against a
+copy of the real mirror: the row's tokens are exactly `baker` and `s`;
+`"bakers"*` instead matches a *different* 80 rows — products that literally
+contain the word "bakers" with no apostrophe — not this one.
+
+**Scope, measured, not assumed:** 18,138 of 442,095 FDC descriptions
+(4.1%) contain an apostrophe — every one of them is subject to this same
+mismatch for anyone who searches the natural, apostrophe-free way. Not
+yet checked against the OFF mirror (1.2 GB, likely similar or higher given
+more varied international branding), but no reason to expect it's lower.
+
+**Sketch of the fix:** normalize apostrophes away entirely — both straight
+(`'`) and curly (`’`) — before tokenization, on *both* sides of the
+boundary, so "baker's" and "bakers" become the identical single token
+instead of splitting differently or only matching when both sides happen
+to split the same way:
+
+- Index-build time (`_build_fts_table()` in both `build_fdc_db.py`/
+  `build_off_db.py`): strip apostrophes from the text before it's inserted
+  into `foods_fts`/`products_fts` — this changes what's actually indexed,
+  not just adds a metadata key, so it needs a `SCHEMA_VERSION` bump and a
+  rebuild of both local mirrors (unlike item 12, which was additive).
+- Query time (`_fts_match_expr()` in `search.py`): strip apostrophes from
+  the query string the same way, before running the `\w+` tokenizer.
+
+Needs the same "verify on real data before shipping" discipline as this
+project's other search fixes (items 2, 4) — confirm the fix actually closes
+this specific case, and doesn't introduce a new one (two genuinely
+different words in the real corpus that happen to differ only by an
+apostrophe, if any such case exists).
+
 ## 14. HA / blue-green deployment across multiple hosts
 
 **Status:** not started — the enabling infrastructure (a Tailscale Service,
