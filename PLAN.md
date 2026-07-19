@@ -205,10 +205,13 @@ flowchart LR
   block (current working `*.ts.net` setup) running alongside this, or replace
   it outright once the custom domain is verified working.
 
-## 15. Apostrophe/possessive mismatch breaks name search for ~4%+ of products
+## 15. Punctuation tokenization mismatch breaks name search for common products
 
-**Status:** not started — logged 2026-07-19, found live-testing `/app`'s
-search. Real, reproduced bug, not a guess.
+**Status:** not started — logged 2026-07-19 as an apostrophe-only finding,
+broadened the same day after checking whether other punctuation shares the
+same failure mode. It does, more of it than apostrophes alone, and the fix
+turns out to have a real subtlety, not a one-line patch. Real, reproduced
+bugs throughout, not guesses.
 
 `GET /api/v1/search?q=baker's+peanuts` returns a hit
 (`BAKER'S, SOUTHERN TRADITIONS PEANUTS`). The exact same search, typed the
@@ -229,31 +232,45 @@ copy of the real mirror: the row's tokens are exactly `baker` and `s`;
 `"bakers"*` instead matches a *different* 80 rows — products that literally
 contain the word "bakers" with no apostrophe — not this one.
 
-**Scope, measured, not assumed:** 18,138 of 442,095 FDC descriptions
-(4.1%) contain an apostrophe — every one of them is subject to this same
-mismatch for anyone who searches the natural, apostrophe-free way. Not
-yet checked against the OFF mirror (1.2 GB, likely similar or higher given
-more varied international branding), but no reason to expect it's lower.
+**This is not apostrophe-specific — surveyed every non-alnum character
+actually appearing in FDC descriptions, then reproduced or ruled out each
+plausible candidate live:**
 
-**Sketch of the fix:** normalize apostrophes away entirely — both straight
-(`'`) and curly (`’`) — before tokenization, on *both* sides of the
-boundary, so "baker's" and "bakers" become the identical single token
-instead of splitting differently or only matching when both sides happen
-to split the same way:
+| char | in FDC descriptions | glued-word test (e.g. `SUN-MAID` → `sunmaid`) | verdict |
+| :--- | ---: | :--- | :--- |
+| `,` | 293,006 (66.3%) | `PASTA,TROFIE` → `pastatrofie`: 0 results | same bug, but the *triggering* shape (comma glued directly to the next word, no space) is rare in this corpus — commas are used with a following space |
+| `&` | 50,809 (11.5%) | `TORN & GLASSER` → `torn glasser` (& simply omitted): **3 results, works fine** | **not affected** — `&` is always space-flanked in practice, so dropping it changes nothing |
+| `-` | 24,749 (5.6%) | `SUN-MAID` → `sunmaid`: 0 results (`sun maid`, spaced, still finds it: 3 results) | **same bug**, and more common than apostrophe |
+| `'` | 18,138 (4.1%) | `BAKER'S` → `bakers`: 0 results | confirmed above |
+| `.` | 11,230 (2.5%) | `U.S. GRADE A HONEY` → `us grade`: the specific dotted product is absent from the 4 results returned (other products already spelled "US" without dots mask the gap) | affected, lower-confidence real-world impact — the corpus already contains both spellings for some terms |
+| `/` | 3,541 (0.8%) | `CHOCOLATE/CRISP` → `chocolatecrisp`: 0 results | same bug |
+| `+` | 2,586 (0.6%) | `FRUIT+COOL` → `fruitcool`: 0 results | same bug |
 
-- Index-build time (`_build_fts_table()` in both `build_fdc_db.py`/
-  `build_off_db.py`): strip apostrophes from the text before it's inserted
-  into `foods_fts`/`products_fts` — this changes what's actually indexed,
-  not just adds a metadata key, so it needs a `SCHEMA_VERSION` bump and a
-  rebuild of both local mirrors (unlike item 12, which was additive).
-- Query time (`_fts_match_expr()` in `search.py`): strip apostrophes from
-  the query string the same way, before running the `\w+` tokenizer.
+**Sketch of the fix — and the real subtlety a first pass at this missed.**
+The obvious-looking fix is "strip the punctuation entirely before
+tokenizing, on both sides" (delete rather than treat as a separator, so
+"SUN-MAID" and "sunmaid" become the identical one-piece token). **That
+fix is wrong on its own** — confirmed live: `sun maid` (spaced, two words)
+*already* correctly finds `SUN-MAID` today, because both sides currently
+split on the hyphen into the same two tokens (`sun`, `maid`). Gluing
+`SUN-MAID` into a single indexed token `sunmaid` would satisfy a `sunmaid`
+query but break the `sun maid` query that works right now — `"maid"*` does
+not prefix-match a token that only *starts* with `sun`. A real fix has to
+make **all three shapes** — spaced (`sun maid`), punctuated (`sun-maid`),
+and glued (`sunmaid`) — resolve to the same product, not trade one
+currently-working shape for another. That likely means indexing (or
+querying) more than one tokenization of a punctuated compound, not a
+single character-normalization pass — needs an actual design, not the
+one-line patch the apostrophe case alone made it look like.
 
-Needs the same "verify on real data before shipping" discipline as this
-project's other search fixes (items 2, 4) — confirm the fix actually closes
-this specific case, and doesn't introduce a new one (two genuinely
-different words in the real corpus that happen to differ only by an
-apostrophe, if any such case exists).
+Whatever the fix, it changes what's actually indexed (not just adds a
+metadata key), so it needs a `SCHEMA_VERSION` bump and a rebuild of both
+local mirrors, and the same "verify on real data before shipping"
+discipline as this project's other search fixes (items 2, 4) — including
+checking that a fix doesn't paper over two genuinely different words that
+happen to differ only by punctuation, if any such case exists in the real
+corpus. Not yet checked against the OFF mirror (1.2 GB, likely a similar or
+larger punctuation surface given more varied international branding).
 
 ## 14. HA / blue-green deployment across multiple hosts
 
