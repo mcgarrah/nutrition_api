@@ -3,6 +3,6 @@
   "private": true,
   "description": "Not a build for the site itself (deploy/site/ is served as plain static files) -- this declares the vendored third-party JS so npm audit and Dependabot have a manifest to check it against. See deploy/site/app/vendor/zxing.min.js and .github/dependabot.yml.",
   "dependencies": {
-    "@zxing/library": "0.21.3"
+    "@zxing/library": "0.23.0"
   }
 }
