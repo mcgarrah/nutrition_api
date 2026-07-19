@@ -4,7 +4,7 @@
 # the bundled XML so the runtime image needs no network access at startup.
 # Stage 2 is a slim runtime image with just the app, deps, and the database.
 
-FROM python:3.13-slim AS builder
+FROM python:3.14-slim AS builder
 
 WORKDIR /build
 
@@ -28,7 +28,7 @@ RUN python scripts/import_gpc_xml.py \
         --db data/gpc.sqlite3
 
 
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 # Surface the git commit in /api/v1/version (pass with --build-arg)
 ARG GIT_HASH=dev
