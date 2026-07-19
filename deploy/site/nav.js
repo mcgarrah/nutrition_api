@@ -13,6 +13,7 @@
 // that includes it does so via a root-relative <script src="/nav.js">, so it
 // resolves the same regardless of which layer serves the HTML around it.
 const NAV_LINKS = [
+  { href: "/app", label: "Scan in-store" },
   { href: "/lookup", label: "Barcode lookup" },
   { href: "/search", label: "Search" },
   { href: "/data", label: "Explore the data" },

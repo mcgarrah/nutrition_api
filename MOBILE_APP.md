@@ -96,9 +96,44 @@ Two things that matter for the "works in a grocery store" goal:
   directly — worth testing on an actual iPhone early rather than assuming
   parity with desktop Chrome.
 
-## Open next step
+## Status: shipped as a PWA at `/app`
 
-Nothing here requires an API change to start building against it — UPC-E
-expansion is the only client-side item called out above. A follow-up
-decision, not yet made: PWA vs. native, and what the app's own
-offline/caching strategy should look like against this API.
+The decisions this doc left open are made, and the app is built:
+
+- **PWA, not native** — no app-store friction, one codebase for Android and
+  iPhone, nothing in the API blocked it (open CORS, no auth).
+- **Same repo, same site** — `deploy/site/app/` is picked up automatically
+  by the existing Caddy static-file fallthrough (`deploy/caddy/site.caddy`'s
+  `@backend` matcher is an explicit allowlist that doesn't include `/app`,
+  so no Caddy config changes were needed at all). No new domain, no new TLS
+  cert, no new Funnel setup.
+- **Camera decode**: `BarcodeDetector` when available, falling back to a
+  vendored `@zxing/library` build (`deploy/site/app/vendor/zxing.min.js`,
+  not CDN-loaded, so the offline app shell is self-contained) for Safari/
+  iOS. Both paths restricted to `ean_13`/`ean_8`/`upc_a`/`upc_e`.
+- **The UPC-E gap is closed** — `deploy/site/app/app.js` expands a decoded
+  UPC-E code to UPC-A client-side (`expandUpcE()`) before calling the API,
+  verified by hand against the standard reference example
+  (0-425261-4 → 042100005264).
+- **Offline/caching strategy** (`deploy/site/app/sw.js`): the app shell is
+  cache-first (loads reliably on flaky store wifi); `GET /api/v1/lookup/*`
+  is network-first with a fallback to the last cached response for that
+  barcode; `GET /api/v1/search*` is network-only, since a live typeahead
+  against a stale result set isn't useful.
+- **The vendored library is tracked, not just dropped in.** This project's
+  `.github/dependabot.yml`/CI previously covered pip, GitHub Actions, and
+  Docker only — deliberately no npm entry, because there was no real npm
+  dependency surface until now. A root `package.json` declares
+  `@zxing/library@0.21.3` so `npm audit` (both PR-blocking in `ci.yml` and
+  the scheduled scan in `dependency-audit.yml`, mirroring the existing
+  pip-audit pattern) and Dependabot can actually see it. A CI step also
+  diffs the committed vendored file against a fresh `npm ci` install
+  byte-for-byte, so the audited version and the deployed version can't
+  silently drift apart.
+
+**Not yet done: a real-device check.** Camera access can't be verified from
+a dev container — no camera, no mobile browser. Before relying on this in a
+store: open `/app` on a phone, grant camera permission, scan a real
+barcode, confirm the result card renders, and try the Search tab (including
+typing a bare barcode into the search box, which is treated as a lookup —
+a manual-entry fallback for when the camera is denied or unavailable).

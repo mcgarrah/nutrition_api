@@ -238,3 +238,8 @@ data/*.building
 
 # Caddy internal CA root — generated per host, never committed
 deploy/site/caddy-local-ca.crt
+
+# npm (package.json/package-lock.json declare the one vendored third-party
+# JS dependency, @zxing/library, purely so audit tooling has a manifest --
+# see .github/dependabot.yml. node_modules/ is CI/dev-only, never deployed.)
+node_modules/

@@ -17,6 +17,7 @@
     --usda: #1baf7a;
     --gpc:  #b57e00;
     --search: #2f7d4f;
+    --scan: #7a52c9;
     --ink:  #3a3a37;
     --good: #008300;
     --bad:  #e34948;
@@ -34,6 +35,7 @@
       --usda: #199e70;
       --gpc:  #d9a53a;
       --search: #5fbf8a;
+      --scan: #a684e0;
       --ink:  #cfcec3;
       --good: #4caf50;
       --bad:  #e66767;
@@ -71,7 +73,7 @@
   .tile.usda { --accent: var(--usda); }
   .tile.gpc  { --accent: var(--gpc); }
 
-  /* The two lookup types -- the primary choice this page exists to make. */
+  /* The lookup methods -- the primary choice this page exists to make. */
   .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
   a.choice {
     display: block; text-decoration: none; color: inherit;
@@ -83,6 +85,7 @@
   a.choice:hover { transform: translateY(-2px); }
   a.choice.lookup { --accent: var(--usda); }
   a.choice.search { --accent: var(--search); }
+  a.choice.scan { --accent: var(--scan); }
   a.choice .icon { font-size: 1.75rem; margin-bottom: .5rem; }
   a.choice .t { font-weight: 700; font-size: 1.15rem; margin-bottom: .3rem; }
   a.choice .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -107,6 +110,11 @@
   <p class="health" id="health"><span class="dot"></span>checking status…</p>
 
   <div class="choices">
+    <a class="choice scan" href="/app">
+      <div class="icon">📱</div>
+      <div class="t">Scan in-store <span class="path">/app</span></div>
+      <div class="d">Installable mobile app: scan a barcode with your phone's camera or search by name, right in the aisle.</div>
+    </a>
     <a class="choice lookup" href="/lookup">
       <div class="icon">🔢</div>
       <div class="t">Look up by barcode <span class="path">/lookup</span></div>

@@ -29,3 +29,14 @@ jobs:
 
       - name: Audit dependencies for known vulnerabilities (pip-audit)
         run: pip-audit -r requirements.txt -r requirements-dev.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Audit npm dependencies for known vulnerabilities (npm audit)
+        run: npm audit

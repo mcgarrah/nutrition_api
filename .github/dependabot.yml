@@ -7,14 +7,17 @@ version: 2
 # dependency can be outdated with no known vulnerability at all. See
 # PLAN.md item 7.
 #
-# Three ecosystems this project actually has a real dependency surface in:
-# pip (requirements.txt/requirements-dev.txt), GitHub Actions (the
-# workflow files under .github/workflows/), and the Dockerfile's base
-# image. Deliberately no npm/yarn entry — checked: no package.json,
-# node_modules, or CDN-hosted <script> anywhere in the repo. jstests/ uses
-# only Node's own built-in node:test/node:assert/node:fs/node:path/node:vm
-# modules, so there is no third-party JavaScript dependency surface to
-# track here.
+# Four ecosystems this project has a real dependency surface in: pip
+# (requirements.txt/requirements-dev.txt), GitHub Actions (the workflow
+# files under .github/workflows/), the Dockerfile's base image, and — since
+# the /app mobile scanner (MOBILE_APP.md) started vendoring
+# @zxing/library for its Safari/iOS barcode-decode fallback — npm.
+# package.json declares that one dependency purely so audit tooling has a
+# manifest to check; deploy/site/app/ itself is still served as plain
+# static files, no npm build step runs at deploy time. jstests/ (our own
+# JS) still uses only Node's built-in node:test/node:assert/node:fs/
+# node:path/node:vm modules — this npm entry exists for the one vendored
+# third-party file, not for our own code.
 updates:
   - package-ecosystem: "pip"
     directory: "/"
@@ -27,6 +30,11 @@ updates:
       interval: "weekly"
 
   - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
