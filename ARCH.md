@@ -129,7 +129,67 @@ The first pass reached a modest 4.4% of real tag-occurrences. **Round 2** (same 
 
 `GET /api/v1/search` (backing the `/search` UI) answers "find a product by name" from the local bulk mirrors only — an FTS5 index (`foods_fts` / `products_fts`, built alongside each mirror) over the FDC and OFF product-name columns, merged and deduped by GTIN, falling back to a `LIKE` scan for a mirror built before the FTS table existed. It deliberately returns **identity fields only** (barcode, name, brand, image): the full merged panel for a chosen result comes from the existing `/api/v1/lookup/{gtin}`, so there is exactly one place that merges sources, not a second lighter copy of the logic. It never falls through to the upstreams' live search — OFF's search budget is 10/minute per IP, too tight to spend on keystroke-shaped traffic, and the mirrors already cover the browsable corpus. The route is deliberately `def`, not `async def`: both the FTS and LIKE queries are blocking local disk I/O, and FastAPI/Starlette threads a sync route automatically rather than stalling the event loop (see PLAN.md item 2 — a cold `LIKE` scan once measured ~17s).
 
-### 8. Deployment Topology
+### 8. Mobile Scanner (PWA): Cross-Browser Barcode Decode
+
+`/app` (`deploy/site/app/`, see MOBILE_APP.md for the readiness review this
+grew out of) is a static PWA — camera barcode scan + name search — with no
+backend route of its own; it calls the same `GET /api/v1/lookup/{gtin}` and
+`GET /api/v1/search` any other client does. The part worth documenting here
+is client-side: which decoder actually runs depends on the browser, because
+no browser engine has full first-party barcode detection yet, and the two
+paths behave differently in practice, not just in theory.
+
+```mermaid
+flowchart TD
+    start["Camera stream acquired<br/>(getUserMedia)"]
+    detect{"window.BarcodeDetector<br/>present?"}
+    native["Native BarcodeDetector<br/>platform ML-based detector,<br/>full-frame"]
+    zxing["Vendored @zxing/library<br/>BrowserMultiFormatReader,<br/>continuous decodeFromStream"]
+    formats["Format allowlist:<br/>ean_13 / ean_8 / upc_a / upc_e"]
+    decoded["rawValue + format"]
+    upce{"format == upc_e?"}
+    expand["expandUpcE()<br/>client-side, app.js"]
+    lookup["GET /api/v1/lookup/{gtin}"]
+
+    start --> detect
+    detect -->|"yes"| native
+    detect -->|"no"| zxing
+    native --> formats
+    zxing --> formats
+    formats --> decoded --> upce
+    upce -->|"yes"| expand --> lookup
+    upce -->|"no"| lookup
+```
+
+| Browser / platform | `BarcodeDetector`? | Path taken | Status |
+| :--- | :--- | :--- | :--- |
+| Chrome/Edge/Samsung Internet, Android | Yes | Native | Verified on a Samsung S23+ — decodes reliably at a distance, the barcode just needs to be somewhere in frame. |
+| Chrome/Edge, desktop | Yes | Native | Same code path as Android; not separately device-tested. |
+| Firefox, Android or desktop | No | ZXing fallback | Verified on Android — decodes correctly, but see the gap noted below. |
+| Safari, iOS | No, as of this writing | ZXing fallback | Not device-tested (no iPhone available). Same fallback code path Firefox already exercised, so that result is meaningful evidence, but iOS-specific behavior (camera permission handling in an installed home-screen PWA — see MOBILE_APP.md) remains unverified. |
+
+**A real, measured gap between the two paths, not just a spec difference.**
+Native `BarcodeDetector` picked up a barcode comfortably at a distance in
+testing; the ZXing fallback needed the barcode to fill much more of the
+frame to decode at all. The likely cause: platform `BarcodeDetector`
+implementations run a proper ML-based detector across the full frame,
+while ZXing-js's default continuous-decode mode (`decodeFromStream`) scans
+the frame as-given, with no region-of-interest cropping or multi-scale
+attempt — a barcode occupying a small fraction of the frame is a much
+smaller target for it. Not a bug in either path; a real UX and detection-
+distance difference a caller on the fallback path should expect. A
+viewfinder overlay that also crops the decode region would plausibly close
+this gap directly, not just make the target clearer — tracked as PLAN.md
+item 13, not yet built.
+
+**UPC-E is handled once, after decode, regardless of which path produced
+it.** Both decoders report the detected format alongside the raw value;
+`app.js`'s `expandUpcE()` runs the standard UPC-E→UPC-A expansion
+client-side before the barcode ever reaches the API — `normalize_gtin`
+server-side (`app/core/usda_fdc.py`) only zero-pads, which is the wrong
+transform for a compressed 6-digit code.
+
+### 9. Deployment Topology
 
 The service itself is deployment-agnostic (a Dockerfile and `.do/app.yaml` support the container/PaaS path), but the **reference deployment** is a Proxmox LXC running:
 

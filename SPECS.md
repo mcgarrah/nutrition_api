@@ -91,7 +91,11 @@ is the map of what exists and why. All are `GET`, read-only.
 Static UI pages (excluded from the OpenAPI schema): `/` (routing landing
 page), `/lookup`, `/search`, `/data` (four tabs: Data Browser, Data Quality,
 GPC Taxonomy, GPC Mappings -- `/gpc` and `/gpc/mappings` redirect here, see
-PLAN.md item 11).
+PLAN.md item 11), `/app` -- the installable mobile PWA (camera barcode scan
++ name search), served as plain static files from `deploy/site/app/` with
+no backend route of its own. See ARCH.md, "Mobile Scanner (PWA): Cross-
+Browser Barcode Decode" for how it decodes a barcode across browsers, and
+MOBILE_APP.md for the readiness review and real-device verification notes.
 
 ## 2. Pydantic Verification Schemas
 Nutritional units are systematically mapped to a standardized baseline measurement of **100g** or **100mL** of product to eliminate arbitrary manufacturer portion definitions and ensure mathematical parity inside data science operations. Units are **ours, not the source's**: sodium is always mg whether USDA sent mg or Open Food Facts sent grams, so a field never changes unit with its provenance.

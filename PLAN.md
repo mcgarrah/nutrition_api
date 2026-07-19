@@ -205,7 +205,33 @@ flowchart LR
   block (current working `*.ts.net` setup) running alongside this, or replace
   it outright once the custom domain is verified working.
 
-# Shipped
+## 13. Viewfinder overlay + ROI-cropped decode for `/app`
+
+**Status:** not started — logged 2026-07-19, from a real finding during
+`/app`'s (item 12's follow-on PWA) real-device testing.
+
+Verified on a Samsung S23+ across two browsers: Chrome's native
+`BarcodeDetector` decodes a barcode comfortably at a distance, just needing
+it somewhere in frame. Firefox's fallback path (the vendored
+`@zxing/library`, also what Safari/iOS will use until it ships
+`BarcodeDetector`) decodes correctly but needs the barcode to fill much
+more of the frame. See ARCH.md, "Mobile Scanner (PWA): Cross-Browser
+Barcode Decode" for the full writeup and the likely cause: native
+detectors run a proper ML-based detector across the whole frame; ZXing-js's
+default `decodeFromStream` scans the frame as-given with no region-of-
+interest cropping.
+
+Sketch: a viewfinder guide box in `/app`'s Scan UI — both a UX affordance
+(shows where to hold the barcode, highlights it once detected) and, more
+substantively, a decode-quality fix if the crop is real: feed both decoders
+a canvas-cropped region matching the guide box instead of the full video
+frame, which should let ZXing decode a smaller/farther barcode the same
+way the native path already does. Needs moving off `decodeFromStream`'s
+continuous whole-video mode onto a canvas-based per-frame loop for both
+decode paths — a real, contained architecture change to `app.js`'s scan
+loop, not a pure CSS overlay. Worth designing properly (verify the crop
+actually improves ZXing's detection distance, not just assume it) before
+building.
 
 ## 2. ~~Name search: stop blocking the event loop, then make it fast (FTS5)~~ — DONE 2026-07-18
 

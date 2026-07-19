@@ -131,9 +131,30 @@ The decisions this doc left open are made, and the app is built:
   byte-for-byte, so the audited version and the deployed version can't
   silently drift apart.
 
-**Not yet done: a real-device check.** Camera access can't be verified from
-a dev container — no camera, no mobile browser. Before relying on this in a
-store: open `/app` on a phone, grant camera permission, scan a real
-barcode, confirm the result card renders, and try the Search tab (including
-typing a bare barcode into the search box, which is treated as a lookup —
-a manual-entry fallback for when the camera is denied or unavailable).
+**Real-device check: done.** Verified on a Samsung S23+ — Chrome
+(`BarcodeDetector` path) decoded a barcode at a distance, from just
+having it somewhere in frame; Search's typeahead and the manual-entry
+barcode fallback both worked as designed.
+
+**A real finding, not a guess:** also verified on Firefox for Android (no
+`BarcodeDetector` there, so this exercises the real vendored-ZXing fallback
+path, not a simulated one) — decoding works, but ZXing needs the barcode to
+fill much more of the frame than the native path does; Chrome's
+`BarcodeDetector` picked the same barcode up comfortably at a distance with
+no careful framing. Likely cause: platform `BarcodeDetector` implementations
+run a proper ML-based detector across the full frame at native resolution,
+while ZXing-js's default `decodeFromStream` scans the frame as-is with no
+region-of-interest cropping or multi-scale attempt — a barcode occupying a
+small fraction of the frame is a much smaller target for it. Not a bug, but
+a real UX gap on the fallback path worth designing around (see below).
+
+**Feature idea, not yet built:** a viewfinder overlay — a guide box showing
+where to hold the barcode, and a highlight when one's detected. Beyond the
+UX win, cropping the decode to that guide box's region before handing it to
+either decoder would very plausibly close the ZXing distance gap directly
+(smaller region == the barcode fills more of what's actually being
+scanned), not just make the affordance clearer. Worth a proper look before
+building — cropping means moving off `decodeFromStream`'s continuous
+whole-video mode and onto a canvas-based per-frame loop for both decode
+paths, which is a real (if contained) architecture change to `app.js`'s
+scan loop, not a pure CSS overlay.
