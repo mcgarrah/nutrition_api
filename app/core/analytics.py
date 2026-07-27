@@ -115,7 +115,10 @@ def gpc_matching_summary() -> dict:
 
 
 def _cross_source_compute() -> list[dict]:
-    conn = sqlite3.connect(":memory:")
+    # uri=True: required for the URI-style (file:...?mode=ro) ATTACH below to
+    # be recognized at all -- without it some SQLite builds reject ATTACH's
+    # URI syntax outright with "unable to open database".
+    conn = sqlite3.connect(":memory:", uri=True)
     try:
         # Read-only ATTACH, same as every other local-mirror query in this
         # codebase -- nothing here ever writes to either file.
