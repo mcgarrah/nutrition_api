@@ -29,7 +29,7 @@ import caddy/site.caddy
 # }
 
 # ── Option A+ — the above, plus Tailscale Funnel ───────────────────────
-# Publishing this site with `tailscale funnel` needs two more things beyond
+# Publishing this site with `tailscale funnel` needs three more things beyond
 # Option A, both explained in detail in README.md's "Tailscale Funnel" section:
 #
 #   1. localhost/127.0.0.1 added to the site address, so Caddy answers
@@ -41,12 +41,20 @@ import caddy/site.caddy
 #      with a normal TLS client -- curl, openssl s_client -- against the same
 #      port), and the loopback hop doesn't need its own TLS layer anyway:
 #      Funnel already terminates real, trusted TLS on the internet-facing side.
+#   3. An explicit `bind` on the HTTPS block instead of the :443 wildcard --
+#      tailscaled also listens on :443, but only on its own Tailscale-assigned
+#      addresses. Wildcard vs. specific-address binds on the same port race at
+#      boot: whichever service starts first wins :443 and the other fails with
+#      "address already in use". Binding to just the addresses this site
+#      actually serves removes the overlap entirely, so boot order no longer
+#      matters -- this bit tailscaled/caddy racing on reboot in practice.
 #
 # {
 # 	default_sni localhost
 # }
 #
 # https://192.168.1.50, https://localhost, https://127.0.0.1 {
+# 	bind 192.168.1.50 127.0.0.1 ::1
 # 	import nutrition_api
 # }
 #

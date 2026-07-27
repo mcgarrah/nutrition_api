@@ -205,9 +205,9 @@ outage shows as a red tile rather than an unreachable page.
 ### Tailscale Funnel
 
 Publishing this site to the public internet with [Funnel](https://tailscale.com/kb/1223/funnel)
-needs two changes beyond a normal Option A deployment (see the Caddyfile's
-"Option A+" block for the exact config). The working setup, and the two
-failure modes it replaced along the way:
+needs three changes beyond a normal Option A deployment (see the Caddyfile's
+"Option A+" block for the exact config). The working setup, and the failure
+modes it replaced along the way:
 
 ```mermaid
 sequenceDiagram
@@ -280,6 +280,18 @@ sequenceDiagram
    `tailscaled` restart, yet it worked immediately when tested from an actual
    external device). Test from a phone on cellular data or another network
    before concluding Funnel itself is broken.
+
+3. **Bind the HTTPS site block to specific addresses instead of the `:443`
+   wildcard.** `tailscaled` also listens on `:443`, but only on its own
+   Tailscale-assigned addresses. A wildcard bind and a specific-address bind
+   on the same port race at boot — whichever service starts first wins
+   `:443` and the other fails with `listen tcp :443: bind: address already
+   in use`. This surfaced on a reboot: `tailscaled` started first and Caddy
+   crash-looped, silently taking the `:8090` Funnel target down with it (502
+   from the outside, nothing obviously wrong from `tailscale funnel status`).
+   Explicitly binding the HTTPS block to the addresses it actually serves —
+   `bind 192.168.1.50 127.0.0.1 ::1` — removes the overlap entirely, so boot
+   order no longer matters.
 
 ### Tailscale Services (multi-host readiness)
 
