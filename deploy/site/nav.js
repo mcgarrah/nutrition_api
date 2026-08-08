@@ -19,6 +19,7 @@ const NAV_LINKS = [
   { href: "/data", label: "Explore the data" },
   { href: "/status", label: "Status" },
   { href: "/docs", label: "/docs" },
+  { href: "/about", label: "About" },
 ];
 
 // current: the page's own path (e.g. "/lookup"), omitted from its own nav.

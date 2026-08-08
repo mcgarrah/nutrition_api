@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nutrition API — About</title>
+<meta name="theme-color" content="#171716">
+<link rel="icon" href="/app/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/app/icons/icon-192.png">
+<style>
+  :root {
+    --surface-0: #f2f2f0;
+    --surface-1: #fcfcfb;
+    --surface-2: #e9e9e5;
+    --border:    #dedddA;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #78776f;
+    --off:  #2a78d6;
+    --usda: #1baf7a;
+    --gpc:  #b57e00;
+    --search: #2f7d4f;
+    --scan: #7a52c9;
+    --good: #008300;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-0: #111110;
+      --surface-1: #1a1a19;
+      --surface-2: #232320;
+      --border:    #35342f;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #8f8e84;
+      --off:  #3987e5;
+      --usda: #199e70;
+      --gpc:  #d9a53a;
+      --search: #5fbf8a;
+      --scan: #a684e0;
+      --good: #4caf50;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 3rem 1rem 4rem;
+    background: var(--surface-0); color: var(--text-primary);
+    font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; }
+  .back { color: var(--text-secondary); text-decoration: none; font-size: .875rem; }
+
+  h1 { font-size: 2rem; letter-spacing: -.02em; margin: 1rem 0 .25rem; }
+  .pitch {
+    font-size: 1.25rem; line-height: 1.5; color: var(--text-primary);
+    margin: 0 0 2rem; max-width: 58ch;
+  }
+  .pitch strong { color: var(--search); }
+
+  h2 { font-size: 1.1rem; margin: 2.5rem 0 .5rem; }
+  p.lead { color: var(--text-secondary); margin: 0 0 1.25rem; max-width: 62ch; }
+
+  .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+  a.choice {
+    display: block; text-decoration: none; color: inherit;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 14px; padding: 1.25rem 1.25rem;
+    border-top: 4px solid var(--accent, var(--text-muted));
+    transition: border-color .12s, transform .12s;
+  }
+  a.choice:hover { transform: translateY(-2px); }
+  a.choice.scan { --accent: var(--scan); }
+  a.choice.search { --accent: var(--search); }
+  a.choice.lookup { --accent: var(--usda); }
+  a.choice .icon { font-size: 1.6rem; margin-bottom: .4rem; }
+  a.choice .t { font-weight: 700; font-size: 1.02rem; margin-bottom: .3rem; }
+  a.choice .d { color: var(--text-secondary); font-size: .8375rem; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; margin: 1.25rem 0 1rem; }
+  .stat {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1rem 1.1rem;
+  }
+  .stat .n { font-size: 1.4rem; font-weight: 750; letter-spacing: -.01em; }
+  .stat .l { font-size: .78rem; color: var(--text-muted); margin-top: .15rem; }
+
+  .sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .85rem; }
+  .source { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.1rem; border-left: 3px solid var(--accent, var(--text-muted)); }
+  .source.usda { --accent: var(--usda); }
+  .source.off  { --accent: var(--off); }
+  .source.gpc  { --accent: var(--gpc); }
+  .source .t { font-weight: 650; margin-bottom: .25rem; }
+  .source .d { font-size: .84rem; color: var(--text-secondary); }
+
+  .dev-box {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.1rem 1.25rem;
+  }
+  .dev-box code {
+    background: var(--surface-2); border-radius: 6px; padding: .1rem .4rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em;
+  }
+  .dev-links { margin-top: .75rem; display: flex; flex-wrap: wrap; gap: .6rem .9rem; font-size: .875rem; }
+  .dev-links a { color: var(--off); }
+
+  footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--border);
+    font-size: .8125rem; color: var(--text-muted); line-height: 1.6; }
+  footer a { color: var(--off); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="/">← Home</a>
+  <h1>Point your phone at a barcode. Get the real answer.</h1>
+  <p class="pitch">
+    This service turns any grocery barcode into a trustworthy Nutrition Facts
+    label — calories, protein, allergens, the works — by merging
+    <strong>lab-tested USDA data</strong>, a <strong>crowdsourced product database
+    of 3M+ items</strong>, and <strong>GS1's global product taxonomy</strong> into
+    one answer. No app store install, no account, no cost, no ads.
+  </p>
+
+  <h2>Try it three ways</h2>
+  <p class="lead">All three hit the same underlying data — pick whichever fits how you're using it.</p>
+  <div class="choices">
+    <a class="choice scan" href="/app">
+      <div class="icon">📱</div>
+      <div class="t">Scan in the aisle</div>
+      <div class="d">Point your phone's camera at a barcode. Installable straight to your home screen — Android and iPhone.</div>
+    </a>
+    <a class="choice search" href="/search">
+      <div class="icon">🔎</div>
+      <div class="t">Search by name</div>
+      <div class="d">No barcode handy? Type a product name and pick from the results.</div>
+    </a>
+    <a class="choice lookup" href="/lookup">
+      <div class="icon">🔢</div>
+      <div class="t">Look up a barcode</div>
+      <div class="d">Have the digits already? Type or paste them for the full product card.</div>
+    </a>
+  </div>
+
+  <h2>Why this beats a single source</h2>
+  <p class="lead">
+    No single public food database is complete or fully accurate on its own —
+    so instead of picking one, this service takes the best of each and lets
+    the strongest source win field by field.
+  </p>
+  <div class="sources">
+    <div class="source usda">
+      <div class="t">USDA FoodData Central</div>
+      <div class="d">The federal government's lab-tested nutrition data — authoritative for calories, protein, vitamins, and minerals. Wins whenever it has an answer.</div>
+    </div>
+    <div class="source off">
+      <div class="t">Open Food Facts</div>
+      <div class="d">A crowdsourced, open database of 3M+ products worldwide — the source for product photos, ingredient lists, and allergen warnings.</div>
+    </div>
+    <div class="source gpc">
+      <div class="t">GS1 GPC</div>
+      <div class="d">The same product-category standard retailers and manufacturers use — tells you not just what a product is, but what kind of thing it is.</div>
+    </div>
+  </div>
+
+  <h2>By the numbers</h2>
+  <div class="stats">
+    <div class="stat"><div class="n">442K+</div><div class="l">barcodes cached locally (USDA)</div></div>
+    <div class="stat"><div class="n">2.24M+</div><div class="l">products cached locally (Open Food Facts)</div></div>
+    <div class="stat"><div class="n">~25µs</div><div class="l">typical lookup time for a cached barcode</div></div>
+    <div class="stat"><div class="n">$0</div><div class="l">cost, no account required</div></div>
+  </div>
+
+  <h2>For developers</h2>
+  <div class="dev-box">
+    <p style="margin:0 0 .5rem;">
+      Everything above is one public, read-only JSON API — no key, no auth,
+      no rate-limit surprise for normal use (60 requests/min).
+    </p>
+    <p style="margin:0;"><code>GET /api/v1/lookup/&#123;barcode&#125;</code> — one call, the full merged product.</p>
+    <div class="dev-links">
+      <a href="/docs">Swagger UI</a>
+      <a href="/redoc">ReDoc reference</a>
+      <a href="/data">Data explorer</a>
+      <a href="/status">Live status</a>
+      <a href="https://github.com/mcgarrah/nutrition_api">Source on GitHub</a>
+    </div>
+  </div>
+
+  <footer>
+    Data from
+    <a href="https://fdc.nal.usda.gov/">USDA FoodData Central</a> (public domain),
+    <a href="https://world.openfoodfacts.org/">Open Food Facts</a>
+    (<a href="https://opendatacommons.org/licenses/odbl/1.0/">ODbL 1.0</a>, images CC BY-SA 3.0), and
+    <a href="https://www.gs1.org/standards/gpc">GS1 GPC</a>.
+    Full attribution: <a href="/api/v1/attribution">/api/v1/attribution</a>.
+  </footer>
+</div>
+</body>
+</html>
