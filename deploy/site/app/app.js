@@ -378,16 +378,26 @@ const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
 
 let deferredInstallPrompt = null;
 
+// Set by the landing page's "Install the app" link (/app/?install=1) --
+// arriving this way means the user already asked to install, so skip
+// making them tap installBtn a second time once we're ready to act.
+const autoInstallRequested = new URLSearchParams(location.search).get("install") === "1";
+if (autoInstallRequested) {
+  history.replaceState(null, "", location.pathname); // don't re-trigger on refresh/back
+}
+
 if (!isStandalone && isIOS) {
   // No install-readiness event exists to wait for on iOS -- show the button
   // up front; nothing here is asynchronous the way beforeinstallprompt is.
   installBtn.hidden = false;
+  if (autoInstallRequested) iosInstallSheet.hidden = false;
 }
 
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault(); // hold the browser's own mini-infobar; installBtn drives it instead
   deferredInstallPrompt = event;
   installBtn.hidden = false;
+  if (autoInstallRequested) installBtn.click();
 });
 
 installBtn.addEventListener("click", async () => {

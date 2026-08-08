@@ -19,7 +19,7 @@
  * no-cache header (see caddy/site.caddy); this is that layer's equivalent
  * once a service worker is controlling /app.
  */
-const SHELL_CACHE = "nutrition-app-shell-v2";
+const SHELL_CACHE = "nutrition-app-shell-v3";
 const LOOKUP_CACHE = "nutrition-app-lookup-v1";
 const CURRENT_CACHES = [SHELL_CACHE, LOOKUP_CACHE];
 

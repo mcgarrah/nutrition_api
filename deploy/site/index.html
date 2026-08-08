@@ -101,6 +101,13 @@
   footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--border);
     font-size: .8125rem; color: var(--text-muted); line-height: 1.6; }
   footer a { color: var(--off); }
+
+  .install-pill {
+    display: inline-flex; align-items: center; gap: .35rem;
+    background: var(--search); color: #fff; text-decoration: none;
+    border-radius: 999px; padding: .45rem .9rem; font-size: .8125rem;
+    font-weight: 650; margin-bottom: 1.25rem;
+  }
 </style>
 </head>
 <body>
@@ -110,6 +117,7 @@
     A unified food-intelligence service: one lookup that merges USDA FoodData Central,
     Open Food Facts, and the GS1 Global Product Classification.
   </p>
+  <a id="installLink" class="install-pill" href="/app/?install=1" hidden>📲 Install the app</a>
   <p class="health" id="health"><span class="dot"></span>checking status…</p>
 
   <div class="choices">
@@ -171,6 +179,16 @@
 </div>
 
 <script>
+  // Hidden by default so a browser that already has the app installed (or one
+  // that can't install PWAs at all) doesn't see a dead-end link -- shown only
+  // when this page isn't itself running standalone. The actual install
+  // happens on /app, the page the manifest and service worker are scoped to;
+  // ?install=1 tells app.js to kick the prompt off immediately on arrival
+  // instead of waiting for a second tap on its own Install button.
+  const isStandalone = window.matchMedia("(display-mode: standalone)").matches
+    || window.navigator.standalone === true;
+  if (!isStandalone) document.getElementById("installLink").hidden = false;
+
   // The landing page is static (served by Caddy), so it fetches health through
   // the proxy to show live status rather than hard-coding it.
   fetch("/api/v1/health").then(r => r.json()).then(h => {
