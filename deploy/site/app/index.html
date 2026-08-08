@@ -122,6 +122,10 @@
     background: var(--search); color: #fff; border: none; border-radius: 10px;
     font-size: 1rem; font-weight: 650; cursor: pointer;
   }
+  .install-btn {
+    background: var(--search); color: #fff; border: none; border-radius: 8px;
+    padding: .35rem .7rem; font-size: .8125rem; font-weight: 650; cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -129,6 +133,7 @@
 <header class="topbar">
   <a href="/">← Home</a>
   <span class="title">Nutrition Scanner</span>
+  <button type="button" id="installBtn" class="install-btn" hidden>Install</button>
   <a class="info-link" href="/api/v1/attribution" aria-label="Data attribution">ⓘ</a>
 </header>
 
@@ -155,6 +160,15 @@
 <div id="resultCard" class="result-card" hidden>
   <div id="resultBody"></div>
   <button type="button" id="dismissBtn" class="primary-button">Done</button>
+</div>
+
+<div id="iosInstallSheet" class="result-card" hidden>
+  <div>
+    <h2>Install this app</h2>
+    <p>Tap the <strong>Share</strong> icon in Safari's toolbar, then choose
+      <strong>Add to Home Screen</strong>.</p>
+  </div>
+  <button type="button" id="iosInstallDismiss" class="primary-button">Got it</button>
 </div>
 
 <script src="/app/vendor/zxing.min.js"></script>

@@ -362,6 +362,56 @@ function switchTab(tab) {
 tabScan.addEventListener("click", () => switchTab("scan"));
 tabSearch.addEventListener("click", () => switchTab("search"));
 
+// ── Install prompt ───────────────────────────────────────────────────
+// Android/Chrome fires beforeinstallprompt and lets us trigger the native
+// install dialog programmatically. Safari/iOS has no such API -- the only
+// path is Share > Add to Home Screen, so there installBtn just opens
+// instructions instead of a real prompt.
+
+const installBtn = document.getElementById("installBtn");
+const iosInstallSheet = document.getElementById("iosInstallSheet");
+const iosInstallDismiss = document.getElementById("iosInstallDismiss");
+
+const isStandalone = window.matchMedia("(display-mode: standalone)").matches
+  || window.navigator.standalone === true; // iOS's own pre-standard flag
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+
+let deferredInstallPrompt = null;
+
+if (!isStandalone && isIOS) {
+  // No install-readiness event exists to wait for on iOS -- show the button
+  // up front; nothing here is asynchronous the way beforeinstallprompt is.
+  installBtn.hidden = false;
+}
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault(); // hold the browser's own mini-infobar; installBtn drives it instead
+  deferredInstallPrompt = event;
+  installBtn.hidden = false;
+});
+
+installBtn.addEventListener("click", async () => {
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    installBtn.hidden = true;
+    return;
+  }
+  if (isIOS) {
+    iosInstallSheet.hidden = false;
+  }
+});
+
+iosInstallDismiss.addEventListener("click", () => {
+  iosInstallSheet.hidden = true;
+});
+
+window.addEventListener("appinstalled", () => {
+  installBtn.hidden = true;
+  deferredInstallPrompt = null;
+});
+
 // ── Startup ──────────────────────────────────────────────────────────
 
 if ("serviceWorker" in navigator) {
